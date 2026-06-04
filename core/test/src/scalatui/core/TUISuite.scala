@@ -8,7 +8,7 @@ class TUISuite extends munit.FunSuite:
 
   test("first render writes full frame with synchronized output"):
     val terminal = VirtualTerminal(20, 5)
-    val tui = TUI(terminal)
+    val tui      = TUI(terminal)
     tui.addChild(MutableLine("hello"))
 
     tui.start()
@@ -20,9 +20,9 @@ class TUISuite extends munit.FunSuite:
 
   test("partial render moves to first changed line and writes changed tail"):
     val terminal = VirtualTerminal(20, 5)
-    val first = MutableLine("first")
-    val second = MutableLine("second")
-    val tui = TUI(terminal)
+    val first    = MutableLine("first")
+    val second   = MutableLine("second")
+    val tui      = TUI(terminal)
     tui.addChild(first)
     tui.addChild(second)
     tui.start()
@@ -40,7 +40,7 @@ class TUISuite extends munit.FunSuite:
 
   test("width change performs full clear redraw"):
     val terminal = VirtualTerminal(20, 5)
-    val tui = TUI(terminal)
+    val tui      = TUI(terminal)
     tui.addChild(MutableLine("hello"))
     tui.start()
     terminal.clearWrites()
@@ -53,15 +53,15 @@ class TUISuite extends munit.FunSuite:
 
   test("line overflow fails"):
     val terminal = VirtualTerminal(3, 5)
-    val tui = TUI(terminal)
+    val tui      = TUI(terminal)
     tui.addChild(MutableLine("abcd"))
 
     intercept[IllegalArgumentException](tui.start())
 
   test("requestRender coalesces until flush"):
     val terminal = VirtualTerminal(20, 5)
-    val line = MutableLine("one")
-    val tui = TUI(terminal)
+    val line     = MutableLine("one")
+    val tui      = TUI(terminal)
     tui.addChild(line)
     tui.start()
     terminal.clearWrites()
@@ -75,14 +75,14 @@ class TUISuite extends munit.FunSuite:
     assert(terminal.output.contains("two" + TUI.LineReset), terminal.output)
 
   test("focused component receives input and rerenders"):
-    val terminal = VirtualTerminal(20, 5)
+    val terminal  = VirtualTerminal(20, 5)
     val component = new Component:
-      var value = "empty"
+      var value                                            = "empty"
       override def handleInput(input: TerminalInput): Unit = input match
         case TerminalInput.Key(TerminalKey.Character(text), _) => value = text
-        case _ => ()
-      override def render(width: Int): Vector[String] = Vector(value)
-    val tui = TUI(terminal)
+        case _                                                 => ()
+      override def render(width: Int): Vector[String]      = Vector(value)
+    val tui       = TUI(terminal)
     tui.addChild(component)
     tui.setFocus(component)
     tui.start()
@@ -92,11 +92,63 @@ class TUISuite extends munit.FunSuite:
 
     assert(terminal.output.contains("x" + TUI.LineReset), terminal.output)
 
+  test("input result can report handled input without render"):
+    val terminal  = VirtualTerminal(20, 5)
+    var handled   = 0
+    val component = new Component:
+      override def handleInputResult(input: TerminalInput): InputResult =
+        handled += 1
+        InputResult.NoRender
+      override def render(width: Int): Vector[String]                   = Vector("stable")
+    val tui       = TUI(terminal)
+    tui.addChild(component)
+    tui.setFocus(component)
+    tui.start()
+    terminal.clearWrites()
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("x")))
+
+    assertEquals(handled, 1)
+    assertEquals(terminal.output, "")
+
+  test("input result can report ignored input"):
+    val terminal  = VirtualTerminal(20, 5)
+    val component = new Component:
+      override def handleInputResult(input: TerminalInput): InputResult = InputResult.Ignored
+      override def render(width: Int): Vector[String]                   = Vector("stable")
+    val tui       = TUI(terminal)
+    tui.addChild(component)
+    tui.setFocus(component)
+    tui.start()
+    terminal.clearWrites()
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("x")))
+
+    assertEquals(terminal.output, "")
+
+  test("input result can request exit"):
+    val terminal  = VirtualTerminal(20, 5)
+    val component = new Component:
+      override def handleInputResult(input: TerminalInput): InputResult = InputResult.Exit
+      override def render(width: Int): Vector[String]                   = Vector("stable")
+    val tui       = TUI(terminal)
+    tui.addChild(component)
+    tui.setFocus(component)
+    val thread    = Thread(() => tui.run())
+    thread.start()
+    Thread.sleep(50)
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Enter))
+    thread.join(1000)
+
+    assertEquals(thread.isAlive, false)
+    assert(terminal.output.contains("\r\n\u001b[?25h"), terminal.output)
+
   test("run exits on ctrl+c and stop positions cursor below content"):
     val terminal = VirtualTerminal(20, 5)
-    val tui = TUI(terminal)
+    val tui      = TUI(terminal)
     tui.addChild(MutableLine("hello"))
-    val thread = Thread(() => tui.run())
+    val thread   = Thread(() => tui.run())
     thread.start()
     Thread.sleep(50)
     terminal.sendInput(TerminalInput.Key(TerminalKey.Character("c"), KeyModifiers(ctrl = true)))

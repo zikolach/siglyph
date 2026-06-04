@@ -12,30 +12,32 @@ import scala.scalanative.posix.unistd.*
 import scala.scalanative.posix.sys.ioctl
 import scala.scalanative.libc.stdlib
 
-/** Scala Native POSIX terminal backend for macOS/Linux.
-  *
-  * It configures stdin raw mode via termios, reads stdin on a background thread,
-  * and writes to stdout. Dimension querying currently uses constructor values or
-  * COLUMNS/LINES environment fallbacks; ioctl-based live size updates are planned
-  * for the next terminal-runtime iteration.
-  */
+/**
+ * Scala Native POSIX terminal backend for macOS/Linux.
+ *
+ * It configures stdin raw mode via termios, reads stdin on a background thread, and writes to
+ * stdout. Dimension querying currently uses constructor values or COLUMNS/LINES environment
+ * fallbacks; ioctl-based live size updates are planned for the next terminal-runtime iteration.
+ */
 final class PosixTerminal(
     initialColumns: Int = PosixTerminal.envInt("COLUMNS").getOrElse(80),
     initialRows: Int = PosixTerminal.envInt("LINES").getOrElse(24)
 ) extends Terminal:
   private type Winsize = CStruct4[CUnsignedShort, CUnsignedShort, CUnsignedShort, CUnsignedShort]
-  @volatile private var running = false
+  @volatile private var running                             = false
   @volatile private var inputHandler: TerminalInput => Unit = _ => ()
-  private var inputThread: Thread | Null = null
-  private var savedState: Ptr[termios.termios] = null
-  private var currentColumns = initialColumns
-  private var currentRows = initialRows
-  private val inputBuffer = TerminalInputBuffer()
+  private var inputThread: Thread | Null                    = null
+  private var savedState: Ptr[termios.termios]              = null
+  private var currentColumns                                = initialColumns
+  private var currentRows                                   = initialRows
+  private val inputBuffer                                   = TerminalInputBuffer()
 
   override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
     if running then return
     if unistd.isatty(unistd.STDIN_FILENO) == 0 then
-      throw IllegalStateException("Scala Native POSIX backend requires stdin to be an interactive TTY")
+      throw IllegalStateException(
+        "Scala Native POSIX backend requires stdin to be an interactive TTY"
+      )
     inputHandler = onInput
     refreshSize()
     try
@@ -77,11 +79,11 @@ final class PosixTerminal(
     if lines > 0 then write(s"\u001b[${lines}B")
     else if lines < 0 then write(s"\u001b[${-lines}A")
 
-  override def hideCursor(): Unit = write("\u001b[?25l")
-  override def showCursor(): Unit = write("\u001b[?25h")
-  override def clearLine(): Unit = write("\u001b[K")
+  override def hideCursor(): Unit      = write("\u001b[?25l")
+  override def showCursor(): Unit      = write("\u001b[?25h")
+  override def clearLine(): Unit       = write("\u001b[K")
   override def clearFromCursor(): Unit = write("\u001b[J")
-  override def clearScreen(): Unit = write("\u001b[2J\u001b[H")
+  override def clearScreen(): Unit     = write("\u001b[2J\u001b[H")
 
   private def enableRawMode(): Unit =
     if savedState != null then return
@@ -113,7 +115,12 @@ final class PosixTerminal(
 
   private def refreshSize(): Unit =
     val winsize = stackalloc[Winsize]()
-    if ioctl.ioctl(unistd.STDOUT_FILENO, PosixTerminal.TIOCGWINSZ, winsize.asInstanceOf[Ptr[Byte]]) == 0 then
+    if ioctl.ioctl(
+        unistd.STDOUT_FILENO,
+        PosixTerminal.TIOCGWINSZ,
+        winsize.asInstanceOf[Ptr[Byte]]
+      ) == 0
+    then
       val rows = winsize._1.toInt
       val cols = winsize._2.toInt
       if rows > 0 then currentRows = rows
@@ -127,11 +134,11 @@ final class PosixTerminal(
       else if read == 0 then inputBuffer.flush().foreach(inputHandler)
       else
         val bytes = Array.ofDim[Byte](read)
-        var i = 0
+        var i     = 0
         while i < read do
           bytes(i) = (!(buffer + i)).toByte
           i += 1
-        val data = String(bytes, java.nio.charset.StandardCharsets.UTF_8)
+        val data  = String(bytes, java.nio.charset.StandardCharsets.UTF_8)
         inputBuffer.process(data).foreach(inputHandler)
 
   private def clearFlags(value: termios.tcflag_t, mask: Int): termios.tcflag_t =
@@ -142,7 +149,8 @@ final class PosixTerminal(
 
 object PosixTerminal:
   private val TIOCGWINSZ: CLongInt =
-    if Option(System.getProperty("os.name")).exists(_.toLowerCase.contains("mac")) then 0x40087468L.toSize
+    if Option(System.getProperty("os.name")).exists(_.toLowerCase.contains("mac")) then
+      0x40087468L.toSize
     else 0x5413L.toSize
 
   private[native] def envInt(name: String): Option[Int] =

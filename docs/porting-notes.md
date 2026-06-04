@@ -26,5 +26,7 @@ When porting a feature:
 ## Intentional deviations
 
 - Components receive typed terminal input events rather than raw escape strings where practical.
+- Components may report a minimal `InputResult` from input handling; richer focus and overlay command APIs are intentionally deferred until autocomplete/overlay work creates concrete pressure.
+- Multiline editing starts with a pure logical `EditorBuffer` before a rendered editor component, keeping buffer mutation independent from terminal display layout.
 - Markdown is separated into a pluggable module instead of being part of the core module.
 - JVM raw mode initially uses `stty` rather than JLine; JLine would require explicit dependency approval.

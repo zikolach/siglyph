@@ -11,8 +11,8 @@ class VirtualTerminalSuite extends munit.FunSuite:
 
   test("virtual terminal delivers input and resize callbacks"):
     val terminal = VirtualTerminal(80, 24)
-    var inputs = Vector.empty[TerminalInput]
-    var resizes = 0
+    var inputs   = Vector.empty[TerminalInput]
+    var resizes  = 0
 
     terminal.start(input => inputs :+= input, () => resizes += 1)
     terminal.sendInput(TerminalInput.Key(TerminalKey.Enter))

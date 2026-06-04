@@ -9,7 +9,10 @@ class TerminalInputBufferSuite extends munit.FunSuite:
   test("buffers split modified key sequence"):
     val buffer = TerminalInputBuffer()
     assertEquals(buffer.process("\u001b[1;"), Vector.empty)
-    assertEquals(buffer.process("5D"), Vector(TerminalInput.Key(TerminalKey.Left, KeyModifiers(ctrl = true))))
+    assertEquals(
+      buffer.process("5D"),
+      Vector(TerminalInput.Key(TerminalKey.Left, KeyModifiers(ctrl = true)))
+    )
 
   test("buffers split bracketed paste"):
     val buffer = TerminalInputBuffer()

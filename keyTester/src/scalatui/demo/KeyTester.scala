@@ -6,7 +6,7 @@ import scalatui.terminal.jvm.SttyTerminal
 import java.util.concurrent.atomic.AtomicBoolean
 
 @main def keyTester(): Unit =
-  val running = AtomicBoolean(true)
+  val running  = AtomicBoolean(true)
   val terminal = SttyTerminal()
   println("scala-tui key tester — press Escape to exit")
   terminal.start(
@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean
       println(describe(input))
       input match
         case TerminalInput.Key(scalatui.terminal.TerminalKey.Escape, _) => running.set(false)
-        case _ => ()
+        case _                                                          => ()
     ,
     () => println(s"resize: ${terminal.columns}x${terminal.rows}")
   )
@@ -24,5 +24,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 private def describe(input: TerminalInput): String = input match
   case TerminalInput.Key(key, modifiers) => s"key=$key modifiers=$modifiers"
-  case TerminalInput.Paste(text) => s"paste ${text.length} chars: ${text.take(80)}"
-  case TerminalInput.Raw(data) => s"raw ${data.toCharArray.map(ch => f"U+${ch.toInt}%04X").mkString(" ")}"
+  case TerminalInput.Paste(text)         => s"paste ${text.length} chars: ${text.take(80)}"
+  case TerminalInput.Raw(data)           =>
+    s"raw ${data.toCharArray.map(ch => f"U+${ch.toInt}%04X").mkString(" ")}"

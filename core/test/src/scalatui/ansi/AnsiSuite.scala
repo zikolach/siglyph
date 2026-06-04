@@ -5,7 +5,8 @@ class AnsiSuite extends munit.FunSuite:
     assertEquals(Ansi.visibleWidth("\u001b[31mhello\u001b[0m"), 5)
 
   test("strip removes CSI, OSC, and APC escapes"):
-    val text = "\u001b[31mred\u001b[0m\u001b]8;;https://example.com\u001b\\link\u001b]8;;\u001b\\\u001b_marker\u0007"
+    val text =
+      "\u001b[31mred\u001b[0m\u001b]8;;https://example.com\u001b\\link\u001b]8;;\u001b\\\u001b_marker\u0007"
     assertEquals(Ansi.strip(text), "redlink")
 
   test("truncate preserves ANSI and appends reset/ellipsis"):

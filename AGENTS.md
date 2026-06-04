@@ -59,6 +59,8 @@ behind the shared terminal abstractions where possible.
 mill __.compile                         # build every module
 mill core.test                          # run core unit tests
 mill core.test.testOnly scalatui.core.TUISuite
+mill scalafmtCheck                      # verify Scalafmt formatting
+mill scalafixCheck                      # verify baseline Scalafix rules
 openspec validate --all --strict        # validate specs and active changes
 ```
 
@@ -106,6 +108,15 @@ stty sane
 - Keep APIs Scala-idiomatic and typed; document `pi-tui` counterparts where it
   clarifies parity.
 - Keep platform-specific behavior in compatibility layers or backend modules.
+- Prefer `scalatui.syntax.Equality.*` and `===` / `!==` for intentional equality
+  comparisons so strict Scalafix can reject universal `==` / `!=`.
+- Prefer `scalatui.syntax.Containment.*` and `contains_` for collection
+  membership when the searched value should be constrained to the element type.
+- Public APIs should include Scaladoc that explains contract, platform scope,
+  and important non-goals.
+- User-visible behavior changes should update README/docs or relevant OpenSpec
+  artifacts. Future OpenSpec tasks should include documentation and Scaladoc
+  work when public APIs are added or changed.
 - Tests should target one behavior each and use `VirtualTerminal`/stream fakes
   instead of real terminals when possible.
 

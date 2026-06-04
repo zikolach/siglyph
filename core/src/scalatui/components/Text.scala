@@ -2,6 +2,7 @@ package scalatui.components
 
 import scalatui.ansi.Ansi
 import scalatui.core.Component
+import scalatui.syntax.Equality.*
 
 final class Text(
     private var content: String,
@@ -12,7 +13,7 @@ final class Text(
   private var cachedWidth = -1
   private var cachedLines = Vector.empty[String]
 
-  def text: String = content
+  def text: String                = content
   def text_=(value: String): Unit =
     content = value
     invalidate()
@@ -22,12 +23,12 @@ final class Text(
     cachedLines = Vector.empty
 
   override def render(width: Int): Vector[String] =
-    if cachedWidth == width then cachedLines
+    if cachedWidth === width then cachedLines
     else
       val innerWidth = math.max(0, width - paddingX * 2)
       val horizontal = " ".repeat(math.max(0, paddingX))
-      val vertical = Vector.fill(math.max(0, paddingY))(style(" ".repeat(width)))
-      val body = Ansi.wrapTextWithAnsi(content, innerWidth).map { line =>
+      val vertical   = Vector.fill(math.max(0, paddingY))(style(" ".repeat(width)))
+      val body       = Ansi.wrapTextWithAnsi(content, innerWidth).map { line =>
         val padded = horizontal + Ansi.padRight(line, innerWidth) + horizontal
         style(Ansi.truncateToWidth(padded, width, ""))
       }

@@ -1,39 +1,41 @@
 package scalatui.terminal
 
+import scalatui.syntax.Equality.*
+
 /** Parser for common terminal escape sequences into typed terminal input. */
 object TerminalInputParser:
   private val PasteStart = "\u001b[200~"
-  private val PasteEnd = "\u001b[201~"
+  private val PasteEnd   = "\u001b[201~"
 
   private val SimpleKeys: Map[String, TerminalInput] = Map(
-    "\r" -> key(TerminalKey.Enter),
-    "\n" -> key(TerminalKey.Enter),
-    "\u001b" -> key(TerminalKey.Escape),
-    "\t" -> key(TerminalKey.Tab),
-    "\u0001" -> key(TerminalKey.Character("a"), KeyModifiers(ctrl = true)),
-    "\u0003" -> key(TerminalKey.Character("c"), KeyModifiers(ctrl = true)),
-    "\u0005" -> key(TerminalKey.Character("e"), KeyModifiers(ctrl = true)),
-    "\u000b" -> key(TerminalKey.Character("k"), KeyModifiers(ctrl = true)),
-    "\u000c" -> key(TerminalKey.Character("l"), KeyModifiers(ctrl = true)),
-    "\u0015" -> key(TerminalKey.Character("u"), KeyModifiers(ctrl = true)),
-    "\u0017" -> key(TerminalKey.Character("w"), KeyModifiers(ctrl = true)),
-    "\u007f" -> key(TerminalKey.Backspace),
-    "\b" -> key(TerminalKey.Backspace),
-    "\u001b[A" -> key(TerminalKey.Up),
-    "\u001b[B" -> key(TerminalKey.Down),
-    "\u001b[C" -> key(TerminalKey.Right),
-    "\u001b[D" -> key(TerminalKey.Left),
-    "\u001b[H" -> key(TerminalKey.Home),
-    "\u001b[F" -> key(TerminalKey.End),
-    "\u001bOH" -> key(TerminalKey.Home),
-    "\u001bOF" -> key(TerminalKey.End),
+    "\r"        -> key(TerminalKey.Enter),
+    "\n"        -> key(TerminalKey.Enter),
+    "\u001b"    -> key(TerminalKey.Escape),
+    "\t"        -> key(TerminalKey.Tab),
+    "\u0001"    -> key(TerminalKey.Character("a"), KeyModifiers(ctrl = true)),
+    "\u0003"    -> key(TerminalKey.Character("c"), KeyModifiers(ctrl = true)),
+    "\u0005"    -> key(TerminalKey.Character("e"), KeyModifiers(ctrl = true)),
+    "\u000b"    -> key(TerminalKey.Character("k"), KeyModifiers(ctrl = true)),
+    "\u000c"    -> key(TerminalKey.Character("l"), KeyModifiers(ctrl = true)),
+    "\u0015"    -> key(TerminalKey.Character("u"), KeyModifiers(ctrl = true)),
+    "\u0017"    -> key(TerminalKey.Character("w"), KeyModifiers(ctrl = true)),
+    "\u007f"    -> key(TerminalKey.Backspace),
+    "\b"        -> key(TerminalKey.Backspace),
+    "\u001b[A"  -> key(TerminalKey.Up),
+    "\u001b[B"  -> key(TerminalKey.Down),
+    "\u001b[C"  -> key(TerminalKey.Right),
+    "\u001b[D"  -> key(TerminalKey.Left),
+    "\u001b[H"  -> key(TerminalKey.Home),
+    "\u001b[F"  -> key(TerminalKey.End),
+    "\u001bOH"  -> key(TerminalKey.Home),
+    "\u001bOF"  -> key(TerminalKey.End),
     "\u001b[3~" -> key(TerminalKey.Delete),
-    "\u001b[Z" -> key(TerminalKey.Tab, KeyModifiers(shift = true))
+    "\u001b[Z"  -> key(TerminalKey.Tab, KeyModifiers(shift = true))
   )
 
-  private val ModifiedArrow = "\u001b\\[1;(\\d+)(?::\\d+)?([ABCDHF])".r
-  private val ModifiedFunc = "\u001b\\[(\\d+);(\\d+)(?::\\d+)?~".r
-  private val CsiU = "\u001b\\[(\\d+)(?::(\\d*))?(?::(\\d+))?(?:;(\\d+))?(?::(\\d+))?u".r
+  private val ModifiedArrow   = "\u001b\\[1;(\\d+)(?::\\d+)?([ABCDHF])".r
+  private val ModifiedFunc    = "\u001b\\[(\\d+);(\\d+)(?::\\d+)?~".r
+  private val CsiU            = "\u001b\\[(\\d+)(?::(\\d*))?(?::(\\d+))?(?:;(\\d+))?(?::(\\d+))?u".r
   private val ModifyOtherKeys = "\u001b\\[27;(\\d+);(\\d+)~".r
 
   def parse(data: String): Vector[TerminalInput] =
@@ -41,40 +43,54 @@ object TerminalInputParser:
     else parsePaste(data).getOrElse(Vector(parseOne(data)))
 
   def parseOne(data: String): TerminalInput =
-    SimpleKeys.getOrElse(data, parseModified(data).getOrElse(parsePrintable(data).getOrElse(TerminalInput.Raw(data))))
+    SimpleKeys.getOrElse(
+      data,
+      parseModified(data).getOrElse(parsePrintable(data).getOrElse(TerminalInput.Raw(data)))
+    )
 
   private def parsePaste(data: String): Option[Vector[TerminalInput]] =
     if data.startsWith(PasteStart) && data.endsWith(PasteEnd) then
-      Some(Vector(TerminalInput.Paste(data.substring(PasteStart.length, data.length - PasteEnd.length))))
+      Some(Vector(TerminalInput.Paste(data.substring(
+        PasteStart.length,
+        data.length - PasteEnd.length
+      ))))
     else None
 
   private def parseModified(data: String): Option[TerminalInput] = data match
-    case ModifiedArrow(modText, code) => Some(key(arrowKey(code), decodeModifiers(modText.toInt - 1)))
-    case ModifiedFunc(numText, modText) => functionKey(numText.toInt).map(key(_, decodeModifiers(modText.toInt - 1)))
-    case ModifyOtherKeys(modText, cpText) => Some(key(codePointKey(cpText.toInt), decodeModifiers(modText.toInt - 1)))
+    case ModifiedArrow(modText, code)                   =>
+      Some(key(arrowKey(code), decodeModifiers(modText.toInt - 1)))
+    case ModifiedFunc(numText, modText)                 =>
+      functionKey(numText.toInt).map(key(_, decodeModifiers(modText.toInt - 1)))
+    case ModifyOtherKeys(modText, cpText)               =>
+      Some(key(codePointKey(cpText.toInt), decodeModifiers(modText.toInt - 1)))
     case CsiU(cpText, _shifted, _base, modText, _event) =>
       val modifiers = Option(modText).fold(KeyModifiers.empty)(m => decodeModifiers(m.toInt - 1))
       Some(key(codePointKey(cpText.toInt), modifiers))
-    case _ => None
+    case _                                              => None
 
   private def parsePrintable(data: String): Option[TerminalInput] =
     if data.startsWith("\u001b") && data.length > 1 then
       val rest = data.substring(1)
-      if rest.codePointCount(0, rest.length) == 1 && rest.codePointAt(0) >= 32 then Some(key(TerminalKey.Character(rest), KeyModifiers(alt = true)))
+      if rest.codePointCount(0, rest.length) === 1 && rest.codePointAt(0) >= 32 then
+        Some(key(TerminalKey.Character(rest), KeyModifiers(alt = true)))
       else None
-    else if data.codePointCount(0, data.length) == 1 && data.codePointAt(0) >= 32 then Some(key(TerminalKey.Character(data)))
+    else if data.codePointCount(0, data.length) === 1 && data.codePointAt(0) >= 32 then
+      Some(key(TerminalKey.Character(data)))
     else None
 
-  private def key(key: TerminalKey, modifiers: KeyModifiers = KeyModifiers.empty): TerminalInput.Key =
+  private def key(
+      key: TerminalKey,
+      modifiers: KeyModifiers = KeyModifiers.empty
+  ): TerminalInput.Key =
     TerminalInput.Key(key, modifiers)
 
   private def arrowKey(code: String): TerminalKey = code match
-    case "A" => TerminalKey.Up
-    case "B" => TerminalKey.Down
-    case "C" => TerminalKey.Right
-    case "D" => TerminalKey.Left
-    case "H" => TerminalKey.Home
-    case "F" => TerminalKey.End
+    case "A"   => TerminalKey.Up
+    case "B"   => TerminalKey.Down
+    case "C"   => TerminalKey.Right
+    case "D"   => TerminalKey.Left
+    case "H"   => TerminalKey.Home
+    case "F"   => TerminalKey.End
     case other => TerminalKey.Unknown(other)
 
   private def functionKey(number: Int): Option[TerminalKey] = number match
@@ -85,17 +101,17 @@ object TerminalInputParser:
     case _ => None
 
   private def codePointKey(codePoint: Int): TerminalKey = codePoint match
-    case 9 => TerminalKey.Tab
-    case 13 => TerminalKey.Enter
-    case 27 => TerminalKey.Escape
-    case 127 => TerminalKey.Backspace
+    case 9              => TerminalKey.Tab
+    case 13             => TerminalKey.Enter
+    case 27             => TerminalKey.Escape
+    case 127            => TerminalKey.Backspace
     case cp if cp >= 32 => TerminalKey.Character(new String(Character.toChars(cp)))
-    case cp => TerminalKey.Unknown(s"U+$cp")
+    case cp             => TerminalKey.Unknown(s"U+$cp")
 
   private def decodeModifiers(mask: Int): KeyModifiers =
     KeyModifiers(
-      shift = (mask & 1) != 0,
-      alt = (mask & 2) != 0,
-      ctrl = (mask & 4) != 0,
-      superKey = (mask & 8) != 0
+      shift = (mask & 1) !== 0,
+      alt = (mask & 2) !== 0,
+      ctrl = (mask & 4) !== 0,
+      superKey = (mask & 8) !== 0
     )

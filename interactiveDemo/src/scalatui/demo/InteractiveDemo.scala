@@ -16,11 +16,11 @@ private final class DemoRoot(tui: TUI) extends Component:
   private enum Focus:
     case Actions, InputLine
 
-  private var focus = Focus.InputLine
-  private var messages = Vector.empty[String]
+  private var focus        = Focus.InputLine
+  private var messages     = Vector.empty[String]
   private val messagesText = Text("Messages: (none)", paddingX = 0)
-  private val input = Input()
-  private val actions = SelectList(
+  private val input        = Input()
+  private val actions      = SelectList(
     Vector(
       SelectItem("add", "Add input as message"),
       SelectItem("clear", "Clear messages"),
@@ -29,27 +29,28 @@ private final class DemoRoot(tui: TUI) extends Component:
     maxVisible = 3
   )
 
-  actions.onSelect = item => item.value match
-    case "add" => addMessage()
-    case "clear" =>
-      messages = Vector.empty
-      updateMessages()
-    case "quit" => tui.requestExit()
-    case _ => ()
+  actions.onSelect = item =>
+    item.value match
+      case "add"   => addMessage()
+      case "clear" =>
+        messages = Vector.empty
+        updateMessages()
+      case "quit"  => tui.requestExit()
+      case _       => ()
 
   input.onSubmit = _ => addMessage()
   updateFocus()
 
   override def handleInput(event: TerminalInput): Unit = event match
-    case TerminalInput.Key(TerminalKey.Tab, _) =>
+    case TerminalInput.Key(TerminalKey.Tab, _)                                      =>
       focus = if focus == Focus.InputLine then Focus.Actions else Focus.InputLine
       updateFocus()
     case TerminalInput.Key(TerminalKey.Character("l"), modifiers) if modifiers.ctrl =>
       messages = Vector.empty
       updateMessages()
-    case _ =>
+    case _                                                                          =>
       focus match
-        case Focus.Actions => actions.handleInput(event)
+        case Focus.Actions   => actions.handleInput(event)
         case Focus.InputLine => input.handleInput(event)
 
   override def render(width: Int): Vector[String] =
@@ -75,7 +76,12 @@ private final class DemoRoot(tui: TUI) extends Component:
   private def updateMessages(): Unit =
     messagesText.text =
       if messages.isEmpty then "Messages: (none)"
-      else messages.zipWithIndex.map((msg, idx) => s"${idx + 1}. $msg").mkString("Messages:\n", "\n", "")
+      else
+        messages.zipWithIndex.map((msg, idx) => s"${idx + 1}. $msg").mkString(
+          "Messages:\n",
+          "\n",
+          ""
+        )
 
   private def updateFocus(): Unit =
     input.focused = focus == Focus.InputLine

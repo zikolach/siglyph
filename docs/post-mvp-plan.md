@@ -12,10 +12,18 @@ The first milestone intentionally stops at the core renderer, terminal abstracti
 
 ## Editor and autocomplete
 
-- `EditorBuffer`: pure text model for multiline editing, grapheme-aware movement, split/merge, delete, undo, and kill-ring helpers.
+- `EditorBuffer`: pure text model for multiline editing, grapheme-aware movement, split/merge, delete, undo, and kill-ring helpers. Initial foundation is in place; undo/kill-ring and large-paste marker expansion remain follow-ups.
 - Multiline `Editor`: visual wrapping, fake cursor, IME cursor marker, submit/newline key handling, and large paste markers.
 - Autocomplete APIs: slash commands, file paths, `@` attachment paths, provider abstraction, and selectable suggestion UI.
 - Paste expansion: replace visible large-paste markers with original content on submit.
+
+Suggested follow-up chain after the editor-buffer foundation:
+
+1. Rendered multiline editor demo using `EditorBuffer`.
+2. Overlay and autocomplete components anchored by the editor.
+3. Terminal runtime polish: resize signals, PTY/manual smoke coverage, lifecycle docs.
+4. Markdown parser selection and JVM/Native-compatible renderer.
+5. Public API stabilization after editor and overlay pressure is real.
 
 ## Images
 

@@ -6,46 +6,61 @@ import java.nio.file.{Files, Path}
 import scala.util.matching.Regex
 
 object GenerateUnicodeTables:
-  private val Base = "https://www.unicode.org/Public/UCD/latest/ucd"
+  private val Base    = "https://www.unicode.org/Public/UCD/latest/ucd"
   private val Sources = Map(
-    "ReadMe" -> s"$Base/ReadMe.txt",
-    "EastAsianWidth" -> s"$Base/EastAsianWidth.txt",
+    "ReadMe"                 -> s"$Base/ReadMe.txt",
+    "EastAsianWidth"         -> s"$Base/EastAsianWidth.txt",
     "DerivedGeneralCategory" -> s"$Base/extracted/DerivedGeneralCategory.txt",
-    "GraphemeBreakProperty" -> s"$Base/auxiliary/GraphemeBreakProperty.txt",
-    "EmojiData" -> s"$Base/emoji/emoji-data.txt"
+    "GraphemeBreakProperty"  -> s"$Base/auxiliary/GraphemeBreakProperty.txt",
+    "EmojiData"              -> s"$Base/emoji/emoji-data.txt"
   )
 
   private case class Interval(start: Int, end: Int)
 
   @main def main(output: String = "core/src/scalatui/unicode/UnicodeTables.scala"): Unit =
-    val files = Sources.view.mapValues(fetch).toMap
+    val files   = Sources.view.mapValues(fetch).toMap
     val version = parseVersion(files("ReadMe"))
 
     val zeroWidthCategories = Set("Mn", "Me", "Cf", "Cc", "Cs")
-    val zeroWidth = parsePropertyFile(files("DerivedGeneralCategory"), zeroWidthCategories).valuesIterator.flatten.toVector
-    val wide = parsePropertyFile(files("EastAsianWidth"), Set("W", "F")).valuesIterator.flatten.toVector
-    val grapheme = parsePropertyFile(files("GraphemeBreakProperty"), Set(
-      "CR", "LF", "Control", "Extend", "ZWJ", "SpacingMark", "Prepend", "Regional_Indicator"
-    ))
-    val emoji = parsePropertyFile(files("EmojiData"), Set("Emoji_Presentation", "Extended_Pictographic"))
+    val zeroWidth           = parsePropertyFile(
+      files("DerivedGeneralCategory"),
+      zeroWidthCategories
+    ).valuesIterator.flatten.toVector
+    val wide                =
+      parsePropertyFile(files("EastAsianWidth"), Set("W", "F")).valuesIterator.flatten.toVector
+    val grapheme            = parsePropertyFile(
+      files("GraphemeBreakProperty"),
+      Set(
+        "CR",
+        "LF",
+        "Control",
+        "Extend",
+        "ZWJ",
+        "SpacingMark",
+        "Prepend",
+        "Regional_Indicator"
+      )
+    )
+    val emoji               =
+      parsePropertyFile(files("EmojiData"), Set("Emoji_Presentation", "Extended_Pictographic"))
 
     val byName = Map(
-      "zeroWidth" -> zeroWidth,
-      "wide" -> wide,
-      "graphemeCr" -> grapheme("CR"),
-      "graphemeLf" -> grapheme("LF"),
-      "graphemeControl" -> grapheme("Control"),
-      "graphemeExtend" -> grapheme("Extend"),
-      "graphemeZwj" -> grapheme("ZWJ"),
-      "graphemeSpacingMark" -> grapheme("SpacingMark"),
-      "graphemePrepend" -> grapheme("Prepend"),
-      "regionalIndicator" -> grapheme("Regional_Indicator"),
-      "emojiPresentation" -> emoji("Emoji_Presentation"),
+      "zeroWidth"            -> zeroWidth,
+      "wide"                 -> wide,
+      "graphemeCr"           -> grapheme("CR"),
+      "graphemeLf"           -> grapheme("LF"),
+      "graphemeControl"      -> grapheme("Control"),
+      "graphemeExtend"       -> grapheme("Extend"),
+      "graphemeZwj"          -> grapheme("ZWJ"),
+      "graphemeSpacingMark"  -> grapheme("SpacingMark"),
+      "graphemePrepend"      -> grapheme("Prepend"),
+      "regionalIndicator"    -> grapheme("Regional_Indicator"),
+      "emojiPresentation"    -> emoji("Emoji_Presentation"),
       "extendedPictographic" -> emoji("Extended_Pictographic")
     )
 
     val sourceList = Sources.values.toVector.sorted.map(url => s"    \"$url\"").mkString(",\n")
-    val tableDefs = byName.toVector.sortBy(_._1).map { case (name, intervals) =>
+    val tableDefs  = byName.toVector.sortBy(_._1).map { case (name, intervals) =>
       s"  private val $name: Array[Int] = ${formatIntervals(merge(intervals))}"
     }.mkString("\n\n")
 
@@ -78,14 +93,15 @@ $tableDefs
   private def contains(table: Array[Int], codePoint: Int): Boolean =
     var lo = 0
     var hi = table.length / 2 - 1
-    while lo <= hi do
+    var found = false
+    while lo <= hi && !found do
       val mid = (lo + hi) >>> 1
       val start = table(mid * 2)
       val end = table(mid * 2 + 1)
       if codePoint < start then hi = mid - 1
       else if codePoint > end then lo = mid + 1
-      else return true
-    false
+      else found = true
+    found
 """
 
     val path = Path.of(output)
@@ -101,7 +117,9 @@ $tableDefs
       "(?i)Version\\s+([0-9]+\\.[0-9]+\\.[0-9]+)".r,
       "(?i)Unicode\\s+([0-9]+\\.[0-9]+\\.[0-9]+)".r
     )
-    patterns.iterator.flatMap(_.findFirstMatchIn(readme).map(_.group(1))).toSeq.headOption.getOrElse("unknown")
+    patterns.iterator.flatMap(
+      _.findFirstMatchIn(readme).map(_.group(1))
+    ).toSeq.headOption.getOrElse("unknown")
 
   private def parsePropertyFile(text: String, wanted: Set[String]): Map[String, Vector[Interval]] =
     val initial = wanted.iterator.map(_ -> Vector.empty[Interval]).toMap
@@ -110,14 +128,14 @@ $tableDefs
       if line.isEmpty || !line.contains(';') then acc
       else
         val Array(rangeText, propText) = line.split(';').map(_.trim).take(2): @unchecked
-        val prop = propText.takeWhile(ch => !ch.isWhitespace)
+        val prop                       = propText.takeWhile(ch => !ch.isWhitespace)
         if !wanted(prop) then acc
         else acc.updated(prop, acc(prop) :+ parseRange(rangeText))
     }
 
   private def parseRange(text: String): Interval =
     text.split("\\.\\.") match
-      case Array(single) =>
+      case Array(single)     =>
         val cp = Integer.parseInt(single, 16)
         Interval(cp, cp)
       case Array(start, end) => Interval(Integer.parseInt(start, 16), Integer.parseInt(end, 16))
@@ -125,14 +143,19 @@ $tableDefs
   private def merge(intervals: Vector[Interval]): Vector[Interval] =
     intervals.sortBy(_.start).foldLeft(Vector.empty[Interval]) { (acc, next) =>
       acc.lastOption match
-        case Some(last) if next.start <= last.end + 1 => acc.updated(acc.size - 1, last.copy(end = math.max(last.end, next.end)))
-        case _ => acc :+ next
+        case Some(last) if next.start <= last.end + 1 =>
+          acc.updated(acc.size - 1, last.copy(end = math.max(last.end, next.end)))
+        case _                                        => acc :+ next
     }
 
   private def formatIntervals(intervals: Vector[Interval]): String =
     if intervals.isEmpty then "Array.emptyIntArray"
     else
       val values = intervals.flatMap(i => Vector(hex(i.start), hex(i.end)))
-      values.grouped(10).map(group => group.mkString("    ", ", ", "")).mkString("Array(\n", ",\n", "\n  )")
+      values.grouped(10).map(group => group.mkString("    ", ", ", "")).mkString(
+        "Array(\n",
+        ",\n",
+        "\n  )"
+      )
 
   private def hex(value: Int): String = "0x" + value.toHexString.toUpperCase

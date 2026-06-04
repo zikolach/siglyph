@@ -5,7 +5,7 @@ import scalatui.terminal.{KeyModifiers, TerminalInput, TerminalKey}
 
 class ComponentsSuite extends munit.FunSuite:
   test("text wraps and pads within width"):
-    val text = Text("hello world", paddingX = 1)
+    val text  = Text("hello world", paddingX = 1)
     val lines = text.render(8)
     assert(lines.forall(Ansi.visibleWidth(_) <= 8), lines.toString)
     assertEquals(lines.headOption.exists(_.startsWith(" ")), true)
@@ -14,14 +14,14 @@ class ComponentsSuite extends munit.FunSuite:
     assertEquals(Spacer(2).render(10), Vector("", ""))
 
   test("box wraps child with padding"):
-    val box = Box(paddingX = 1, paddingY = 1)
+    val box   = Box(paddingX = 1, paddingY = 1)
     box.addChild(Text("x", paddingX = 0))
     val lines = box.render(5)
     assertEquals(lines.length, 3)
     assert(lines.forall(Ansi.visibleWidth(_) <= 5), lines.toString)
 
   test("select list navigates and selects"):
-    val list = SelectList(Vector(SelectItem("a", "A"), SelectItem("b", "B")), maxVisible = 2)
+    val list     = SelectList(Vector(SelectItem("a", "A"), SelectItem("b", "B")), maxVisible = 2)
     var selected = Option.empty[SelectItem]
     list.onSelect = item => selected = Some(item)
 

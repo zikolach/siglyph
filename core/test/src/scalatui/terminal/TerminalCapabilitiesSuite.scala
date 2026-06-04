@@ -9,7 +9,10 @@ class TerminalCapabilitiesSuite extends munit.FunSuite:
 
   test("tmux disables images and delegates hyperlinks"):
     assertEquals(
-      TerminalCapabilities.detect(Map("TMUX" -> "1", "COLORTERM" -> "truecolor"), tmuxForwardsHyperlinks = true),
+      TerminalCapabilities.detect(
+        Map("TMUX" -> "1", "COLORTERM" -> "truecolor"),
+        tmuxForwardsHyperlinks = true
+      ),
       TerminalCapabilities(trueColor = true, hyperlinks = true, images = None)
     )
 

@@ -6,9 +6,59 @@ trait ScalaTuiModule extends ScalaModule {
   def scalaVersion = "3.7.4"
 }
 
+private def workspaceRoot: os.Path =
+  os.Path(sys.env.getOrElse("MILL_WORKSPACE_ROOT", System.getProperty("user.dir")))
+
+private def runShell(command: String): Unit =
+  os.proc("sh", "-c", command).call(cwd = workspaceRoot)
+
+private def runScalafmt(check: Boolean): Unit =
+  val mode       = if check then "--test ." else "."
+  val launchMode = if check then "-- --test ." else "-- ."
+  runShell(s"""
+    if command -v scalafmt >/dev/null 2>&1; then
+      exec scalafmt $mode
+    fi
+    if command -v cs >/dev/null 2>&1; then
+      exec cs launch org.scalameta:scalafmt-cli_2.13:3.9.10 $launchMode
+    fi
+    echo "scalafmt or coursier (cs) is required" >&2
+    exit 1
+  """)
+
+private def runScalafix(): Unit =
+  runShell("""
+    sources="core/src core/test terminalJvm/src terminalNative/src markdown/src demo/src keyTester/src interactiveDemo/src interactiveJvmDemo/src interactiveNativeDemo/src scripts/GenerateUnicodeTables.scala"
+    if command -v scalafix >/dev/null 2>&1; then
+      exec scalafix --syntactic --check --scala-version 3.7.4 --files $sources
+    fi
+    if command -v cs >/dev/null 2>&1; then
+      exec cs launch ch.epfl.scala:scalafix-cli_2.13:0.14.6 -- --syntactic --check --scala-version 3.7.4 --files $sources
+    fi
+    echo "scalafix or coursier (cs) is required" >&2
+    exit 1
+  """)
+
+def scalafmtAll = Task.Input {
+  runScalafmt(check = false)
+}
+
+def scalafmtCheck = Task.Input {
+  runScalafmt(check = true)
+}
+
+def scalafixCheck = Task.Input {
+  runScalafix()
+}
+
+def quality = Task.Input {
+  runScalafmt(check = true)
+  runScalafix()
+}
+
 object core extends ScalaTuiModule {
   object test extends ScalaTests {
-    def mvnDeps = Seq(mvn"org.scalameta::munit::1.2.0")
+    def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
     def testFramework = "munit.Framework"
   }
 }
@@ -18,14 +68,14 @@ object terminalJvm extends ScalaTuiModule {
 }
 
 object coreNative extends ScalaNativeModule {
-  def scalaVersion = "3.7.4"
+  def scalaVersion       = "3.7.4"
   def scalaNativeVersion = "0.5.12"
 }
 
 object terminalNative extends ScalaNativeModule {
-  def scalaVersion = "3.7.4"
+  def scalaVersion       = "3.7.4"
   def scalaNativeVersion = "0.5.12"
-  def moduleDeps = Seq(coreNative)
+  def moduleDeps         = Seq(coreNative)
 }
 
 object markdown extends ScalaTuiModule {
@@ -45,9 +95,9 @@ object interactiveDemo extends ScalaTuiModule {
 }
 
 object interactiveDemoNative extends ScalaNativeModule {
-  def scalaVersion = "3.7.4"
+  def scalaVersion       = "3.7.4"
   def scalaNativeVersion = "0.5.12"
-  def moduleDeps = Seq(coreNative)
+  def moduleDeps         = Seq(coreNative)
 }
 
 object interactiveJvmDemo extends ScalaTuiModule {
@@ -55,7 +105,7 @@ object interactiveJvmDemo extends ScalaTuiModule {
 }
 
 object interactiveNativeDemo extends ScalaNativeModule {
-  def scalaVersion = "3.7.4"
+  def scalaVersion       = "3.7.4"
   def scalaNativeVersion = "0.5.12"
-  def moduleDeps = Seq(terminalNative, interactiveDemoNative)
+  def moduleDeps         = Seq(terminalNative, interactiveDemoNative)
 }

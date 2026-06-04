@@ -22,7 +22,9 @@ final class SttyTerminal(
   override def start(onInput: scalatui.terminal.TerminalInput => Unit, onResize: () => Unit): Unit =
     if savedState.nonEmpty then return
     if System.console() == null then
-      throw IllegalStateException("JVM stty backend requires an interactive TTY; use StreamTerminal for non-interactive streams")
+      throw IllegalStateException(
+        "JVM stty backend requires an interactive TTY; use StreamTerminal for non-interactive streams"
+      )
     savedState = Some(runStty("-g"))
     try
       runStty("raw -echo min 1 time 0")
@@ -46,5 +48,5 @@ final class SttyTerminal(
 
   private def runStty(args: String): String =
     val command = Seq("sh", "-c", s"stty $args < /dev/tty")
-    val output = command.!!
+    val output  = command.!!
     output.trim

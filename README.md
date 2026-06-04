@@ -22,7 +22,7 @@ The first usable milestone targets:
 - Core renderer foundation.
 - MVP components: `Text`, `Box`, `Spacer`, `SelectList`, and `Input`.
 
-Editor, autocomplete, images, and Markdown are planned after the first milestone. Markdown will live in a separate pluggable module so parser dependencies can be evaluated explicitly for JVM and Native.
+Editor, autocomplete, images, and Markdown are planned after the first milestone. The multiline editor starts with a pure `EditorBuffer` model in `core`, keeping text mutation testable before a rendered editor component is introduced. Markdown will live in a separate pluggable module so parser dependencies can be evaluated explicitly for JVM and Native.
 
 ## Demos
 
@@ -69,5 +69,17 @@ Run all currently wired checks:
 ```bash
 mill __.compile
 mill core.test
+mill quality
 openspec validate --all --strict
 ```
+
+Formatting and linting:
+
+```bash
+mill scalafmtAll     # format sources using .scalafmt.conf
+mill scalafmtCheck   # check formatting
+mill scalafixCheck   # run baseline syntactic Scalafix rules
+mill quality         # run formatting and Scalafix checks
+```
+
+Public APIs should include Scaladoc, and user-visible behavior should be reflected in README/docs or the relevant OpenSpec artifacts.
