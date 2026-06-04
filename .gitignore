@@ -1,0 +1,26 @@
+# Build outputs
+out/
+target/
+.scala-build/
+
+# Mill / BSP / Scala tooling
+.bsp/
+.bloop/
+.metals/
+
+# Scala Native
+*.dSYM/
+*.nir
+*.ll
+
+# IDEs
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+
+# Logs / temp
+*.log
+.tmp/
+tmp/
