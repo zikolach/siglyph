@@ -23,7 +23,7 @@
 - [ ] 3.4 Implement Scala Native POSIX terminal startup, raw mode, stdin reads, resize handling, writes, and shutdown
 - [x] 3.5 Implement JVM Unix `stty` terminal startup, raw mode, stdin reads, resize handling, writes, and shutdown for interactive TTYs
 - [x] 3.6 Implement stream-backed non-interactive terminal operation with configured or environment-derived dimensions
-- [ ] 3.7 Add terminal lifecycle tests using the virtual backend and parser-level unit tests for key sequences
+- [x] 3.7 Add terminal lifecycle tests using the virtual backend and parser-level unit tests for key sequences
 
 ## 4. Components
 
@@ -47,12 +47,12 @@
 - [x] 6.3 Implement terminal capability detection for true color, hyperlinks, and tmux limitations in the MVP
 - [x] 6.4 Plan post-MVP Kitty/iTerm2 image support
 - [x] 6.5 Add an MVP demo showing Text, Box, Spacer, SelectList, and Input
-- [ ] 6.6 Add a key tester demo for raw and normalized terminal input diagnostics
+- [x] 6.6 Add a key tester demo for raw and normalized terminal input diagnostics
 
 ## 7. Validation and Parity
 
 - [x] 7.1 Mirror high-value `pi-tui` tests for width, wrapping, keys, renderer, input, and MVP components first; plan editor, autocomplete, Markdown, and image fixtures later
-- [ ] 7.2 Compare TauTUI tests and port useful Node-free edge cases into Scala tests
+- [x] 7.2 Compare TauTUI tests and port useful Node-free edge cases into Scala tests
 - [x] 7.3 Document intentional deviations from current `pi-tui` behavior
 - [x] 7.4 Use normalized virtual-viewport tests for most rendering assertions and targeted raw ANSI snapshots for escape-stream compatibility
-- [ ] 7.5 Run `openspec validate --all --strict` and fix any spec or change validation errors
+- [x] 7.5 Run `openspec validate --all --strict` and fix any spec or change validation errors

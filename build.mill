@@ -30,3 +30,7 @@ object markdown extends ScalaTuiModule {
 object demo extends ScalaTuiModule {
   def moduleDeps = Seq(core)
 }
+
+object keyTester extends ScalaTuiModule {
+  def moduleDeps = Seq(terminalJvm)
+}
