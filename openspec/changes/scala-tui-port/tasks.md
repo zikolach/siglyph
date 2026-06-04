@@ -27,14 +27,14 @@
 
 ## 4. Components
 
-- [ ] 4.1 Implement MVP components: `Text`, `Spacer`, `Box`, `SelectList`, and `Input`
-- [ ] 4.2 Add component render tests mirroring relevant `pi-tui` and TauTUI cases
+- [x] 4.1 Implement MVP components: `Text`, `Spacer`, `Box`, `SelectList`, and `Input`
+- [x] 4.2 Add component render tests mirroring relevant `pi-tui` and TauTUI cases
 - [ ] 4.3 Plan post-MVP components: `TruncatedText`, `Loader`, `SettingsList`, overlays, and image helpers
 
 ## 5. Editing and Autocomplete Plan
 
-- [ ] 5.1 Implement the single-line `Input` component and readline-style key bindings for the MVP
-- [ ] 5.2 Add Unicode input and paste regression tests for `Input`
+- [x] 5.1 Implement the single-line `Input` component and readline-style key bindings for the MVP
+- [x] 5.2 Add Unicode input and paste regression tests for `Input`
 - [ ] 5.3 Plan post-MVP `EditorBuffer` with insert, delete, split, merge, movement, undo, and kill-ring helpers
 - [ ] 5.4 Plan post-MVP multiline `Editor` renderer with fake cursor and IME cursor marker support
 - [ ] 5.5 Plan post-MVP autocomplete provider APIs for slash commands, file paths, and attachment-prefixed paths
