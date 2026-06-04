@@ -1,17 +1,17 @@
 ## 1. Project Skeleton
 
-- [ ] 1.1 Create a latest-stable Mill Scala 3 project layout named `scala-tui` with separate core, Native backend, JVM backend, Markdown, and test modules
-- [ ] 1.2 Add the initial `scalatui` package namespace for core, terminal, components, editing, autocomplete, markdown, and tests
-- [ ] 1.3 Add a README section documenting the Node-free Scala TUI goal and initial platform scope
-- [ ] 1.4 Add a porting notes document that records `pi-tui` and TauTUI source paths and sync procedure
+- [x] 1.1 Create a latest-stable Mill Scala 3 project layout named `scala-tui` with separate core, Native backend, JVM backend, Markdown, and test modules
+- [x] 1.2 Add the initial `scalatui` package namespace for core, terminal, components, editing, autocomplete, markdown, and tests
+- [x] 1.3 Add a README section documenting the Node-free Scala TUI goal and initial platform scope
+- [x] 1.4 Add a porting notes document that records `pi-tui` and TauTUI source paths and sync procedure
 
 ## 2. Core Rendering Foundation
 
-- [ ] 2.1 Define `Component`, `Focusable`, `Container`, and invalidation APIs
+- [x] 2.1 Define `Component`, `Focusable`, `Container`, and invalidation APIs
 - [ ] 2.2 Add a Scala CLI Unicode table generator targeting latest Unicode data and commit generated width/grapheme tables
 - [ ] 2.3 Implement ANSI escape parsing and visible-width measurement utilities using generated Unicode tables
 - [ ] 2.4 Implement ANSI-safe slicing, truncation, padding, and wrapping helpers
-- [ ] 2.5 Implement the virtual terminal test backend and basic viewport assertions
+- [x] 2.5 Implement the virtual terminal test backend and basic viewport assertions
 - [ ] 2.6 Implement the differential renderer for first render, partial diff, and full redraw paths
 - [ ] 2.7 Add renderer tests for width changes, changed tails, line overflow guards, and synchronized output wrapping
 
@@ -42,7 +42,7 @@
 
 ## 6. Markdown, Capability Detection, and Examples
 
-- [ ] 6.1 Create the separate Markdown module API and parser abstraction
+- [x] 6.1 Create the separate Markdown module API and parser abstraction
 - [ ] 6.2 Research and document candidate Markdown parser dependencies for JVM and Native before adding any runtime dependency
 - [ ] 6.3 Implement terminal capability detection for true color, hyperlinks, and tmux limitations in the MVP
 - [ ] 6.4 Plan post-MVP Kitty/iTerm2 image support
