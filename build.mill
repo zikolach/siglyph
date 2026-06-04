@@ -1,5 +1,6 @@
 import mill.*
 import mill.scalalib.*
+import mill.scalanativelib.*
 
 trait ScalaTuiModule extends ScalaModule {
   def scalaVersion = "3.7.4"
@@ -16,13 +17,9 @@ object terminalJvm extends ScalaTuiModule {
   def moduleDeps = Seq(core)
 }
 
-/** Placeholder module for the Scala Native backend.
-  *
-  * The actual Mill Scala Native module wiring will be added when the Native
-  * plugin/version choice is confirmed. Keeping this as a Scala module for the
-  * first slice lets the shared package layout and API compile immediately.
-  */
-object terminalNative extends ScalaTuiModule {
+object terminalNative extends ScalaNativeModule {
+  def scalaVersion = "3.7.4"
+  def scalaNativeVersion = "0.5.12"
   def moduleDeps = Seq(core)
 }
 
