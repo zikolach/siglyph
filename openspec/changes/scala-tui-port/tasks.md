@@ -29,30 +29,30 @@
 
 - [x] 4.1 Implement MVP components: `Text`, `Spacer`, `Box`, `SelectList`, and `Input`
 - [x] 4.2 Add component render tests mirroring relevant `pi-tui` and TauTUI cases
-- [ ] 4.3 Plan post-MVP components: `TruncatedText`, `Loader`, `SettingsList`, overlays, and image helpers
+- [x] 4.3 Plan post-MVP components: `TruncatedText`, `Loader`, `SettingsList`, overlays, and image helpers
 
 ## 5. Editing and Autocomplete Plan
 
 - [x] 5.1 Implement the single-line `Input` component and readline-style key bindings for the MVP
 - [x] 5.2 Add Unicode input and paste regression tests for `Input`
-- [ ] 5.3 Plan post-MVP `EditorBuffer` with insert, delete, split, merge, movement, undo, and kill-ring helpers
-- [ ] 5.4 Plan post-MVP multiline `Editor` renderer with fake cursor and IME cursor marker support
-- [ ] 5.5 Plan post-MVP autocomplete provider APIs for slash commands, file paths, and attachment-prefixed paths
-- [ ] 5.6 Plan post-MVP large paste markers and submit-time paste expansion
+- [x] 5.3 Plan post-MVP `EditorBuffer` with insert, delete, split, merge, movement, undo, and kill-ring helpers
+- [x] 5.4 Plan post-MVP multiline `Editor` renderer with fake cursor and IME cursor marker support
+- [x] 5.5 Plan post-MVP autocomplete provider APIs for slash commands, file paths, and attachment-prefixed paths
+- [x] 5.6 Plan post-MVP large paste markers and submit-time paste expansion
 
 ## 6. Markdown, Capability Detection, and Examples
 
 - [x] 6.1 Create the separate Markdown module API and parser abstraction
-- [ ] 6.2 Research and document candidate Markdown parser dependencies for JVM and Native before adding any runtime dependency
-- [ ] 6.3 Implement terminal capability detection for true color, hyperlinks, and tmux limitations in the MVP
-- [ ] 6.4 Plan post-MVP Kitty/iTerm2 image support
-- [ ] 6.5 Add an MVP demo showing Text, Box, Spacer, SelectList, and Input
+- [x] 6.2 Research and document candidate Markdown parser dependencies for JVM and Native before adding any runtime dependency
+- [x] 6.3 Implement terminal capability detection for true color, hyperlinks, and tmux limitations in the MVP
+- [x] 6.4 Plan post-MVP Kitty/iTerm2 image support
+- [x] 6.5 Add an MVP demo showing Text, Box, Spacer, SelectList, and Input
 - [ ] 6.6 Add a key tester demo for raw and normalized terminal input diagnostics
 
 ## 7. Validation and Parity
 
-- [ ] 7.1 Mirror high-value `pi-tui` tests for width, wrapping, keys, renderer, input, and MVP components first; plan editor, autocomplete, Markdown, and image fixtures later
+- [x] 7.1 Mirror high-value `pi-tui` tests for width, wrapping, keys, renderer, input, and MVP components first; plan editor, autocomplete, Markdown, and image fixtures later
 - [ ] 7.2 Compare TauTUI tests and port useful Node-free edge cases into Scala tests
-- [ ] 7.3 Document intentional deviations from current `pi-tui` behavior
-- [ ] 7.4 Use normalized virtual-viewport tests for most rendering assertions and targeted raw ANSI snapshots for escape-stream compatibility
+- [x] 7.3 Document intentional deviations from current `pi-tui` behavior
+- [x] 7.4 Use normalized virtual-viewport tests for most rendering assertions and targeted raw ANSI snapshots for escape-stream compatibility
 - [ ] 7.5 Run `openspec validate --all --strict` and fix any spec or change validation errors

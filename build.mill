@@ -26,3 +26,7 @@ object terminalNative extends ScalaNativeModule {
 object markdown extends ScalaTuiModule {
   def moduleDeps = Seq(core)
 }
+
+object demo extends ScalaTuiModule {
+  def moduleDeps = Seq(core)
+}
