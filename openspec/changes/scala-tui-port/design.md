@@ -1,6 +1,6 @@
 ## Context
 
-The target is a Scala 3 implementation of a `pi-tui`-style terminal UI library built with Mill and usable without Node.js. The TypeScript `pi-tui` package is the canonical behavior source, while TauTUI demonstrates a working Node-free porting strategy for macOS/Linux using a terminal abstraction, native process terminal, virtual terminal, renderer, and component set.
+The target is a Scala 3 implementation of a `pi-tui`-style terminal UI library named `scala-tui`, built with latest stable Mill and usable without Node.js. The TypeScript `pi-tui` package is the canonical behavior source, while TauTUI demonstrates a working Node-free porting strategy for macOS/Linux using a terminal abstraction, native process terminal, virtual terminal, renderer, and component set.
 
 Current `pi-tui` complexity is concentrated in terminal protocol handling, Unicode-aware width/editing, differential rendering, overlays, markdown, images, and autocomplete. The Scala project should avoid trying to port everything at once; it should start with a small shared core and a production-quality Unix-like terminal backend.
 
@@ -35,6 +35,12 @@ TauTUI maps `pi-tui` into a native terminal architecture and provides useful sea
 
 Alternative considered: line-by-line TypeScript port. This would preserve behavior in the short term but would embed Node-centric assumptions and produce a weaker Scala API.
 
+### Decision: Use `scalatui` as the initial package namespace
+
+Use `scalatui` as the top-level Scala package for the first implementation slice. It is short, matches the library name, avoids guessing a publishing organization, and can be renamed before publication if the final Maven coordinates require reverse-DNS naming.
+
+Alternative considered: reverse-DNS package names such as `io.github.<owner>.scalatui`. Those are better once the publishing owner is fixed, but premature for the bootstrap.
+
 ### Decision: Split the library into pure core and backend modules
 
 The initial module layout should separate responsibilities:
@@ -52,11 +58,11 @@ Scala Native can call POSIX APIs directly and is the cleanest backend for raw te
 
 Alternative considered: Native-only MVP. This would simplify implementation but would delay validation of the shared API across Scala targets.
 
-### Decision: Implement Unicode support with generated latest-version tables plus tests
+### Decision: Generate Unicode tables with Scala CLI
 
-Without ICU or npm width packages in the core, Unicode width and segmentation need explicit implementation. Start with minimal wcwidth-style display width plus full grapheme cluster handling backed by latest Unicode data generated and committed to the repository, then harden through fixtures from `pi-tui` and terminal observations.
+Without ICU or npm width packages in the core, Unicode width and segmentation need explicit implementation. Use a Scala CLI generator script to fetch latest Unicode Character Database and emoji data, generate committed Scala interval/property tables, and record the Unicode version in generated output. Start with minimal wcwidth-style display width plus full grapheme cluster segmentation per UAX #29, then harden through fixtures from `pi-tui` and terminal observations.
 
-Alternative considered: use ICU4J or platform ICU. This reduces risk but requires explicit dependency approval and would not belong in the dependency-light core by default.
+Alternative considered: use ICU4J or platform ICU. This reduces risk but requires explicit dependency approval and would not belong in the dependency-light core by default. Another alternative is hand-maintained tables, but that is error-prone and hard to update.
 
 ### Decision: Keep public APIs typed and Scala-idiomatic
 
@@ -68,14 +74,14 @@ Alternative considered: mirror TypeScript raw string input. That would simplify 
 
 - **Unicode correctness is hard** → Mitigate with generated Unicode tables, focused width/grapheme tests, and documented known deviations.
 - **Markdown dependencies need careful approval** → Mitigate by keeping Markdown in a separate pluggable module and confirming parser dependencies before adding them.
-- **JVM raw mode through `stty` is less robust than JLine** → Mitigate by documenting Unix-only JVM scope for v0 and keeping the backend replaceable.
+- **JVM raw mode through `stty` is less robust than JLine** → Mitigate by documenting Unix-only JVM scope for v0, keeping the backend replaceable, and supporting non-interactive stream operation without raw-mode requirements where possible.
 - **Current pi-tui continues to evolve** → Mitigate by tracking upstream tests and maintaining a porting/sync log similar to TauTUI.
 - **Terminal behavior varies across emulators** → Mitigate with a key tester/demo, virtual terminal tests, and explicit capability detection.
 - **Full Windows parity is expensive** → Mitigate by documenting Windows as out of initial scope and not blocking Unix/macOS delivery.
 
 ## Migration Plan
 
-1. Create the Mill/Scala 3 project skeleton and module boundaries.
+1. Create the Mill/Scala 3 project skeleton and module boundaries using the initial `scalatui` package namespace.
 2. Implement the pure core: component contract, container, ANSI parsing, visible width/truncation/wrapping, virtual terminal, and basic renderer.
 3. Implement compatibility-layer terminal APIs with Native POSIX and JVM `stty` Unix backends.
 4. Port MVP components: Text, Box, Spacer, SelectList, and Input.
@@ -88,5 +94,4 @@ Alternative considered: mirror TypeScript raw string input. That would simplify 
 
 - Which Markdown parser dependency, if any, should be approved for JVM and Native?
 - What exact raw ANSI snapshots from `pi-tui` should be treated as compatibility fixtures rather than virtual-viewport tests?
-- Which Unicode data generation script/tool should be used to produce latest-version committed tables?
-- What user-facing name should the library and Mill modules use?
+- What final Maven coordinates and reverse-DNS package name should be used before publication, if different from the bootstrap `scalatui` package?

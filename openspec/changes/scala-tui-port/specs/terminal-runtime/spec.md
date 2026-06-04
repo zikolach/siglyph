@@ -23,15 +23,30 @@ The initial Native backend SHALL target Scala Native on macOS and Linux and use 
 - **THEN** the backend updates columns and rows and requests a render
 
 ### Requirement: JVM stty backend
-The initial JVM backend SHALL target macOS and Linux terminals using an `stty`-based compatibility layer for raw mode and terminal restoration.
+The initial JVM backend SHALL target macOS and Linux terminals using an `stty`-based compatibility layer for raw mode and terminal restoration when attached to an interactive TTY.
 
 #### Scenario: JVM backend enters raw mode
-- **WHEN** the JVM backend starts on a Unix-like system with `stty` available
+- **WHEN** the JVM backend starts on a Unix-like interactive TTY with `stty` available
 - **THEN** it configures the terminal for unbuffered interactive input
 
+#### Scenario: JVM backend fails clearly without stty
+- **WHEN** raw-mode JVM startup is requested and `stty` is unavailable
+- **THEN** the backend fails with a clear diagnostic instead of leaving the terminal in an unknown state
+
 #### Scenario: JVM backend restores stty state
-- **WHEN** the JVM backend stops
+- **WHEN** the JVM backend stops after configuring raw mode
 - **THEN** it restores the previously captured terminal settings
+
+### Requirement: Non-interactive stream operation
+The terminal runtime SHALL support non-interactive operation where practical by allowing stream-backed input and output without requiring raw terminal mode.
+
+#### Scenario: Non-interactive output renders frames
+- **WHEN** a stream-backed terminal is created with a non-TTY output stream
+- **THEN** the renderer can write frames to that stream without invoking `stty`
+
+#### Scenario: Non-interactive dimensions use fallback
+- **WHEN** terminal dimensions cannot be queried from an interactive TTY
+- **THEN** the backend uses configured dimensions or environment fallbacks such as `COLUMNS` and `LINES`
 
 ### Requirement: Shared backend compatibility
 The library SHALL keep the terminal backend interface independent from target-specific implementation details so Native and JVM backends use the same component and renderer APIs.

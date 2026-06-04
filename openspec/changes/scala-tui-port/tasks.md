@@ -1,18 +1,19 @@
 ## 1. Project Skeleton
 
-- [ ] 1.1 Create a Mill Scala 3 project layout with separate core, Native backend, JVM backend, Markdown, and test modules
-- [ ] 1.2 Add package namespaces for core, terminal, components, editing, autocomplete, markdown, and tests
+- [ ] 1.1 Create a latest-stable Mill Scala 3 project layout named `scala-tui` with separate core, Native backend, JVM backend, Markdown, and test modules
+- [ ] 1.2 Add the initial `scalatui` package namespace for core, terminal, components, editing, autocomplete, markdown, and tests
 - [ ] 1.3 Add a README section documenting the Node-free Scala TUI goal and initial platform scope
 - [ ] 1.4 Add a porting notes document that records `pi-tui` and TauTUI source paths and sync procedure
 
 ## 2. Core Rendering Foundation
 
 - [ ] 2.1 Define `Component`, `Focusable`, `Container`, and invalidation APIs
-- [ ] 2.2 Implement ANSI escape parsing and visible-width measurement utilities
-- [ ] 2.3 Implement ANSI-safe slicing, truncation, padding, and wrapping helpers
-- [ ] 2.4 Implement the virtual terminal test backend and basic viewport assertions
-- [ ] 2.5 Implement the differential renderer for first render, partial diff, and full redraw paths
-- [ ] 2.6 Add renderer tests for width changes, changed tails, line overflow guards, and synchronized output wrapping
+- [ ] 2.2 Add a Scala CLI Unicode table generator targeting latest Unicode data and commit generated width/grapheme tables
+- [ ] 2.3 Implement ANSI escape parsing and visible-width measurement utilities using generated Unicode tables
+- [ ] 2.4 Implement ANSI-safe slicing, truncation, padding, and wrapping helpers
+- [ ] 2.5 Implement the virtual terminal test backend and basic viewport assertions
+- [ ] 2.6 Implement the differential renderer for first render, partial diff, and full redraw paths
+- [ ] 2.7 Add renderer tests for width changes, changed tails, line overflow guards, and synchronized output wrapping
 
 ## 3. Terminal Runtime
 
@@ -20,8 +21,9 @@
 - [ ] 3.2 Implement escape sequence parsing for legacy keys, xterm modified keys, and Kitty CSI-u keys
 - [ ] 3.3 Implement bracketed paste parsing and paste-safe event delivery
 - [ ] 3.4 Implement Scala Native POSIX terminal startup, raw mode, stdin reads, resize handling, writes, and shutdown
-- [ ] 3.5 Implement JVM Unix `stty` terminal startup, raw mode, stdin reads, resize handling, writes, and shutdown
-- [ ] 3.6 Add terminal lifecycle tests using the virtual backend and parser-level unit tests for key sequences
+- [ ] 3.5 Implement JVM Unix `stty` terminal startup, raw mode, stdin reads, resize handling, writes, and shutdown for interactive TTYs
+- [ ] 3.6 Implement stream-backed non-interactive terminal operation with configured or environment-derived dimensions
+- [ ] 3.7 Add terminal lifecycle tests using the virtual backend and parser-level unit tests for key sequences
 
 ## 4. Components
 
@@ -41,7 +43,7 @@
 ## 6. Markdown, Capability Detection, and Examples
 
 - [ ] 6.1 Create the separate Markdown module API and parser abstraction
-- [ ] 6.2 Document candidate Markdown parser dependencies for JVM and Native before adding any runtime dependency
+- [ ] 6.2 Research and document candidate Markdown parser dependencies for JVM and Native before adding any runtime dependency
 - [ ] 6.3 Implement terminal capability detection for true color, hyperlinks, and tmux limitations in the MVP
 - [ ] 6.4 Plan post-MVP Kitty/iTerm2 image support
 - [ ] 6.5 Add an MVP demo showing Text, Box, Spacer, SelectList, and Input
