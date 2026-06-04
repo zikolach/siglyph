@@ -29,3 +29,12 @@ class TerminalInputParserSuite extends munit.FunSuite:
       TerminalInputParser.parse("\u001b[200~hello\nworld\u001b[201~"),
       Vector(TerminalInput.Paste("hello\nworld"))
     )
+
+  test("normalizes common raw control bytes"):
+    assertEquals(TerminalInputParser.parseOne("\u0003"), TerminalInput.Key(TerminalKey.Character("c"), KeyModifiers(ctrl = true)))
+    assertEquals(TerminalInputParser.parseOne("\u0001"), TerminalInput.Key(TerminalKey.Character("a"), KeyModifiers(ctrl = true)))
+    assertEquals(TerminalInputParser.parseOne("\u0005"), TerminalInput.Key(TerminalKey.Character("e"), KeyModifiers(ctrl = true)))
+    assertEquals(TerminalInputParser.parseOne("\u0015"), TerminalInput.Key(TerminalKey.Character("u"), KeyModifiers(ctrl = true)))
+    assertEquals(TerminalInputParser.parseOne("\u000b"), TerminalInput.Key(TerminalKey.Character("k"), KeyModifiers(ctrl = true)))
+    assertEquals(TerminalInputParser.parseOne("\u000c"), TerminalInput.Key(TerminalKey.Character("l"), KeyModifiers(ctrl = true)))
+    assertEquals(TerminalInputParser.parseOne("\u0017"), TerminalInput.Key(TerminalKey.Character("w"), KeyModifiers(ctrl = true)))

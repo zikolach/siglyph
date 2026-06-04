@@ -24,6 +24,40 @@ The first usable milestone targets:
 
 Editor, autocomplete, images, and Markdown are planned after the first milestone. Markdown will live in a separate pluggable module so parser dependencies can be evaluated explicitly for JVM and Native.
 
+## Demos
+
+Render a non-interactive frame using the stream backend:
+
+```bash
+mill demo.run
+```
+
+Run the JVM interactive demo in a macOS/Linux TTY:
+
+```bash
+mill interactiveJvmDemo.run
+```
+
+Build the Scala Native interactive demo:
+
+```bash
+mill interactiveNativeDemo.nativeLink
+```
+
+The interactive demo controls are:
+
+- `Tab` switches focus between actions and input
+- `↑` / `↓` move through actions when the action list is focused
+- `Enter` submits the input or selects the focused action
+- `Ctrl+L` clears messages
+- `Esc` or `Ctrl+C` exits and restores terminal state
+
+Run the JVM key tester:
+
+```bash
+mill keyTester.run
+```
+
 ## Development
 
 ```bash

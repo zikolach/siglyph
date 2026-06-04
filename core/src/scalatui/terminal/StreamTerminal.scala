@@ -16,19 +16,30 @@ class StreamTerminal(
   @volatile private var inputHandler: TerminalInput => Unit = _ => ()
   @volatile private var running = false
   private var inputThread: Thread | Null = null
+  private var flushThread: Thread | Null = null
+  private val inputBuffer = TerminalInputBuffer()
+  private val inputLock = Object()
 
   override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
     inputHandler = onInput
     running = true
     val thread = Thread(() => readLoop(), "scala-tui-stream-terminal-input")
+    val flusher = Thread(() => flushLoop(), "scala-tui-stream-terminal-flush")
     thread.setDaemon(true)
+    flusher.setDaemon(true)
     inputThread = thread
+    flushThread = flusher
     thread.start()
+    flusher.start()
 
   override def stop(): Unit =
+    if !running && inputThread == null then return
     running = false
     Option(inputThread).foreach(_.interrupt())
+    Option(flushThread).foreach(_.interrupt())
     inputThread = null
+    flushThread = null
+    inputLock.synchronized(inputBuffer.clear())
 
   override def write(data: String): Unit =
     val bytes = data.getBytes(java.nio.charset.StandardCharsets.UTF_8)
@@ -54,11 +65,26 @@ class StreamTerminal(
       try
         val read = input.read(buffer)
         if read < 0 then running = false
-        else if read > 0 then
+        else if read == 0 then flushPending()
+        else
           val data = String(buffer, 0, read, java.nio.charset.StandardCharsets.UTF_8)
-          TerminalInputParser.parse(data).foreach(inputHandler)
+          val inputs = inputLock.synchronized(inputBuffer.process(data))
+          inputs.foreach(inputHandler)
       catch case _: InterruptedException => running = false
 
+  private def flushLoop(): Unit =
+    while running do
+      try
+        Thread.sleep(StreamTerminal.IncompleteEscapeFlushMillis)
+        flushPending()
+      catch case _: InterruptedException => running = false
+
+  private def flushPending(): Unit =
+    val inputs = inputLock.synchronized(inputBuffer.flush())
+    inputs.foreach(inputHandler)
+
 object StreamTerminal:
+  private val IncompleteEscapeFlushMillis = 75L
+
   private[terminal] def envInt(name: String): Option[Int] =
     Option(System.getenv(name)).flatMap(value => scala.util.Try(value.toInt).toOption).filter(_ > 0)

@@ -53,5 +53,9 @@ class ComponentsSuite extends munit.FunSuite:
     input.handleInput(TerminalInput.Key(TerminalKey.Character("X")))
     input.handleInput(TerminalInput.Key(TerminalKey.Character("e"), KeyModifiers(ctrl = true)))
     input.handleInput(TerminalInput.Key(TerminalKey.Character("w"), KeyModifiers(ctrl = true)))
-
     assertEquals(input.value, "Xhello ")
+
+    input.handleInput(TerminalInput.Key(TerminalKey.Character("k"), KeyModifiers(ctrl = true)))
+    assertEquals(input.value, "Xhello ")
+    input.handleInput(TerminalInput.Key(TerminalKey.Character("u"), KeyModifiers(ctrl = true)))
+    assertEquals(input.value, "")

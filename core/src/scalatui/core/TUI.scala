@@ -1,16 +1,22 @@
 package scalatui.core
 
 import scalatui.ansi.Ansi
-import scalatui.terminal.{Terminal, TerminalInput}
+import scalatui.terminal.{Terminal, TerminalInput, TerminalKey}
 
 /** Main terminal UI runtime with a small differential renderer. */
 final class TUI(val terminal: Terminal):
   private val root = Container()
+  private val lifecycleLock = Object()
   private var previousLines = Vector.empty[String]
   private var previousWidth = 0
   private var cursorRow = 0
   private var focusedComponent: Option[Component] = None
   private var running = false
+  private var exitRequested = false
+  private var renderRequested = false
+
+  var handlesControlC: Boolean = true
+  var exitsOnEscape: Boolean = false
 
   def addChild(component: Component): Unit = root.addChild(component)
   def removeChild(component: Component): Boolean = root.removeChild(component)
@@ -29,26 +35,75 @@ final class TUI(val terminal: Terminal):
     }
 
   def start(): Unit =
-    running = true
-    terminal.start(handleInput, () => requestRender())
-    terminal.hideCursor()
-    requestRender(force = true)
+    lifecycleLock.synchronized {
+      if running then return
+      exitRequested = false
+      running = true
+    }
+    try
+      terminal.start(handleInput, () =>
+        requestRender(force = true)
+        flushRender()
+      )
+      terminal.hideCursor()
+      requestRender(force = true)
+      flushRender()
+    catch
+      case e: Throwable =>
+        stop()
+        throw e
 
-  def stop(): Unit =
+  def run(): Unit =
+    try
+      start()
+      lifecycleLock.synchronized {
+        while running && !exitRequested do lifecycleLock.wait()
+      }
+    finally stop()
+
+  def requestExit(): Unit = lifecycleLock.synchronized {
+    exitRequested = true
+    lifecycleLock.notifyAll()
+  }
+
+  def stop(): Unit = lifecycleLock.synchronized {
+    if !running then return
     running = false
+    if previousLines.nonEmpty then terminal.write("\r\n")
     terminal.showCursor()
     terminal.stop()
+    lifecycleLock.notifyAll()
+  }
 
-  def requestRender(force: Boolean = false): Unit =
+  def requestRender(force: Boolean = false): Unit = lifecycleLock.synchronized {
     if force then
       previousLines = Vector.empty
-      previousWidth = 0
+      previousWidth = -1
       cursorRow = 0
-    renderNow()
+    renderRequested = true
+  }
 
-  private def handleInput(input: TerminalInput): Unit =
+  def flushRender(): Unit = lifecycleLock.synchronized {
+    if renderRequested then
+      renderRequested = false
+      renderNow()
+  }
+
+  private def handleInput(input: TerminalInput): Unit = lifecycleLock.synchronized {
+    if handlesControlC && isCtrl(input, "c") then
+      requestExit()
+      return
+    if exitsOnEscape && input == TerminalInput.Key(TerminalKey.Escape) then
+      requestExit()
+      return
     focusedComponent.foreach(_.handleInput(input))
     requestRender()
+    flushRender()
+  }
+
+  private def isCtrl(input: TerminalInput, char: String): Boolean = input match
+    case TerminalInput.Key(TerminalKey.Character(value), modifiers) => value == char && modifiers.ctrl
+    case _ => false
 
   private def renderNow(): Unit =
     val width = terminal.columns

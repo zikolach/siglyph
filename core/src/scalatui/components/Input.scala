@@ -23,6 +23,8 @@ final class Input(initialValue: String = "") extends Component, Focusable:
     case TerminalInput.Key(TerminalKey.Character("a"), modifiers) if modifiers.ctrl => cursorCluster = 0
     case TerminalInput.Key(TerminalKey.Character("e"), modifiers) if modifiers.ctrl => cursorCluster = clusters.length
     case TerminalInput.Key(TerminalKey.Character("w"), modifiers) if modifiers.ctrl => deleteWordBackwards()
+    case TerminalInput.Key(TerminalKey.Character("u"), modifiers) if modifiers.ctrl => deleteToStart()
+    case TerminalInput.Key(TerminalKey.Character("k"), modifiers) if modifiers.ctrl => deleteToEnd()
     case TerminalInput.Key(TerminalKey.Character(text), _) => insert(text)
     case TerminalInput.Paste(text) => insert(text.replace('\n', ' ').replace('\r', ' '))
     case TerminalInput.Key(TerminalKey.Enter, _) => onSubmit(currentValue)
@@ -65,5 +67,14 @@ final class Input(initialValue: String = "") extends Component, Focusable:
     while i > 0 && !cs(i - 1).forall(_.isWhitespace) do i -= 1
     currentValue = (cs.take(i) ++ cs.drop(cursorCluster)).mkString
     cursorCluster = i
+
+  private def deleteToStart(): Unit =
+    val cs = clusters
+    currentValue = cs.drop(cursorCluster).mkString
+    cursorCluster = 0
+
+  private def deleteToEnd(): Unit =
+    val cs = clusters
+    currentValue = cs.take(cursorCluster).mkString
 
   private def clusters: Vector[String] = Unicode.graphemeClusters(currentValue)

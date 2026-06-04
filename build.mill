@@ -17,10 +17,15 @@ object terminalJvm extends ScalaTuiModule {
   def moduleDeps = Seq(core)
 }
 
+object coreNative extends ScalaNativeModule {
+  def scalaVersion = "3.7.4"
+  def scalaNativeVersion = "0.5.12"
+}
+
 object terminalNative extends ScalaNativeModule {
   def scalaVersion = "3.7.4"
   def scalaNativeVersion = "0.5.12"
-  def moduleDeps = Seq(core)
+  def moduleDeps = Seq(coreNative)
 }
 
 object markdown extends ScalaTuiModule {
@@ -33,4 +38,24 @@ object demo extends ScalaTuiModule {
 
 object keyTester extends ScalaTuiModule {
   def moduleDeps = Seq(terminalJvm)
+}
+
+object interactiveDemo extends ScalaTuiModule {
+  def moduleDeps = Seq(core)
+}
+
+object interactiveDemoNative extends ScalaNativeModule {
+  def scalaVersion = "3.7.4"
+  def scalaNativeVersion = "0.5.12"
+  def moduleDeps = Seq(coreNative)
+}
+
+object interactiveJvmDemo extends ScalaTuiModule {
+  def moduleDeps = Seq(terminalJvm, interactiveDemo)
+}
+
+object interactiveNativeDemo extends ScalaNativeModule {
+  def scalaVersion = "3.7.4"
+  def scalaNativeVersion = "0.5.12"
+  def moduleDeps = Seq(terminalNative, interactiveDemoNative)
 }

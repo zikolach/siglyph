@@ -1,6 +1,6 @@
 package scalatui.terminal.native
 
-import scalatui.terminal.{Terminal, TerminalInput, TerminalInputParser}
+import scalatui.terminal.{Terminal, TerminalInput, TerminalInputBuffer}
 
 import scala.scalanative.unsafe.*
 import scala.scalanative.unsigned.*
@@ -30,23 +30,35 @@ final class PosixTerminal(
   private var savedState: Ptr[termios.termios] = null
   private var currentColumns = initialColumns
   private var currentRows = initialRows
+  private val inputBuffer = TerminalInputBuffer()
 
   override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
+    if running then return
     if unistd.isatty(unistd.STDIN_FILENO) == 0 then
       throw IllegalStateException("Scala Native POSIX backend requires stdin to be an interactive TTY")
     inputHandler = onInput
     refreshSize()
-    enableRawMode()
-    running = true
-    val thread = Thread(() => readLoop(), "scala-tui-posix-terminal-input")
-    thread.setDaemon(true)
-    inputThread = thread
-    thread.start()
+    try
+      enableRawMode()
+      write("\u001b[?2004h")
+      running = true
+      val thread = Thread(() => readLoop(), "scala-tui-posix-terminal-input")
+      thread.setDaemon(true)
+      inputThread = thread
+      thread.start()
+    catch
+      case e: Throwable =>
+        write("\u001b[?2004l")
+        restoreMode()
+        throw e
 
   override def stop(): Unit =
+    if !running && savedState == null then return
+    write("\u001b[?2004l")
     running = false
     Option(inputThread).foreach(_.interrupt())
     inputThread = null
+    inputBuffer.clear()
     restoreMode()
 
   override def write(data: String): Unit =
@@ -85,6 +97,8 @@ final class PosixTerminal(
     raw.c_oflag = clearFlags(raw.c_oflag, OPOST)
     raw.c_cflag = setFlags(raw.c_cflag, CS8)
     raw.c_lflag = clearFlags(raw.c_lflag, ECHO | ICANON | IEXTEN | ISIG)
+    raw.c_cc(termios.VMIN) = 0.toUByte
+    raw.c_cc(termios.VTIME) = 1.toUByte
 
     if termios.tcsetattr(unistd.STDIN_FILENO, TCSAFLUSH, raw) != 0 then
       stdlib.free(original.asInstanceOf[Ptr[Byte]])
@@ -110,14 +124,15 @@ final class PosixTerminal(
     while running do
       val read = unistd.read(unistd.STDIN_FILENO, buffer, 4096.toUSize)
       if read < 0 then running = false
-      else if read > 0 then
+      else if read == 0 then inputBuffer.flush().foreach(inputHandler)
+      else
         val bytes = Array.ofDim[Byte](read)
         var i = 0
         while i < read do
           bytes(i) = (!(buffer + i)).toByte
           i += 1
         val data = String(bytes, java.nio.charset.StandardCharsets.UTF_8)
-        TerminalInputParser.parse(data).foreach(inputHandler)
+        inputBuffer.process(data).foreach(inputHandler)
 
   private def clearFlags(value: termios.tcflag_t, mask: Int): termios.tcflag_t =
     (value.toInt & ~mask).toUInt

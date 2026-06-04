@@ -20,18 +20,26 @@ final class SttyTerminal(
   private var savedState: Option[String] = None
 
   override def start(onInput: scalatui.terminal.TerminalInput => Unit, onResize: () => Unit): Unit =
+    if savedState.nonEmpty then return
     if System.console() == null then
       throw IllegalStateException("JVM stty backend requires an interactive TTY; use StreamTerminal for non-interactive streams")
     savedState = Some(runStty("-g"))
-    try runStty("raw -echo min 1 time 0")
+    try
+      runStty("raw -echo min 1 time 0")
+      write("\u001b[?2004h")
+      super.start(onInput, onResize)
     catch
       case e: Throwable =>
+        write("\u001b[?2004l")
         savedState.foreach(state => scala.util.Try(runStty(state)))
         savedState = None
         throw e
-    super.start(onInput, onResize)
 
   override def stop(): Unit =
+    if savedState.isEmpty then
+      super.stop()
+      return
+    write("\u001b[?2004l")
     super.stop()
     savedState.foreach(state => scala.util.Try(runStty(state)))
     savedState = None
