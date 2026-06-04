@@ -8,12 +8,12 @@
 ## 2. Core Rendering Foundation
 
 - [x] 2.1 Define `Component`, `Focusable`, `Container`, and invalidation APIs
-- [ ] 2.2 Add a Scala CLI Unicode table generator targeting latest Unicode data and commit generated width/grapheme tables
-- [ ] 2.3 Implement ANSI escape parsing and visible-width measurement utilities using generated Unicode tables
-- [ ] 2.4 Implement ANSI-safe slicing, truncation, padding, and wrapping helpers
+- [x] 2.2 Add a Scala CLI Unicode table generator targeting latest Unicode data and commit generated width/grapheme tables
+- [x] 2.3 Implement ANSI escape parsing and visible-width measurement utilities using generated Unicode tables
+- [x] 2.4 Implement ANSI-safe slicing, truncation, padding, and wrapping helpers
 - [x] 2.5 Implement the virtual terminal test backend and basic viewport assertions
-- [ ] 2.6 Implement the differential renderer for first render, partial diff, and full redraw paths
-- [ ] 2.7 Add renderer tests for width changes, changed tails, line overflow guards, and synchronized output wrapping
+- [x] 2.6 Implement the differential renderer for first render, partial diff, and full redraw paths
+- [x] 2.7 Add renderer tests for width changes, changed tails, line overflow guards, and synchronized output wrapping
 
 ## 3. Terminal Runtime
 
