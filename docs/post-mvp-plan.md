@@ -12,18 +12,19 @@ The first milestone intentionally stops at the core renderer, terminal abstracti
 
 ## Editor and autocomplete
 
-- `EditorBuffer`: pure text model for multiline editing, grapheme-aware movement, split/merge, delete, undo, and kill-ring helpers. Initial foundation is in place; undo/kill-ring and large-paste marker expansion remain follow-ups.
-- Multiline `Editor`: visual wrapping, fake cursor, IME cursor marker, submit/newline key handling, and large paste markers.
+- `EditorBuffer`: pure text model for multiline editing, grapheme-aware movement, split/merge, delete, and paste insertion. Initial foundation is in place; undo/kill-ring and large-paste marker expansion remain follow-ups.
+- Multiline `Editor`: rendered MVP with visual wrapping, fake cursor, core editing keys, callbacks, and configurable submit/newline behavior. IME cursor markers, hardware cursor positioning, undo/kill-ring, autocomplete overlays, and large paste markers remain follow-ups.
 - Autocomplete APIs: slash commands, file paths, `@` attachment paths, provider abstraction, and selectable suggestion UI.
 - Paste expansion: replace visible large-paste markers with original content on submit.
 
 Suggested follow-up chain after the editor-buffer foundation:
 
-1. Rendered multiline editor demo using `EditorBuffer`.
-2. Overlay and autocomplete components anchored by the editor.
-3. Terminal runtime polish: resize signals, PTY/manual smoke coverage, lifecycle docs.
-4. Markdown parser selection and JVM/Native-compatible renderer.
-5. Public API stabilization after editor and overlay pressure is real.
+1. Overlay and autocomplete components anchored by the editor.
+2. Undo/kill-ring helpers and large-paste marker compaction/expansion.
+3. IME cursor markers and hardware cursor positioning if component-level fake cursors prove insufficient.
+4. Terminal runtime polish: resize signals, PTY/manual smoke coverage, lifecycle docs.
+5. Markdown parser selection and JVM/Native-compatible renderer.
+6. Public API stabilization after editor and overlay pressure is real.
 
 ## Images
 

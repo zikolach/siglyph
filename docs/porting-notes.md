@@ -27,6 +27,7 @@ When porting a feature:
 
 - Components receive typed terminal input events rather than raw escape strings where practical.
 - Components may report a minimal `InputResult` from input handling; richer focus and overlay command APIs are intentionally deferred until autocomplete/overlay work creates concrete pressure.
-- Multiline editing starts with a pure logical `EditorBuffer` before a rendered editor component, keeping buffer mutation independent from terminal display layout.
+- Multiline editing starts with a pure logical `EditorBuffer` and a rendered `Editor` MVP. The Scala editor consumes typed terminal input, renders a fake cursor inside component output, and keeps terminal display layout separate from the logical buffer.
+- The first rendered editor intentionally ports only a small `pi-tui` subset: wrapping, Unicode-aware cursor placement, core editing keys, callbacks, and configurable Enter behavior. Autocomplete/overlays, undo/kill-ring, large-paste markers, IME cursor markers, and hardware cursor positioning remain explicit follow-ups.
 - Markdown is separated into a pluggable module instead of being part of the core module.
 - JVM raw mode initially uses `stty` rather than JLine; JLine would require explicit dependency approval.
