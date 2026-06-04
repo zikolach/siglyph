@@ -20,7 +20,7 @@
 - [x] 3.1 Define typed terminal events, key events, modifiers, paste events, and resize callbacks
 - [x] 3.2 Implement escape sequence parsing for legacy keys, xterm modified keys, and Kitty CSI-u keys
 - [x] 3.3 Implement bracketed paste parsing and paste-safe event delivery
-- [ ] 3.4 Implement Scala Native POSIX terminal startup, raw mode, stdin reads, resize handling, writes, and shutdown
+- [x] 3.4 Implement Scala Native POSIX terminal startup, raw mode, stdin reads, resize handling, writes, and shutdown
 - [x] 3.5 Implement JVM Unix `stty` terminal startup, raw mode, stdin reads, resize handling, writes, and shutdown for interactive TTYs
 - [x] 3.6 Implement stream-backed non-interactive terminal operation with configured or environment-derived dimensions
 - [x] 3.7 Add terminal lifecycle tests using the virtual backend and parser-level unit tests for key sequences
