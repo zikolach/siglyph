@@ -1,5 +1,6 @@
 package scalatui.demo
 
+import scalatui.ansi.Ansi
 import scalatui.components.{Editor, EditorOptions, SelectItem, SelectList, Text}
 import scalatui.core.{Component, TUI}
 import scalatui.syntax.Equality.*
@@ -54,12 +55,15 @@ private final class DemoRoot(tui: TUI) extends Component:
         case Focus.EditorPane => editor.handleInput(event)
 
   override def render(width: Int): Vector[String] =
-    Vector(
-      "scala-tui multiline editor demo",
-      "Tab focus • ↑↓ actions • Enter submit • Shift+Enter newline • Ctrl+L clear • Esc/Ctrl+C quit",
-      "",
-      if focus === Focus.Actions then "Actions (focused):" else "Actions:"
-    ) ++
+    Vector("scala-tui multiline editor demo") ++
+      Ansi.wrapTextWithAnsi(
+        "Tab focus • ↑↓ actions • Enter submit • Shift+Enter newline • Ctrl+L clear • Esc/Ctrl+C quit",
+        width
+      ) ++
+      Vector(
+        "",
+        if focus === Focus.Actions then "Actions (focused):" else "Actions:"
+      ) ++
       actions.render(width) ++
       Vector("") ++
       messagesText.render(width) ++
