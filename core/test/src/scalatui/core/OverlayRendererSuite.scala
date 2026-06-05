@@ -109,7 +109,7 @@ class OverlayRendererSuite extends munit.FunSuite:
     )
 
     assertEquals(lines.length, 3)
-    assertEquals(Ansi.strip(lines(2)), "menu")
+    assertEquals(Ansi.strip(lines(2)).trim, "menu")
 
   test("bottom anchored overlay may still extend to terminal height"):
     val lines = OverlayRenderer.composite(
@@ -120,4 +120,4 @@ class OverlayRendererSuite extends munit.FunSuite:
     )
 
     assertEquals(lines.length, 10)
-    assertEquals(Ansi.strip(lines(9)), "bottom")
+    assertEquals(Ansi.strip(lines(9)).trim, "bottom")

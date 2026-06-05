@@ -2,10 +2,9 @@ package scalatui.components
 
 import scalatui.ansi.Ansi
 import scalatui.autocomplete.*
-import scalatui.core.InputResult
+import scalatui.core.{InputResult, OverlayOptions, OverlaySize, TUI}
 import scalatui.editing.EditorCursor
 import scalatui.terminal.{KeyModifiers, TerminalInput, TerminalKey, VirtualTerminal}
-import scalatui.core.TUI
 
 class EditorSuite extends munit.FunSuite:
   test("renders focused fake cursor on character and hides it when unfocused"):
@@ -204,3 +203,77 @@ class EditorSuite extends munit.FunSuite:
     editor.setAutocompleteProvider(None)
 
     assertEquals(editor.autocompleteProvider, None)
+
+  test("editor default autocomplete placement appears after single-line editor"):
+    val terminal = VirtualTerminal(40, 10)
+    val editor   = Editor(options = EditorOptions(autocompleteProvider = Some(helpProvider)))
+    val tui      = TUI(terminal)
+    tui.addChild(editor)
+    tui.setFocus(editor)
+    tui.start()
+    terminal.clearWrites()
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("/")))
+    terminal.clearWrites()
+    tui.requestRender(force = true)
+    tui.flushRender()
+
+    val lines = visibleFrameLines(terminal.output)
+    assertEquals(lines.indexWhere(_.contains("/")), 0)
+    assertEquals(lines.indexWhere(_.contains("help")), 1)
+    assertEquals(lines.length, 2)
+
+  test("editor adjacent autocomplete placement tracks multiline editor height"):
+    val terminal = VirtualTerminal(40, 10)
+    val editor   = Editor("first\n/", EditorOptions(autocompleteProvider = Some(helpProvider)))
+    val tui      = TUI(terminal)
+    tui.addChild(editor)
+    tui.setFocus(editor)
+    tui.start()
+    terminal.clearWrites()
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Tab))
+    terminal.clearWrites()
+    tui.requestRender(force = true)
+    tui.flushRender()
+
+    val lines = visibleFrameLines(terminal.output)
+    assertEquals(lines.indexWhere(_.contains("first")), 0)
+    assertEquals(lines.indexWhere(_.contains("/")), 1)
+    assertEquals(lines.indexWhere(_.contains("help")), 2)
+
+  test("editor custom autocomplete placement override is preserved"):
+    val terminal = VirtualTerminal(40, 10)
+    val editor   = Editor(options =
+      EditorOptions(
+        autocompleteProvider = Some(helpProvider),
+        autocompletePlacement = EditorAutocompletePlacement.Custom(OverlayOptions(
+          width = Some(OverlaySize.Absolute(10)),
+          row = Some(OverlaySize.Absolute(5)),
+          col = Some(OverlaySize.Absolute(0))
+        ))
+      )
+    )
+    val tui      = TUI(terminal)
+    tui.addChild(editor)
+    tui.setFocus(editor)
+    tui.start()
+    terminal.clearWrites()
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("/")))
+    terminal.clearWrites()
+    tui.requestRender(force = true)
+    tui.flushRender()
+
+    val lines = visibleFrameLines(terminal.output)
+    assertEquals(lines.indexWhere(_.contains("help")), 5)
+
+  private def helpProvider: AutocompleteProvider =
+    SlashCommandAutocompleteProvider(Vector(SlashCommand("help", Some("Show help"))))
+
+  private def visibleFrameLines(output: String): Vector[String] =
+    val lines = Ansi.strip(output).replace(
+      "\r\n",
+      "\n"
+    ).replace('\r', '\n').split("\n", -1).toVector.map(_.trim)
+    lines.dropWhile(_.isEmpty).reverse.dropWhile(_.isEmpty).reverse

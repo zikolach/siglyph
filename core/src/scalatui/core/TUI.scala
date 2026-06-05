@@ -110,7 +110,7 @@ final class TUI(val terminal: Terminal) extends TUIContext, OverlayHost:
           input => safeRuntimeCallback(handleInput(input)),
           () =>
             safeRuntimeCallback {
-              requestRenderInternal(force = true, clear = true)
+              requestRender()
               flushRender()
             }
         )
@@ -231,7 +231,11 @@ final class TUI(val terminal: Terminal) extends TUIContext, OverlayHost:
     override def isFocused: Boolean =
       lifecycleLock.synchronized(focusedComponent.exists(_ eq entry.component))
 
-    override def update(component: Component, options: Option[OverlayOptions]): Unit =
+    override def update(
+        component: Component,
+        options: Option[OverlayOptions],
+        requestRender: Boolean
+    ): Unit =
       lifecycleLock.synchronized {
         if overlayStack.exists(_ eq entry) then
           val wasFocused = focusedComponent.exists(_ eq entry.component)
@@ -240,7 +244,7 @@ final class TUI(val terminal: Terminal) extends TUIContext, OverlayHost:
           attachContext(component)
           options.foreach(entry.options = _)
           if wasFocused then setFocus(component)
-          requestRender()
+          if requestRender then TUI.this.requestRender()
       }
 
   private def removeOverlay(entry: TUI.OverlayEntry): Unit =
@@ -314,10 +318,13 @@ final class TUI(val terminal: Terminal) extends TUIContext, OverlayHost:
 
     val widthChanged  = (previousWidth !== 0) && (previousWidth !== width)
     val heightChanged = (previousHeight !== 0) && (previousHeight !== height)
-    if previousLines.isEmpty || widthChanged || heightChanged then
-      val shouldClear = clearRequested || widthChanged || heightChanged
+    if previousLines.isEmpty then
+      val shouldClear = clearRequested
       clearRequested = false
       fullRender(newLines, width, height, clear = shouldClear)
+    else if widthChanged || heightChanged then
+      clearRequested = false
+      redrawFromFrameStart(newLines, width, height)
     else
       clearRequested = false
       val firstChanged = firstChangedLine(previousLines, newLines)
@@ -330,6 +337,19 @@ final class TUI(val terminal: Terminal) extends TUIContext, OverlayHost:
     val builder = StringBuilder()
     builder.append(SyncStart)
     if clear then builder.append("\u001b[2J\u001b[H\u001b[3J")
+    builder.append(lines.mkString("\r\n"))
+    builder.append(SyncEnd)
+    terminal.write(builder.result())
+    previousLines = lines
+    previousWidth = width
+    previousHeight = height
+    cursorRow = math.max(0, lines.length - 1)
+
+  private def redrawFromFrameStart(lines: Vector[String], width: Int, height: Int): Unit =
+    val builder = StringBuilder()
+    builder.append(SyncStart)
+    if cursorRow > 0 then builder.append(s"\u001b[${cursorRow}A")
+    builder.append("\r\u001b[J")
     builder.append(lines.mkString("\r\n"))
     builder.append(SyncEnd)
     terminal.write(builder.result())

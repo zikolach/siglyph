@@ -3,7 +3,7 @@ package scalatui.demo
 import scalatui.ansi.Ansi
 import scalatui.autocomplete.{SlashCommand, SlashCommandAutocompleteProvider}
 import scalatui.components.{Editor, EditorOptions, SelectItem, SelectList, Text}
-import scalatui.core.{Component, OverlayOptions, OverlaySize, TUI}
+import scalatui.core.{Component, ComponentFrameBuilder, TUI}
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{TerminalInput, TerminalKey}
 
@@ -66,33 +66,26 @@ private final class DemoRoot(tui: TUI) extends Component:
         case Focus.EditorPane => editor.handleInput(event)
 
   override def render(width: Int): Vector[String] =
-    val renderWidth  = math.max(1, width)
-    val headerLines  = Vector(fit("scala-tui multiline editor demo", renderWidth)) ++
-      Ansi.wrapTextWithAnsi(
-        "Tab focus • ↑↓ actions • Enter submit • Shift+Enter newline • type / for commands • Ctrl+L clear • Esc/Ctrl+C quit",
-        renderWidth
-      )
-    val beforeEditor = headerLines ++
-      Vector(
-        "",
-        fit(if focus === Focus.Actions then "Actions (focused):" else "Actions:", renderWidth)
-      ) ++
-      actions.render(renderWidth) ++
-      Vector("") ++
-      messagesText.render(renderWidth) ++
-      Vector(
-        "",
-        fit(if focus === Focus.EditorPane then "Editor (focused):" else "Editor:", renderWidth)
-      )
-    val editorLines  = editor.render(renderWidth)
-    editor.setAutocompleteOverlayOptions(OverlayOptions(
-      width = Some(OverlaySize.Percent(100)),
-      maxHeight = Some(OverlaySize.Absolute(editor.autocompleteMaxVisible)),
-      row = Some(OverlaySize.Absolute(beforeEditor.length + editorLines.length)),
-      col = Some(OverlaySize.Absolute(0)),
-      focusCapturing = true
+    val renderWidth = math.max(1, width)
+    val frame       = ComponentFrameBuilder(renderWidth)
+    frame.addLines(Vector(fit("scala-tui multiline editor demo", renderWidth)))
+    frame.addLines(Ansi.wrapTextWithAnsi(
+      "Tab focus • ↑↓ actions • Enter submit • Shift+Enter newline • type / for commands • Ctrl+L clear • Esc/Ctrl+C quit",
+      renderWidth
     ))
-    beforeEditor ++ editorLines
+    frame.addLines(Vector(
+      "",
+      fit(if focus === Focus.Actions then "Actions (focused):" else "Actions:", renderWidth)
+    ))
+    frame.addComponent(actions)
+    frame.addLine("")
+    frame.addComponent(messagesText)
+    frame.addLines(Vector(
+      "",
+      fit(if focus === Focus.EditorPane then "Editor (focused):" else "Editor:", renderWidth)
+    ))
+    frame.addComponent(editor)
+    frame.result()
 
   private def fit(value: String, width: Int): String =
     Ansi.truncateToWidth(value, width, "")

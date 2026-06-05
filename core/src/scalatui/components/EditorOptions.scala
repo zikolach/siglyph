@@ -18,8 +18,8 @@ import scalatui.core.{OverlayAnchor, OverlayOptions, OverlaySize}
  *   maximum number of suggestion rows shown by the autocomplete overlay
  * @param autocompleteTrigger
  *   automatic trigger policy for autocomplete requests
- * @param autocompleteOverlayOptions
- *   initial overlay placement used for autocomplete suggestions
+ * @param autocompletePlacement
+ *   placement strategy used for autocomplete suggestions; defaults to editor-adjacent placement
  */
 final case class EditorOptions(
     enterBehavior: EditorEnterBehavior = EditorEnterBehavior.Default,
@@ -28,11 +28,11 @@ final case class EditorOptions(
     autocompleteProvider: Option[AutocompleteProvider] = None,
     autocompleteMaxVisible: Int = 5,
     autocompleteTrigger: EditorAutocompleteTrigger = EditorAutocompleteTrigger.Default,
-    autocompleteOverlayOptions: OverlayOptions = EditorOptions.DefaultAutocompleteOverlayOptions
+    autocompletePlacement: EditorAutocompletePlacement = EditorAutocompletePlacement.Default
 )
 
 object EditorOptions:
-  val DefaultAutocompleteOverlayOptions: OverlayOptions = OverlayOptions(
+  val FallbackAutocompleteOverlayOptions: OverlayOptions = OverlayOptions(
     width = Some(OverlaySize.Percent(100)),
     anchor = OverlayAnchor.BottomLeft,
     focusCapturing = true

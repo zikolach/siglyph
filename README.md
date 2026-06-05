@@ -67,7 +67,7 @@ mill keyTester.run
 
 Default prompt-like behavior submits on `Enter` and inserts a newline on `Shift+Enter`. Editor-like behavior can be configured with `EditorEnterBehavior.NewlineOnEnter()`, where plain `Enter` inserts a newline and `Cmd/Super+Enter` submits. Modified Enter support depends on terminal/parser normalization.
 
-The editor can be configured with `scalatui.autocomplete.AutocompleteProvider` implementations. Suggestions are displayed through the generic TUI overlay stack, and provider lookups use a cancellable callback boundary so applications can bridge file, network, `Future`, or other effect runtimes without adding dependencies to `scala-tui` itself. Slash-command helpers are metadata providers only; applications remain responsible for interpreting submitted commands.
+The editor can be configured with `scalatui.autocomplete.AutocompleteProvider` implementations. Suggestions are displayed through the generic TUI overlay stack and default to editor-adjacent placement, so applications do not need to compute terminal rows for normal editor autocomplete. Provider lookups use a cancellable callback boundary so applications can bridge file, network, `Future`, or other effect runtimes without adding dependencies to `scala-tui` itself. Slash-command helpers are metadata providers only; applications remain responsible for interpreting submitted commands.
 
 The first editor component intentionally still defers undo/kill-ring, large-paste marker compaction, IME cursor markers, and hardware cursor positioning.
 

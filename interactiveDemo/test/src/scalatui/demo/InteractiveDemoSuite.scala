@@ -55,6 +55,20 @@ class InteractiveDemoSuite extends munit.FunSuite:
 
     assert(Ansi.strip(terminal.output).contains("/clear"), terminal.output)
 
+  test("interactive demo keeps autocomplete overlay safe during narrow resize"):
+    val terminal = VirtualTerminal(60, 20)
+    val tui      = TUI(terminal)
+    InteractiveDemo.install(tui)
+    tui.start()
+    terminal.clearWrites()
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("/")))
+    terminal.clearWrites()
+    terminal.resize(12, 8)
+
+    assertWidthSafe(terminal.output, 12)
+    assert(Ansi.strip(terminal.output).contains("help"), "expected suggestions after resize")
+
   private def assertWidthSafe(output: String, width: Int): Unit =
     val visibleLines = Ansi.strip(output).replace("\r\n", "\n").replace('\r', '\n').split("\n", -1)
     visibleLines.foreach { line =>

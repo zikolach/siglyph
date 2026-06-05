@@ -26,21 +26,24 @@ import scalatui.unicode.Unicode
 final class Editor(initialText: String = "", options: EditorOptions = EditorOptions())
     extends Component,
       Focusable,
-      ContextualComponent:
-  private var buffer                                     = EditorBuffer(initialText)
-  private var isFocused                                  = false
-  private var context                                    = Option.empty[TUIContext]
-  private var provider                                   = options.autocompleteProvider
-  private var currentAutocompleteHandle                  = Option.empty[AutocompleteRequestHandle]
-  private var currentAutocompleteOverlay                 = Option.empty[OverlayHandle]
-  private var currentAutocomplete                        = Option.empty[Editor.AutocompleteState]
-  private var autocompleteRequestToken                   = 0L
-  var enterBehavior: EditorEnterBehavior                 = options.enterBehavior
-  var onChange: String => Unit                           = options.onChange
-  var onSubmit: String => Unit                           = options.onSubmit
-  var autocompleteMaxVisible: Int                        = math.max(1, options.autocompleteMaxVisible)
-  var autocompleteTrigger: EditorAutocompleteTrigger     = options.autocompleteTrigger
-  private var autocompleteOverlayOptions: OverlayOptions = options.autocompleteOverlayOptions
+      ContextualComponent,
+      RenderOriginAware:
+  private var buffer                                             = EditorBuffer(initialText)
+  private var isFocused                                          = false
+  private var context                                            = Option.empty[TUIContext]
+  private var provider                                           = options.autocompleteProvider
+  private var currentAutocompleteHandle                          = Option.empty[AutocompleteRequestHandle]
+  private var currentAutocompleteOverlay                         = Option.empty[OverlayHandle]
+  private var currentAutocomplete                                = Option.empty[Editor.AutocompleteState]
+  private var autocompleteRequestToken                           = 0L
+  private var currentRenderOrigin                                = Option.empty[ComponentRenderOrigin]
+  private var lastRenderedVisualHeight                           = 0
+  var enterBehavior: EditorEnterBehavior                         = options.enterBehavior
+  var onChange: String => Unit                                   = options.onChange
+  var onSubmit: String => Unit                                   = options.onSubmit
+  var autocompleteMaxVisible: Int                                = math.max(1, options.autocompleteMaxVisible)
+  var autocompleteTrigger: EditorAutocompleteTrigger             = options.autocompleteTrigger
+  private var autocompletePlacement: EditorAutocompletePlacement = options.autocompletePlacement
 
   /** Current editor text joined with `\n` separators. */
   def text: String = synchronized(buffer.text)
@@ -54,13 +57,15 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
   /** Current autocomplete provider, if configured. */
   def autocompleteProvider: Option[AutocompleteProvider] = synchronized(provider)
 
-  /** Update placement options for the autocomplete suggestion overlay. */
-  def setAutocompleteOverlayOptions(value: OverlayOptions): Unit = synchronized {
-    autocompleteOverlayOptions = value
-    currentAutocomplete.foreach { state =>
-      currentAutocompleteOverlay.foreach(_.update(state.overlay, Some(currentOverlayOptions)))
-    }
+  /** Update autocomplete suggestion placement strategy. */
+  def setAutocompletePlacement(value: EditorAutocompletePlacement): Unit = synchronized {
+    autocompletePlacement = value
+    refreshAutocompleteOverlayPlacement(requestRender = true)
   }
+
+  /** Use explicit placement options for the autocomplete suggestion overlay. */
+  def setAutocompleteOverlayOptions(value: OverlayOptions): Unit =
+    setAutocompletePlacement(EditorAutocompletePlacement.Custom(value))
 
   /** Replace the autocomplete provider and close any active autocomplete UI. */
   def setAutocompleteProvider(value: Option[AutocompleteProvider]): Unit = synchronized {
@@ -85,6 +90,10 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     context = value
   }
 
+  override def renderOrigin_=(value: Option[ComponentRenderOrigin]): Unit = synchronized {
+    currentRenderOrigin = value
+  }
+
   override def focused: Boolean = synchronized(isFocused)
 
   override def focused_=(value: Boolean): Unit = synchronized { isFocused = value }
@@ -98,13 +107,16 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
 
   override def render(width: Int): Vector[String] = synchronized {
     val layout = EditorLayout.fromBuffer(buffer, width)
-    layout.lines.zipWithIndex.map { (line, index) =>
+    lastRenderedVisualHeight = layout.lines.length
+    val lines  = layout.lines.zipWithIndex.map { (line, index) =>
       val rendered =
         if focused && currentAutocomplete.isEmpty && index === layout.cursor.row then
           renderCursor(line)
         else line.text
       Ansi.truncateToWidth(rendered, width, "")
     }
+    refreshAutocompleteOverlayPlacement(requestRender = false)
+    lines
   }
 
   private def handleInputLocked(input: TerminalInput): InputResult =
@@ -306,12 +318,29 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
   private def currentLineBeforeCursor: String =
     Unicode.graphemeClusters(buffer.lines(buffer.cursor.line)).take(buffer.cursor.column).mkString
 
+  private def refreshAutocompleteOverlayPlacement(requestRender: Boolean): Unit =
+    currentAutocomplete.foreach { state =>
+      currentAutocompleteOverlay.foreach(_.update(
+        state.overlay,
+        Some(currentOverlayOptions),
+        requestRender = requestRender
+      ))
+    }
+
   private def currentOverlayOptions: OverlayOptions =
-    autocompleteOverlayOptions.copy(
-      maxHeight = autocompleteOverlayOptions.maxHeight.orElse(
-        Some(OverlaySize.Absolute(autocompleteMaxVisible))
-      )
-    )
+    val base = autocompletePlacement match
+      case EditorAutocompletePlacement.AdjacentToEditor =>
+        currentRenderOrigin match
+          case Some(origin) =>
+            OverlayOptions(
+              width = Some(OverlaySize.Percent(100)),
+              row = Some(OverlaySize.Absolute(origin.row + lastRenderedVisualHeight)),
+              col = Some(OverlaySize.Absolute(origin.col)),
+              focusCapturing = true
+            )
+          case None         => EditorOptions.FallbackAutocompleteOverlayOptions
+      case EditorAutocompletePlacement.Custom(options)  => options
+    base.copy(maxHeight = base.maxHeight.orElse(Some(OverlaySize.Absolute(autocompleteMaxVisible))))
 
   private def renderCursor(line: EditorVisualLine): String =
     val clusters      = Unicode.graphemeClusters(buffer.lines(line.logicalLine))

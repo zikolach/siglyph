@@ -80,7 +80,11 @@ trait OverlayHandle:
   def focus(): Unit
   def unfocus(options: Option[OverlayUnfocusOptions] = None): Unit
   def isFocused: Boolean
-  def update(component: Component, options: Option[OverlayOptions] = None): Unit
+  def update(
+      component: Component,
+      options: Option[OverlayOptions] = None,
+      requestRender: Boolean = true
+  ): Unit
 
 /** Capability for showing and managing overlays without depending on a concrete TUI runtime. */
 trait OverlayHost:
@@ -99,3 +103,43 @@ trait TUIContext:
 /** Component mix-in for receiving or clearing a TUI context when attached to a runtime. */
 trait ContextualComponent:
   def tuiContext_=(value: Option[TUIContext]): Unit
+
+/** Render origin supplied to components that need to place owned overlays near their output. */
+final case class ComponentRenderOrigin(row: Int, col: Int = 0) derives CanEqual
+
+/** Component mix-in for receiving its current terminal-relative render origin. */
+trait RenderOriginAware:
+  def renderOrigin_=(value: Option[ComponentRenderOrigin]): Unit
+
+/**
+ * Small vertical frame builder that tracks render origins for origin-aware components.
+ *
+ * This is intentionally lightweight rather than a retained layout tree: it helps application and
+ * demo code compose line-oriented frames while allowing components such as
+ * [[scalatui.components.Editor]] to place owned overlays adjacent to their rendered area.
+ */
+final class ComponentFrameBuilder(width: Int, startRow: Int = 0, startCol: Int = 0):
+  private val rendered = Vector.newBuilder[String]
+  private var row      = startRow
+
+  /** Append already-rendered lines and advance the tracked row. */
+  def addLines(lines: Vector[String]): Unit =
+    rendered ++= lines
+    row += lines.length
+
+  /** Append one already-rendered line and advance the tracked row. */
+  def addLine(line: String): Unit = addLines(Vector(line))
+
+  /**
+   * Render and append a component, supplying its render origin when it supports that capability.
+   */
+  def addComponent(component: Component): Unit =
+    component match
+      case aware: RenderOriginAware =>
+        aware.renderOrigin_=(Some(ComponentRenderOrigin(row, startCol)))
+      case _                        => ()
+    val lines = component.render(width)
+    addLines(lines)
+
+  /** Return accumulated frame lines. */
+  def result(): Vector[String] = rendered.result()

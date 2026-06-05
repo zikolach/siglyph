@@ -42,7 +42,7 @@ class TUISuite extends munit.FunSuite:
     assert(output.contains("changed" + TUI.LineReset), output)
     assert(!output.contains("first" + TUI.LineReset), output)
 
-  test("width change performs full clear redraw"):
+  test("width change redraws frame in place without clearing scrollback"):
     val terminal = VirtualTerminal(20, 5)
     val tui      = TUI(terminal)
     tui.addChild(MutableLine("hello"))
@@ -52,7 +52,8 @@ class TUISuite extends munit.FunSuite:
     terminal.resize(30, 5)
 
     val output = terminal.output
-    assert(output.contains("\u001b[2J\u001b[H\u001b[3J"), output)
+    assert(output.contains("\r\u001b[J"), output)
+    assert(!output.contains("\u001b[2J\u001b[H\u001b[3J"), output)
     assert(output.contains("hello" + TUI.LineReset), output)
 
   test("over-wide lines are sanitized instead of failing"):
@@ -66,7 +67,7 @@ class TUISuite extends munit.FunSuite:
     assertEquals(tui.sanitizedLineCount, 1)
     assertEquals(tui.lastSanitizedLine.map(_.originalWidth), Some(4))
 
-  test("height change performs full clear redraw"):
+  test("height change redraws frame in place without clearing scrollback"):
     val terminal = VirtualTerminal(20, 5)
     val tui      = TUI(terminal)
     tui.addChild(MutableLine("hello"))
@@ -76,7 +77,8 @@ class TUISuite extends munit.FunSuite:
     terminal.resize(20, 3)
 
     val output = terminal.output
-    assert(output.contains("\u001b[2J\u001b[H\u001b[3J"), output)
+    assert(output.contains("\r\u001b[J"), output)
+    assert(!output.contains("\u001b[2J\u001b[H\u001b[3J"), output)
     assert(output.contains("hello" + TUI.LineReset), output)
 
   test("zero terminal dimensions are clamped before component rendering"):
@@ -347,5 +349,6 @@ class TUISuite extends munit.FunSuite:
 
     terminal.resize(2, 2)
 
-    assert(terminal.output.contains("\u001b[2J\u001b[H\u001b[3J"), terminal.output)
+    assert(terminal.output.contains("\r\u001b[J"), terminal.output)
+    assert(!terminal.output.contains("\u001b[2J\u001b[H\u001b[3J"), terminal.output)
     assert(visibleOutputLines(terminal.output).exists(_.contains("wi")), terminal.output)

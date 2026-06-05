@@ -23,4 +23,6 @@ final class Container extends Component:
     childBuffer.foreach(_.invalidate())
 
   override def render(width: Int): Vector[String] =
-    childBuffer.iterator.flatMap(_.render(width)).toVector
+    val frame = ComponentFrameBuilder(width)
+    childBuffer.foreach(frame.addComponent)
+    frame.result()
