@@ -1,7 +1,7 @@
 # text-editing Specification
 
 ## Purpose
-TBD - created by archiving change scala-tui-port. Update Purpose after archive.
+Defines single-line input and multiline editor behavior, including Unicode-aware editing, pure editor-buffer delegation, paste handling, callbacks, configurable Enter semantics, and autocomplete follow-up scope.
 ## Requirements
 ### Requirement: Single-line input component
 The library SHALL provide a single-line input component with editable text, cursor positioning, horizontal scrolling, submission callbacks, paste insertion, and common readline-style key bindings.

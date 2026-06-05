@@ -1,7 +1,7 @@
 # markdown-rendering Specification
 
 ## Purpose
-TBD - created by archiving change scala-tui-port. Update Purpose after archive.
+Defines the separate pluggable Markdown rendering module, parser-selection constraints, initial Markdown feature scope, and pi-tui Markdown parity tracking expectations.
 ## Requirements
 ### Requirement: Separate Markdown module
 The library SHALL provide Markdown rendering as a separate module from the core renderer and terminal backends.

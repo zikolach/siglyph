@@ -1,7 +1,7 @@
 # developer-api Specification
 
 ## Purpose
-TBD - created by archiving change scala-tui-port. Update Purpose after archive.
+Defines the public project architecture, dependency constraints, cross-platform module model, documentation expectations, demo commands, and API compatibility principles for scala-tui.
 ## Requirements
 ### Requirement: Dependency-light public core
 The library SHALL provide a public core module whose component, rendering, ANSI utility, key model, and test-support APIs do not require Node.js or npm packages. Third-party runtime dependencies MUST be added only after explicit confirmation.
@@ -187,3 +187,33 @@ The editor demo change SHALL include formatting, lint, test, and Native build va
 #### Scenario: Mill quality validation
 - **WHEN** the change is complete
 - **THEN** `mill quality`, `mill __.compile`, `mill core.test`, and Native editor demo build validation pass
+
+### Requirement: Native modules reuse shared sources through Mill configuration
+Scala Native mirror modules SHALL reuse shared JVM/Native implementation sources through Mill source-root configuration rather than symlinked source directories.
+
+#### Scenario: Core Native compiles canonical core sources
+- **WHEN** the `coreNative` module is compiled
+- **THEN** it compiles the canonical `core/src` shared source tree without requiring a `coreNative/src` symlink
+
+#### Scenario: Interactive demo Native compiles canonical demo sources
+- **WHEN** the `interactiveDemoNative` module is compiled
+- **THEN** it compiles the canonical `interactiveDemo/src` shared source tree without requiring an `interactiveDemoNative/src` symlink
+
+#### Scenario: Repository layout avoids symlink mirrors
+- **WHEN** a contributor inspects the repository source directories
+- **THEN** shared JVM/Native implementations appear in one canonical source tree and Native-specific modules do not expose symlink mirrors of that tree
+
+### Requirement: Shared source root cleanup preserves behavior
+Replacing source symlinks with Mill shared source roots SHALL preserve module graph, public APIs, and dependency constraints.
+
+#### Scenario: JVM and Native modules still compile
+- **WHEN** the source-root cleanup is complete
+- **THEN** `mill __.compile` succeeds for JVM and Scala Native modules
+
+#### Scenario: Native interactive demo still links
+- **WHEN** the source-root cleanup is complete
+- **THEN** `mill interactiveNativeDemo.nativeLink` succeeds using the same shared demo implementation
+
+#### Scenario: No runtime dependency is added
+- **WHEN** the Mill build is inspected after this cleanup
+- **THEN** no new third-party runtime dependency is present

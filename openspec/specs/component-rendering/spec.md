@@ -1,7 +1,7 @@
 # component-rendering Specification
 
 ## Purpose
-TBD - created by archiving change scala-tui-port. Update Purpose after archive.
+Defines the component rendering contract, ANSI-aware text utilities, differential rendering behavior, focus flow, overlays, and editor visual layout expectations for terminal UI output.
 ## Requirements
 ### Requirement: Component contract
 The library SHALL expose a component abstraction whose render operation receives the available terminal width and returns ordered terminal lines. Each returned line MUST fit within the requested display width after ANSI and non-printing escape sequences are ignored.

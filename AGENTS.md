@@ -20,14 +20,14 @@ Use OpenSpec for feature work. Active and archived change artifacts live under
 scala-tui/
 ├── build.mill
 ├── core/                  # shared component/core/terminal/unicode/ANSI APIs + tests
-├── coreNative/            # Scala Native mirror of core sources (src symlink)
+├── coreNative/            # Scala Native module compiling shared core/src via Mill
 ├── terminalJvm/           # JVM Unix/stty terminal backend
 ├── terminalNative/        # Scala Native POSIX terminal backend
 ├── markdown/              # pluggable Markdown module shell
 ├── demo/                  # non-interactive stream-render smoke demo
 ├── keyTester/             # JVM interactive key tester
 ├── interactiveDemo/       # shared interactive demo UI/logic
-├── interactiveDemoNative/ # Scala Native mirror of interactiveDemo sources (src symlink)
+├── interactiveDemoNative/ # Native module compiling interactiveDemo/src via Mill
 ├── interactiveJvmDemo/    # JVM interactive demo launcher
 ├── interactiveNativeDemo/ # Scala Native interactive demo launcher
 ├── scripts/               # generation scripts, including Unicode tables
@@ -51,7 +51,9 @@ core
 ```
 
 The public package namespace is `scalatui`. Keep JVM- and Native-specific code
-behind the shared terminal abstractions where possible.
+behind the shared terminal abstractions where possible. Shared JVM/Native sources
+are canonical under `core/src` and `interactiveDemo/src`; Native mirror modules
+reuse them through Mill source-root configuration rather than filesystem symlinks.
 
 ## Build and test
 

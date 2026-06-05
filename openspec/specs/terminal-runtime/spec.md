@@ -1,7 +1,7 @@
 # terminal-runtime Specification
 
 ## Purpose
-TBD - created by archiving change scala-tui-port. Update Purpose after archive.
+Defines the terminal backend abstraction, JVM and Scala Native runtime behavior, input parsing, resize handling, protocol support, and virtual terminal test backend expectations.
 ## Requirements
 ### Requirement: Terminal abstraction
 The library SHALL define a terminal backend abstraction for starting and stopping terminal control, writing output, reading input events, observing resize events, querying dimensions, and controlling cursor and clear operations.

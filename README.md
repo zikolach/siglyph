@@ -70,6 +70,11 @@ The first editor component intentionally defers autocomplete, overlays, undo/kil
 
 ## Development
 
+Import project to IntelliJ IDEA:
+```bash
+mill mill.idea/
+```
+
 ```bash
 mill core.test
 ```
