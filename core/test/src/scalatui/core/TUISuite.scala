@@ -20,6 +20,7 @@ class TUISuite extends munit.FunSuite:
     assert(output.contains(TUI.SyncStart))
     assert(output.contains("hello" + TUI.LineReset))
     assert(output.contains(TUI.SyncEnd))
+    assert(!output.contains("\u001b[2J\u001b[H\u001b[3J"), output)
 
   test("partial render moves to first changed line and writes changed tail"):
     val terminal = VirtualTerminal(20, 5)
@@ -249,3 +250,102 @@ class TUISuite extends munit.FunSuite:
 
     assertEquals(thread.isAlive, false)
     assert(terminal.output.contains("\r\n\u001b[?25h"), terminal.output)
+
+  test("visible overlay is composited over base content"):
+    val terminal = VirtualTerminal(10, 3)
+    val tui      = TUI(terminal)
+    tui.addChild(MutableLine("abcdef"))
+    tui.showOverlay(
+      MutableLine("XYZ"),
+      OverlayOptions(
+        width = Some(OverlaySize.Absolute(3)),
+        row = Some(OverlaySize.Absolute(0)),
+        col = Some(OverlaySize.Absolute(1))
+      )
+    )
+
+    tui.start()
+
+    assert(visibleOutputLines(terminal.output).exists(_.contains("aXYZe")), terminal.output)
+
+  test("non-capturing overlay preserves base input focus"):
+    val terminal    = VirtualTerminal(10, 3)
+    var baseHits    = 0
+    var overlayHits = 0
+    val base        = new Component:
+      override def render(width: Int): Vector[String]                   = Vector("base")
+      override def handleInputResult(input: TerminalInput): InputResult =
+        baseHits += 1
+        InputResult.NoRender
+    val overlay     = new Component:
+      override def render(width: Int): Vector[String]                   = Vector("over")
+      override def handleInputResult(input: TerminalInput): InputResult =
+        overlayHits += 1
+        InputResult.NoRender
+    val tui         = TUI(terminal)
+    tui.addChild(base)
+    tui.setFocus(base)
+    tui.showOverlay(overlay, OverlayOptions(focusCapturing = false))
+    tui.start()
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("x")))
+
+    assertEquals(baseHits, 1)
+    assertEquals(overlayHits, 0)
+
+  test("topmost capturing overlay receives input and restores focus when hidden"):
+    val terminal     = VirtualTerminal(10, 3)
+    var baseFocused  = false
+    var firstHits    = 0
+    var secondHits   = 0
+    val base         = new Component with Focusable:
+      override def render(width: Int): Vector[String] = Vector("base")
+      override def focused: Boolean                   = baseFocused
+      override def focused_=(value: Boolean): Unit    = baseFocused = value
+    val first        = new Component:
+      override def render(width: Int): Vector[String]                   = Vector("one")
+      override def handleInputResult(input: TerminalInput): InputResult =
+        firstHits += 1
+        InputResult.NoRender
+    val second       = new Component:
+      override def render(width: Int): Vector[String]                   = Vector("two")
+      override def handleInputResult(input: TerminalInput): InputResult =
+        secondHits += 1
+        InputResult.NoRender
+    val tui          = TUI(terminal)
+    tui.addChild(base)
+    tui.setFocus(base)
+    val firstHandle  = tui.showOverlay(
+      first,
+      OverlayOptions(row = Some(OverlaySize.Absolute(0)), col = Some(OverlaySize.Absolute(0)))
+    )
+    val secondHandle = tui.showOverlay(
+      second,
+      OverlayOptions(row = Some(OverlaySize.Absolute(0)), col = Some(OverlaySize.Absolute(0)))
+    )
+    tui.start()
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("x")))
+    secondHandle.hide()
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("y")))
+    firstHandle.hide()
+
+    assertEquals(secondHits, 1)
+    assertEquals(firstHits, 1)
+    assertEquals(baseFocused, true)
+
+  test("overlay layout is recomputed after resize"):
+    val terminal = VirtualTerminal(20, 4)
+    val tui      = TUI(terminal)
+    tui.addChild(MutableLine("base"))
+    tui.showOverlay(
+      MutableLine("wide"),
+      OverlayOptions(width = Some(OverlaySize.Percent(100)), anchor = OverlayAnchor.BottomLeft)
+    )
+    tui.start()
+    terminal.clearWrites()
+
+    terminal.resize(2, 2)
+
+    assert(terminal.output.contains("\u001b[2J\u001b[H\u001b[3J"), terminal.output)
+    assert(visibleOutputLines(terminal.output).exists(_.contains("wi")), terminal.output)

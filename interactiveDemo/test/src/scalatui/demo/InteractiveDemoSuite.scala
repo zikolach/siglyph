@@ -29,6 +29,32 @@ class InteractiveDemoSuite extends munit.FunSuite:
     assertWidthSafe(terminal.output, 1)
     assert(terminal.output.nonEmpty, terminal.output)
 
+  test("interactive demo shows slash-command autocomplete overlay"):
+    val terminal = VirtualTerminal(60, 20)
+    val tui      = TUI(terminal)
+    InteractiveDemo.install(tui)
+    tui.start()
+    terminal.clearWrites()
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("/")))
+    terminal.clearWrites()
+    tui.requestRender(force = true)
+    tui.flushRender()
+
+    val suggestions = Ansi.strip(terminal.output)
+    assert(suggestions.contains("help"), terminal.output)
+    assert(suggestions.contains("clear"), terminal.output)
+    val lines       = suggestions.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1).toVector
+    val editorLine  = lines.indexWhere(_.contains("Editor"))
+    val helpLine    = lines.indexWhere(_.contains("help"))
+    assert(editorLine >= 0, terminal.output)
+    assert(helpLine > editorLine, terminal.output)
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Down))
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Enter))
+
+    assert(Ansi.strip(terminal.output).contains("/clear"), terminal.output)
+
   private def assertWidthSafe(output: String, width: Int): Unit =
     val visibleLines = Ansi.strip(output).replace("\r\n", "\n").replace('\r', '\n').split("\n", -1)
     visibleLines.foreach { line =>

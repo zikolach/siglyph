@@ -1,9 +1,11 @@
 package scalatui.components
 
 import scalatui.ansi.Ansi
+import scalatui.autocomplete.*
 import scalatui.core.InputResult
 import scalatui.editing.EditorCursor
-import scalatui.terminal.{KeyModifiers, TerminalInput, TerminalKey}
+import scalatui.terminal.{KeyModifiers, TerminalInput, TerminalKey, VirtualTerminal}
+import scalatui.core.TUI
 
 class EditorSuite extends munit.FunSuite:
   test("renders focused fake cursor on character and hides it when unfocused"):
@@ -125,3 +127,80 @@ class EditorSuite extends munit.FunSuite:
       editor.handleInputResult(TerminalInput.Key(TerminalKey.Left)),
       InputResult.NoRender
     )
+
+  test("editor slash command autocomplete renders overlay and applies completion"):
+    val provider = SlashCommandAutocompleteProvider(Vector(
+      SlashCommand("help", Some("Show help")),
+      SlashCommand("quit", Some("Exit"))
+    ))
+    val terminal = VirtualTerminal(40, 8)
+    val editor   = Editor(options = EditorOptions(autocompleteProvider = Some(provider)))
+    val tui      = TUI(terminal)
+    tui.addChild(editor)
+    tui.setFocus(editor)
+    tui.start()
+    terminal.clearWrites()
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("/")))
+
+    assert(Ansi.strip(terminal.output).contains("help"), terminal.output)
+    assert(Ansi.strip(terminal.output).contains("quit"), terminal.output)
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Down))
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Enter))
+
+    assertEquals(editor.text, "/quit ")
+
+  test("editor autocomplete ignores stale async suggestions and cancels pending handles"):
+    final class ManualProvider extends AutocompleteProvider:
+      var callback  = Option.empty[AutocompleteCallback]
+      var cancelled = 0
+      override def requestSuggestions(
+          request: AutocompleteRequest,
+          callback: AutocompleteCallback
+      ): AutocompleteRequestHandle =
+        this.callback = Some(callback)
+        () => cancelled += 1
+
+      override def applyCompletion(request: CompletionRequest): CompletionResult =
+        AutocompleteProvider.defaultCompletion(request)
+
+    val provider = ManualProvider()
+    val editor   = Editor(
+      "/",
+      EditorOptions(
+        autocompleteProvider = Some(provider),
+        autocompleteTrigger = EditorAutocompleteTrigger.ExplicitTabOnly
+      )
+    )
+
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Tab))
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("x")))
+    provider.callback.foreach(_.complete(Some(AutocompleteSuggestions(
+      Vector(AutocompleteItem("help", "help")),
+      "/"
+    ))))
+
+    assertEquals(provider.cancelled, 1)
+    assertEquals(editor.text, "/x")
+
+  test("editor autocomplete closes empty suggestions and provider replacement cancels request"):
+    final class EmptyProvider extends AutocompleteProvider:
+      var cancelled = 0
+      override def requestSuggestions(
+          request: AutocompleteRequest,
+          callback: AutocompleteCallback
+      ): AutocompleteRequestHandle =
+        callback.complete(None)
+        () => cancelled += 1
+
+      override def applyCompletion(request: CompletionRequest): CompletionResult =
+        AutocompleteProvider.defaultCompletion(request)
+
+    val provider = EmptyProvider()
+    val editor   = Editor("/", EditorOptions(autocompleteProvider = Some(provider)))
+
+    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Tab)), InputResult.Render)
+    editor.setAutocompleteProvider(None)
+
+    assertEquals(editor.autocompleteProvider, None)

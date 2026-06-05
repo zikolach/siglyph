@@ -26,9 +26,12 @@ When porting a feature:
 ## Intentional deviations
 
 - Components receive typed terminal input events rather than raw escape strings where practical.
-- Components may report a minimal `InputResult` from input handling; richer focus and overlay command APIs are intentionally deferred until autocomplete/overlay work creates concrete pressure.
+- Components may report a minimal `InputResult` from input handling. Overlay work now adds a small `TUIContext`/`OverlayHost` capability instead of passing concrete runtime internals into components.
 - Multiline editing starts with a pure logical `EditorBuffer` and a rendered `Editor` MVP. The Scala editor consumes typed terminal input, renders a fake cursor inside component output, and keeps terminal display layout separate from the logical buffer.
-- The first rendered editor intentionally ports only a small `pi-tui` subset: wrapping, Unicode-aware cursor placement, core editing keys, callbacks, and configurable Enter behavior. Autocomplete/overlays, undo/kill-ring, large-paste markers, IME cursor markers, and hardware cursor positioning remain explicit follow-ups.
+- The rendered editor now ports wrapping, Unicode-aware cursor placement, core editing keys, callbacks, configurable Enter behavior, and overlay-backed autocomplete. Undo/kill-ring, large-paste markers, IME cursor markers, and hardware cursor positioning remain explicit follow-ups.
+- `pi-tui` autocomplete uses async promises plus `AbortSignal`. `scala-tui` intentionally does not parameterize the full runtime with `F[_]`; it exposes a cancellable callback-style `AutocompleteProvider` boundary that applications can adapt from `Future`, file/network work, or external effect runtimes without adding core dependencies.
+- `pi-tui` includes slash-command autocomplete helpers, but command execution belongs to the application. `scala-tui` mirrors that separation: slash-command helpers produce suggestions and completions only.
 - Markdown is separated into a pluggable module instead of being part of the core module.
 - JVM raw mode initially uses `stty` rather than JLine; JLine would require explicit dependency approval.
 - Resize hardening intentionally improves on `pi-tui`'s stop-then-throw behavior for over-wide rendered lines: `scala-tui` keeps component width contracts testable, but the runtime sanitizes final over-wide output so normal interactive sessions survive narrow terminal resizes.
+- Overlay positioning follows `pi-tui`'s hybrid model: width and max-height resolve against current terminal dimensions; absolute row/column values win over percentages, percentages win over anchors, offsets are applied, and margins clamp final placement.

@@ -22,7 +22,7 @@ The first usable milestone targets:
 - Core renderer foundation.
 - MVP components: `Text`, `Box`, `Spacer`, `SelectList`, and `Input`.
 
-Autocomplete, images, and richer Markdown are planned after the first milestone. The multiline editor now starts with a pure `EditorBuffer` model plus a rendered `Editor` component in `core`, keeping text mutation and visual layout testable. Markdown will live in a separate pluggable module so parser dependencies can be evaluated explicitly for JVM and Native.
+Images and richer Markdown are planned after the first milestone. The multiline editor now starts with a pure `EditorBuffer` model plus a rendered `Editor` component in `core`, keeping text mutation and visual layout testable. The core runtime also includes a generic overlay stack and editor autocomplete contracts for dependency-free suggestions. Markdown will live in a separate pluggable module so parser dependencies can be evaluated explicitly for JVM and Native.
 
 ## Demos
 
@@ -44,12 +44,13 @@ Build the Scala Native interactive demo:
 mill interactiveNativeDemo.nativeLink
 ```
 
-The interactive demo now showcases the multiline editor. Controls are:
+The interactive demo now showcases the multiline editor, overlay-backed slash-command autocomplete, and resize-safe rendering. Controls are:
 
 - `Tab` switches focus between actions and editor
 - `↑` / `↓` move through actions when the action list is focused
-- `Enter` submits editor text or selects the focused action
+- `Enter` submits editor text, selects the focused action, or accepts the selected autocomplete suggestion
 - `Shift+Enter` inserts a newline in the editor when the terminal reports a normalized modified Enter event
+- Type `/` in the editor to show application-supplied slash-command suggestions; `↑` / `↓` navigate suggestions, `Enter` or `Tab` accepts, and `Esc` cancels
 - `Ctrl+A` / `Ctrl+E`, arrows, `Home` / `End`, `Backspace`, `Delete`, `Ctrl+K`, and `Ctrl+W` edit the multiline buffer
 - `Ctrl+L` clears submitted messages
 - `Esc` or `Ctrl+C` exits and restores terminal state
@@ -66,7 +67,9 @@ mill keyTester.run
 
 Default prompt-like behavior submits on `Enter` and inserts a newline on `Shift+Enter`. Editor-like behavior can be configured with `EditorEnterBehavior.NewlineOnEnter()`, where plain `Enter` inserts a newline and `Cmd/Super+Enter` submits. Modified Enter support depends on terminal/parser normalization.
 
-The first editor component intentionally defers autocomplete, overlays, undo/kill-ring, large-paste marker compaction, IME cursor markers, and hardware cursor positioning.
+The editor can be configured with `scalatui.autocomplete.AutocompleteProvider` implementations. Suggestions are displayed through the generic TUI overlay stack, and provider lookups use a cancellable callback boundary so applications can bridge file, network, `Future`, or other effect runtimes without adding dependencies to `scala-tui` itself. Slash-command helpers are metadata providers only; applications remain responsible for interpreting submitted commands.
+
+The first editor component intentionally still defers undo/kill-ring, large-paste marker compaction, IME cursor markers, and hardware cursor positioning.
 
 ## Resize and narrow terminals
 

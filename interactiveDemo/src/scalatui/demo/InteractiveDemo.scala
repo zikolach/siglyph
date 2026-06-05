@@ -1,8 +1,9 @@
 package scalatui.demo
 
 import scalatui.ansi.Ansi
+import scalatui.autocomplete.{SlashCommand, SlashCommandAutocompleteProvider}
 import scalatui.components.{Editor, EditorOptions, SelectItem, SelectList, Text}
-import scalatui.core.{Component, TUI}
+import scalatui.core.{Component, OverlayOptions, OverlaySize, TUI}
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{TerminalInput, TerminalKey}
 
@@ -21,7 +22,16 @@ private final class DemoRoot(tui: TUI) extends Component:
   private var focus        = Focus.EditorPane
   private var messages     = Vector.empty[String]
   private val messagesText = Text("Submitted: (none)", paddingX = 0)
-  private val editor       = Editor(options = EditorOptions(onSubmit = addMessage))
+  private val editor       = Editor(options =
+    EditorOptions(
+      onSubmit = addMessage,
+      autocompleteProvider = Some(SlashCommandAutocompleteProvider(Vector(
+        SlashCommand("help", Some("Show demo help")),
+        SlashCommand("clear", Some("Clear submitted messages")),
+        SlashCommand("quit", Some("Exit the demo"))
+      )))
+    )
+  )
   private val actions      = SelectList(
     Vector(
       SelectItem("submit", "Submit editor text"),
@@ -41,6 +51,7 @@ private final class DemoRoot(tui: TUI) extends Component:
       case _        => ()
 
   updateFocus()
+  editor.tuiContext_=(Some(tui))
 
   override def handleInput(event: TerminalInput): Unit = event match
     case TerminalInput.Key(TerminalKey.Tab, _)                                      =>
@@ -55,12 +66,13 @@ private final class DemoRoot(tui: TUI) extends Component:
         case Focus.EditorPane => editor.handleInput(event)
 
   override def render(width: Int): Vector[String] =
-    val renderWidth = math.max(1, width)
-    Vector(fit("scala-tui multiline editor demo", renderWidth)) ++
+    val renderWidth  = math.max(1, width)
+    val headerLines  = Vector(fit("scala-tui multiline editor demo", renderWidth)) ++
       Ansi.wrapTextWithAnsi(
-        "Tab focus • ↑↓ actions • Enter submit • Shift+Enter newline • Ctrl+L clear • Esc/Ctrl+C quit",
+        "Tab focus • ↑↓ actions • Enter submit • Shift+Enter newline • type / for commands • Ctrl+L clear • Esc/Ctrl+C quit",
         renderWidth
-      ) ++
+      )
+    val beforeEditor = headerLines ++
       Vector(
         "",
         fit(if focus === Focus.Actions then "Actions (focused):" else "Actions:", renderWidth)
@@ -71,8 +83,16 @@ private final class DemoRoot(tui: TUI) extends Component:
       Vector(
         "",
         fit(if focus === Focus.EditorPane then "Editor (focused):" else "Editor:", renderWidth)
-      ) ++
-      editor.render(renderWidth)
+      )
+    val editorLines  = editor.render(renderWidth)
+    editor.setAutocompleteOverlayOptions(OverlayOptions(
+      width = Some(OverlaySize.Percent(100)),
+      maxHeight = Some(OverlaySize.Absolute(editor.autocompleteMaxVisible)),
+      row = Some(OverlaySize.Absolute(beforeEditor.length + editorLines.length)),
+      col = Some(OverlaySize.Absolute(0)),
+      focusCapturing = true
+    ))
+    beforeEditor ++ editorLines
 
   private def fit(value: String, width: Int): String =
     Ansi.truncateToWidth(value, width, "")
@@ -80,9 +100,19 @@ private final class DemoRoot(tui: TUI) extends Component:
   private def addMessage(value: String): Unit =
     val trimmed = value.trim
     if trimmed.nonEmpty then
-      messages :+= value
-      editor.setText("")
-      updateMessages()
+      if trimmed === "/clear" then
+        messages = Vector.empty
+        editor.setText("")
+        updateMessages()
+      else if trimmed === "/quit" then tui.requestExit()
+      else if trimmed === "/help" then
+        messages :+= "Slash commands: /help, /clear, /quit"
+        editor.setText("")
+        updateMessages()
+      else
+        messages :+= value
+        editor.setText("")
+        updateMessages()
 
   private def updateMessages(): Unit =
     messagesText.text =

@@ -4,29 +4,46 @@ import scalatui.ansi.Ansi
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{Terminal, TerminalInput, TerminalKey}
 
+import scala.collection.mutable.ArrayBuffer
+
 /** Main terminal UI runtime with a small differential renderer. */
-final class TUI(val terminal: Terminal):
-  private val root                                = Container()
-  private val lifecycleLock                       = Object()
-  private var previousLines                       = Vector.empty[String]
-  private var previousWidth                       = 0
-  private var previousHeight                      = 0
-  private var cursorRow                           = 0
-  private var focusedComponent: Option[Component] = None
-  private var running                             = false
-  private var exitRequested                       = false
-  private var renderRequested                     = false
-  private var sanitizationCount                   = 0
-  private var lastSanitization                    = Option.empty[TUI.RenderSanitization]
-  private var runtimeFailure                      = Option.empty[Throwable]
+final class TUI(val terminal: Terminal) extends TUIContext, OverlayHost:
+  private val root                                    = Container()
+  private val lifecycleLock                           = Object()
+  private val overlayStack                            = ArrayBuffer.empty[TUI.OverlayEntry]
+  private var previousLines                           = Vector.empty[String]
+  private var previousWidth                           = 0
+  private var previousHeight                          = 0
+  private var cursorRow                               = 0
+  private var focusedComponent: Option[Component]     = None
+  private var baseFocusedComponent: Option[Component] = None
+  private var running                                 = false
+  private var exitRequested                           = false
+  private var renderRequested                         = false
+  private var clearRequested                          = false
+  private var sanitizationCount                       = 0
+  private var lastSanitization                        = Option.empty[TUI.RenderSanitization]
+  private var runtimeFailure                          = Option.empty[Throwable]
+  private var nextOverlayId                           = 0L
+  private var nextFocusOrder                          = 0L
 
   var handlesControlC: Boolean = true
   var exitsOnEscape: Boolean   = false
 
-  def addChild(component: Component): Unit       = root.addChild(component)
-  def removeChild(component: Component): Boolean = root.removeChild(component)
-  def clear(): Unit                              = root.clear()
-  def children: Vector[Component]                = root.children
+  def addChild(component: Component): Unit =
+    attachContext(component)
+    root.addChild(component)
+
+  def removeChild(component: Component): Boolean =
+    val removed = root.removeChild(component)
+    if removed then detachContext(component)
+    removed
+
+  def clear(): Unit =
+    root.children.foreach(detachContext)
+    root.clear()
+
+  def children: Vector[Component] = root.children
 
   /** Number of final rendered lines sanitized because they exceeded terminal width. */
   def sanitizedLineCount: Int = lifecycleLock.synchronized(sanitizationCount)
@@ -35,16 +52,48 @@ final class TUI(val terminal: Terminal):
   def lastSanitizedLine: Option[TUI.RenderSanitization] =
     lifecycleLock.synchronized(lastSanitization)
 
-  def setFocus(component: Component | Null): Unit =
+  override def setFocus(component: Component | Null): Unit =
     focusedComponent.foreach {
       case focusable: Focusable => focusable.focused = false
       case _                    => ()
     }
     focusedComponent = Option(component)
+    if !focusedComponent.exists(isOverlayComponent) then baseFocusedComponent = focusedComponent
     focusedComponent.foreach {
       case focusable: Focusable => focusable.focused = true
       case _                    => ()
     }
+
+  override def overlays: OverlayHost = this
+
+  override def showOverlay(
+      component: Component,
+      options: OverlayOptions = OverlayOptions()
+  ): OverlayHandle =
+    lifecycleLock.synchronized {
+      attachContext(component)
+      nextOverlayId += 1
+      nextFocusOrder += 1
+      val entry = TUI.OverlayEntry(
+        id = OverlayId(nextOverlayId),
+        component = component,
+        options = options,
+        preFocus = focusedComponent,
+        hidden = false,
+        focusOrder = nextFocusOrder
+      )
+      overlayStack += entry
+      if entry.options.focusCapturing && isOverlayVisible(entry) then focusOverlay(entry)
+      requestRender()
+      makeOverlayHandle(entry)
+    }
+
+  override def hideOverlay(): Unit = lifecycleLock.synchronized {
+    topVisibleOverlay.foreach(removeOverlay)
+  }
+
+  override def hasOverlay: Boolean =
+    lifecycleLock.synchronized(overlayStack.exists(isOverlayVisible))
 
   def start(): Unit =
     val shouldStart = lifecycleLock.synchronized {
@@ -61,12 +110,12 @@ final class TUI(val terminal: Terminal):
           input => safeRuntimeCallback(handleInput(input)),
           () =>
             safeRuntimeCallback {
-              requestRender(force = true)
+              requestRenderInternal(force = true, clear = true)
               flushRender()
             }
         )
         terminal.hideCursor()
-        requestRender(force = true)
+        requestRenderInternal(force = true, clear = false)
         flushRender()
       catch
         case e: Throwable =>
@@ -82,7 +131,7 @@ final class TUI(val terminal: Terminal):
     finally stop()
     runtimeFailure.foreach(throw _)
 
-  def requestExit(): Unit = lifecycleLock.synchronized {
+  override def requestExit(): Unit = lifecycleLock.synchronized {
     exitRequested = true
     lifecycleLock.notifyAll()
   }
@@ -96,16 +145,22 @@ final class TUI(val terminal: Terminal):
       lifecycleLock.notifyAll()
   }
 
-  def requestRender(force: Boolean = false): Unit = lifecycleLock.synchronized {
-    if force then
-      previousLines = Vector.empty
-      previousWidth = -1
-      previousHeight = -1
-      cursorRow = 0
-    renderRequested = true
+  override def requestRender(force: Boolean = false): Unit = lifecycleLock.synchronized {
+    requestRenderInternal(force = force, clear = false)
   }
 
-  def flushRender(): Unit = lifecycleLock.synchronized {
+  private def requestRenderInternal(force: Boolean, clear: Boolean): Unit =
+    lifecycleLock.synchronized {
+      if force then
+        previousLines = Vector.empty
+        previousWidth = if clear then -1 else 0
+        previousHeight = if clear then -1 else 0
+        cursorRow = 0
+      if clear then clearRequested = true
+      renderRequested = true
+    }
+
+  override def flushRender(): Unit = lifecycleLock.synchronized {
     if renderRequested then
       renderRequested = false
       renderNow()
@@ -115,7 +170,7 @@ final class TUI(val terminal: Terminal):
     if handlesControlC && isCtrl(input, "c") then requestExit()
     else if exitsOnEscape && (input === TerminalInput.Key(TerminalKey.Escape)) then requestExit()
     else
-      focusedComponent.map(_.handleInputResult(input)).foreach {
+      inputTarget.map(_.handleInputResult(input)).foreach {
         case InputResult.Ignored               => ()
         case InputResult.Handled(shouldRender) =>
           if shouldRender then
@@ -124,6 +179,114 @@ final class TUI(val terminal: Terminal):
         case InputResult.Exit                  => requestExit()
       }
   }
+
+  private def inputTarget: Option[Component] =
+    topCapturingOverlay.map(_.component).orElse(focusedComponent)
+
+  private def renderOverlays(baseLines: Vector[String], width: Int, height: Int): Vector[String] =
+    val rendered = overlayStack.toVector
+      .filter(isOverlayVisible)
+      .sortBy(_.focusOrder)
+      .flatMap { entry =>
+        val initialLayout = OverlayRenderer.resolve(entry.options, overlayHeight = 0, width, height)
+        val rawLines      = entry.component.render(initialLayout.width)
+        val clippedLines  = initialLayout.maxHeight.fold(rawLines)(rawLines.take)
+        val layout        = OverlayRenderer.resolve(entry.options, clippedLines.length, width, height)
+        Option.when(clippedLines.nonEmpty)(clippedLines -> layout)
+      }
+    OverlayRenderer.composite(baseLines, rendered, width, height)
+
+  private def makeOverlayHandle(entry: TUI.OverlayEntry): OverlayHandle = new OverlayHandle:
+    override def id: OverlayId = entry.id
+
+    override def hide(): Unit = lifecycleLock.synchronized(removeOverlay(entry))
+
+    override def setHidden(hidden: Boolean): Unit = lifecycleLock.synchronized {
+      if overlayStack.exists(_ eq entry) && (entry.hidden !== hidden) then
+        entry.hidden = hidden
+        if hidden && focusedComponent.exists(_ eq entry.component) then restoreFocusAfter(entry)
+        else if !hidden && entry.options.focusCapturing && isOverlayVisible(entry) then
+          focusOverlay(entry)
+        requestRender()
+    }
+
+    override def isHidden: Boolean = lifecycleLock.synchronized(entry.hidden)
+
+    override def focus(): Unit = lifecycleLock.synchronized {
+      if overlayStack.exists(_ eq entry) && entry.options.focusCapturing && isOverlayVisible(entry)
+      then
+        focusOverlay(entry)
+        requestRender()
+    }
+
+    override def unfocus(options: Option[OverlayUnfocusOptions]): Unit =
+      lifecycleLock.synchronized {
+        if focusedComponent.exists(_ eq entry.component) then
+          options match
+            case Some(value) => setFocus(value.target)
+            case None        => restoreFocusAfter(entry)
+          requestRender()
+      }
+
+    override def isFocused: Boolean =
+      lifecycleLock.synchronized(focusedComponent.exists(_ eq entry.component))
+
+    override def update(component: Component, options: Option[OverlayOptions]): Unit =
+      lifecycleLock.synchronized {
+        if overlayStack.exists(_ eq entry) then
+          val wasFocused = focusedComponent.exists(_ eq entry.component)
+          detachContext(entry.component)
+          entry.component = component
+          attachContext(component)
+          options.foreach(entry.options = _)
+          if wasFocused then setFocus(component)
+          requestRender()
+      }
+
+  private def removeOverlay(entry: TUI.OverlayEntry): Unit =
+    val index = overlayStack.indexWhere(_ eq entry)
+    if index >= 0 then
+      val wasFocused = focusedComponent.exists(_ eq entry.component)
+      overlayStack.remove(index)
+      detachContext(entry.component)
+      if wasFocused then restoreFocusAfter(entry)
+      requestRender()
+
+  private def restoreFocusAfter(entry: TUI.OverlayEntry): Unit =
+    val fallback = topCapturingOverlay.filterNot(
+      _ eq entry
+    ).map(_.component).orElse(entry.preFocus).orElse(baseFocusedComponent)
+    setFocus(fallback.orNull)
+
+  private def focusOverlay(entry: TUI.OverlayEntry): Unit =
+    nextFocusOrder += 1
+    entry.focusOrder = nextFocusOrder
+    setFocus(entry.component)
+
+  private def topCapturingOverlay: Option[TUI.OverlayEntry] =
+    overlayStack.filter(entry => entry.options.focusCapturing && isOverlayVisible(entry)).sortBy(
+      _.focusOrder
+    ).lastOption
+
+  private def topVisibleOverlay: Option[TUI.OverlayEntry] =
+    overlayStack.filter(isOverlayVisible).sortBy(_.focusOrder).lastOption
+
+  private def isOverlayVisible(entry: TUI.OverlayEntry): Boolean =
+    !entry.hidden && entry.options.visible(
+      positiveDimension(terminal.columns),
+      positiveDimension(terminal.rows)
+    )
+
+  private def isOverlayComponent(component: Component): Boolean =
+    overlayStack.exists(_.component eq component)
+
+  private def attachContext(component: Component): Unit = component match
+    case contextual: ContextualComponent => contextual.tuiContext_=(Some(this))
+    case _                               => ()
+
+  private def detachContext(component: Component): Unit = component match
+    case contextual: ContextualComponent => contextual.tuiContext_=(None)
+    case _                               => ()
 
   private def safeRuntimeCallback(action: => Unit): Unit =
     try action
@@ -143,16 +306,20 @@ final class TUI(val terminal: Terminal):
     case _                                                          => false
 
   private def renderNow(): Unit =
-    val width    = positiveDimension(terminal.columns)
-    val height   = positiveDimension(terminal.rows)
-    val rawLines = root.render(width)
-    val newLines = applyLineResets(sanitizeLines(rawLines, width))
+    val width        = positiveDimension(terminal.columns)
+    val height       = positiveDimension(terminal.rows)
+    val rawLines     = root.render(width)
+    val overlayLines = renderOverlays(rawLines, width, height)
+    val newLines     = applyLineResets(sanitizeLines(overlayLines, width))
 
     val widthChanged  = (previousWidth !== 0) && (previousWidth !== width)
     val heightChanged = (previousHeight !== 0) && (previousHeight !== height)
     if previousLines.isEmpty || widthChanged || heightChanged then
-      fullRender(newLines, width, height, clear = widthChanged || heightChanged)
+      val shouldClear = clearRequested || widthChanged || heightChanged
+      clearRequested = false
+      fullRender(newLines, width, height, clear = shouldClear)
     else
+      clearRequested = false
       val firstChanged = firstChangedLine(previousLines, newLines)
       if firstChanged >= 0 then partialRender(newLines, firstChanged)
       previousLines = newLines
@@ -213,6 +380,15 @@ final class TUI(val terminal: Terminal):
     lines.map(_ + LineReset)
 
 object TUI:
+  private final class OverlayEntry(
+      val id: OverlayId,
+      var component: Component,
+      var options: OverlayOptions,
+      val preFocus: Option[Component],
+      var hidden: Boolean,
+      var focusOrder: Long
+  )
+
   final case class RenderSanitization(
       lineIndex: Int,
       originalWidth: Int,
