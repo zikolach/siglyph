@@ -31,3 +31,4 @@ When porting a feature:
 - The first rendered editor intentionally ports only a small `pi-tui` subset: wrapping, Unicode-aware cursor placement, core editing keys, callbacks, and configurable Enter behavior. Autocomplete/overlays, undo/kill-ring, large-paste markers, IME cursor markers, and hardware cursor positioning remain explicit follow-ups.
 - Markdown is separated into a pluggable module instead of being part of the core module.
 - JVM raw mode initially uses `stty` rather than JLine; JLine would require explicit dependency approval.
+- Resize hardening intentionally improves on `pi-tui`'s stop-then-throw behavior for over-wide rendered lines: `scala-tui` keeps component width contracts testable, but the runtime sanitizes final over-wide output so normal interactive sessions survive narrow terminal resizes.

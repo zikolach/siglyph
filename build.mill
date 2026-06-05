@@ -93,6 +93,11 @@ object keyTester extends ScalaTuiModule {
 
 object interactiveDemo extends ScalaTuiModule {
   def moduleDeps = Seq(core)
+
+  object test extends ScalaTests {
+    def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
+    def testFramework = "munit.Framework"
+  }
 }
 
 object interactiveDemoNative extends ScalaNativeModule {

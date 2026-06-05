@@ -10,11 +10,15 @@ final class TUI(val terminal: Terminal):
   private val lifecycleLock                       = Object()
   private var previousLines                       = Vector.empty[String]
   private var previousWidth                       = 0
+  private var previousHeight                      = 0
   private var cursorRow                           = 0
   private var focusedComponent: Option[Component] = None
   private var running                             = false
   private var exitRequested                       = false
   private var renderRequested                     = false
+  private var sanitizationCount                   = 0
+  private var lastSanitization                    = Option.empty[TUI.RenderSanitization]
+  private var runtimeFailure                      = Option.empty[Throwable]
 
   var handlesControlC: Boolean = true
   var exitsOnEscape: Boolean   = false
@@ -23,6 +27,13 @@ final class TUI(val terminal: Terminal):
   def removeChild(component: Component): Boolean = root.removeChild(component)
   def clear(): Unit                              = root.clear()
   def children: Vector[Component]                = root.children
+
+  /** Number of final rendered lines sanitized because they exceeded terminal width. */
+  def sanitizedLineCount: Int = lifecycleLock.synchronized(sanitizationCount)
+
+  /** Most recent final rendered line sanitization diagnostic, if any occurred. */
+  def lastSanitizedLine: Option[TUI.RenderSanitization] =
+    lifecycleLock.synchronized(lastSanitization)
 
   def setFocus(component: Component | Null): Unit =
     focusedComponent.foreach {
@@ -40,16 +51,19 @@ final class TUI(val terminal: Terminal):
       if running then false
       else
         exitRequested = false
+        runtimeFailure = None
         running = true
         true
     }
     if shouldStart then
       try
         terminal.start(
-          handleInput,
+          input => safeRuntimeCallback(handleInput(input)),
           () =>
-            requestRender(force = true)
-            flushRender()
+            safeRuntimeCallback {
+              requestRender(force = true)
+              flushRender()
+            }
         )
         terminal.hideCursor()
         requestRender(force = true)
@@ -66,6 +80,7 @@ final class TUI(val terminal: Terminal):
         while running && !exitRequested do lifecycleLock.wait()
       }
     finally stop()
+    runtimeFailure.foreach(throw _)
 
   def requestExit(): Unit = lifecycleLock.synchronized {
     exitRequested = true
@@ -85,6 +100,7 @@ final class TUI(val terminal: Terminal):
     if force then
       previousLines = Vector.empty
       previousWidth = -1
+      previousHeight = -1
       cursorRow = 0
     renderRequested = true
   }
@@ -109,33 +125,41 @@ final class TUI(val terminal: Terminal):
       }
   }
 
+  private def safeRuntimeCallback(action: => Unit): Unit =
+    try action
+    catch case e: Throwable => handleRuntimeFailure(e)
+
+  private def handleRuntimeFailure(error: Throwable): Unit =
+    lifecycleLock.synchronized {
+      if runtimeFailure.isEmpty then runtimeFailure = Some(error)
+      exitRequested = true
+      lifecycleLock.notifyAll()
+    }
+    stop()
+
   private def isCtrl(input: TerminalInput, char: String): Boolean = input match
     case TerminalInput.Key(TerminalKey.Character(value), modifiers) =>
       (value === char) && modifiers.ctrl
     case _                                                          => false
 
   private def renderNow(): Unit =
-    val width    = terminal.columns
+    val width    = positiveDimension(terminal.columns)
+    val height   = positiveDimension(terminal.rows)
     val rawLines = root.render(width)
-    rawLines.foreach { line =>
-      val lineWidth = Ansi.visibleWidth(line)
-      if lineWidth > width then
-        throw IllegalArgumentException(
-          s"Rendered line width $lineWidth exceeds terminal width $width: $line"
-        )
-    }
-    val newLines = applyLineResets(rawLines)
+    val newLines = applyLineResets(sanitizeLines(rawLines, width))
 
-    val widthChanged = (previousWidth !== 0) && (previousWidth !== width)
-    if previousLines.isEmpty || widthChanged then
-      fullRender(newLines, clear = widthChanged)
+    val widthChanged  = (previousWidth !== 0) && (previousWidth !== width)
+    val heightChanged = (previousHeight !== 0) && (previousHeight !== height)
+    if previousLines.isEmpty || widthChanged || heightChanged then
+      fullRender(newLines, width, height, clear = widthChanged || heightChanged)
     else
       val firstChanged = firstChangedLine(previousLines, newLines)
       if firstChanged >= 0 then partialRender(newLines, firstChanged)
       previousLines = newLines
       previousWidth = width
+      previousHeight = height
 
-  private def fullRender(lines: Vector[String], clear: Boolean): Unit =
+  private def fullRender(lines: Vector[String], width: Int, height: Int, clear: Boolean): Unit =
     val builder = StringBuilder()
     builder.append(SyncStart)
     if clear then builder.append("\u001b[2J\u001b[H\u001b[3J")
@@ -143,7 +167,8 @@ final class TUI(val terminal: Terminal):
     builder.append(SyncEnd)
     terminal.write(builder.result())
     previousLines = lines
-    previousWidth = terminal.columns
+    previousWidth = width
+    previousHeight = height
     cursorRow = math.max(0, lines.length - 1)
 
   private def partialRender(lines: Vector[String], firstChanged: Int): Unit =
@@ -157,6 +182,25 @@ final class TUI(val terminal: Terminal):
     terminal.write(builder.result())
     cursorRow = math.max(0, lines.length - 1)
 
+  private def positiveDimension(value: Int): Int = math.max(1, value)
+
+  private def sanitizeLines(lines: Vector[String], width: Int): Vector[String] =
+    lines.zipWithIndex.map { (line, index) =>
+      val lineWidth = Ansi.visibleWidth(line)
+      if lineWidth <= width then line
+      else
+        val sanitized = Ansi.truncateToWidth(line, width, "")
+        sanitizationCount += 1
+        lastSanitization = Some(TUI.RenderSanitization(
+          lineIndex = index,
+          originalWidth = lineWidth,
+          targetWidth = width,
+          original = line,
+          sanitized = sanitized
+        ))
+        sanitized
+    }
+
   private def firstChangedLine(oldLines: Vector[String], newLines: Vector[String]): Int =
     val firstDifferent = oldLines.zip(newLines).indexWhere { case (oldLine, newLine) =>
       oldLine !== newLine
@@ -169,6 +213,14 @@ final class TUI(val terminal: Terminal):
     lines.map(_ + LineReset)
 
 object TUI:
+  final case class RenderSanitization(
+      lineIndex: Int,
+      originalWidth: Int,
+      targetWidth: Int,
+      original: String,
+      sanitized: String
+  ) derives CanEqual
+
   val SyncStart: String = "\u001b[?2026h"
   val SyncEnd: String   = "\u001b[?2026l"
   val LineReset: String = "\u001b[0m\u001b]8;;\u0007"

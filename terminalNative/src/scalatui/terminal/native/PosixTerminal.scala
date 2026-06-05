@@ -1,5 +1,6 @@
 package scalatui.terminal.native
 
+import scalatui.syntax.Equality.*
 import scalatui.terminal.{Terminal, TerminalInput, TerminalInputBuffer}
 
 import scala.scalanative.unsafe.*
@@ -15,9 +16,8 @@ import scala.scalanative.libc.stdlib
 /**
  * Scala Native POSIX terminal backend for macOS/Linux.
  *
- * It configures stdin raw mode via termios, reads stdin on a background thread, and writes to
- * stdout. Dimension querying currently uses constructor values or COLUMNS/LINES environment
- * fallbacks; ioctl-based live size updates are planned for the next terminal-runtime iteration.
+ * It configures stdin raw mode via termios, reads stdin on a background thread, writes to stdout,
+ * queries dimensions through ioctl, and polls for live resize changes while running.
  */
 final class PosixTerminal(
     initialColumns: Int = PosixTerminal.envInt("COLUMNS").getOrElse(80),
@@ -25,54 +25,61 @@ final class PosixTerminal(
 ) extends Terminal:
   private type Winsize = CStruct4[CUnsignedShort, CUnsignedShort, CUnsignedShort, CUnsignedShort]
   @volatile private var running                             = false
+  @volatile private var resizePolling                       = false
   @volatile private var inputHandler: TerminalInput => Unit = _ => ()
+  @volatile private var resizeHandler: () => Unit           = () => ()
+  @volatile private var currentColumns                      = initialColumns
+  @volatile private var currentRows                         = initialRows
   private var inputThread: Thread | Null                    = null
+  private var resizeThread: Thread | Null                   = null
   private var savedState: Ptr[termios.termios]              = null
-  private var currentColumns                                = initialColumns
-  private var currentRows                                   = initialRows
   private val inputBuffer                                   = TerminalInputBuffer()
 
   override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
-    if running then return
-    if unistd.isatty(unistd.STDIN_FILENO) == 0 then
-      throw IllegalStateException(
-        "Scala Native POSIX backend requires stdin to be an interactive TTY"
-      )
-    inputHandler = onInput
-    refreshSize()
-    try
-      enableRawMode()
-      write("\u001b[?2004h")
-      running = true
-      val thread = Thread(() => readLoop(), "scala-tui-posix-terminal-input")
-      thread.setDaemon(true)
-      inputThread = thread
-      thread.start()
-    catch
-      case e: Throwable =>
-        write("\u001b[?2004l")
-        restoreMode()
-        throw e
+    if !running then
+      if unistd.isatty(unistd.STDIN_FILENO) == 0 then
+        throw IllegalStateException(
+          "Scala Native POSIX backend requires stdin to be an interactive TTY"
+        )
+      inputHandler = onInput
+      resizeHandler = onResize
+      refreshSize(notify = false)
+      try
+        enableRawMode()
+        write("\u001b[?2004h")
+        running = true
+        val thread = Thread(() => readLoop(), "scala-tui-posix-terminal-input")
+        thread.setDaemon(true)
+        inputThread = thread
+        thread.start()
+        startResizePolling()
+      catch
+        case e: Throwable =>
+          stopResizePolling()
+          write("\u001b[?2004l")
+          restoreMode()
+          throw e
 
   override def stop(): Unit =
-    if !running && savedState == null then return
-    write("\u001b[?2004l")
-    running = false
-    Option(inputThread).foreach(_.interrupt())
-    inputThread = null
-    inputBuffer.clear()
-    restoreMode()
+    if running || savedState != null then
+      write("\u001b[?2004l")
+      running = false
+      stopResizePolling()
+      Option(inputThread).foreach(_.interrupt())
+      inputThread = null
+      inputBuffer.clear()
+      restoreMode()
 
   override def write(data: String): Unit =
     System.out.print(data)
     System.out.flush()
 
   override def columns: Int =
-    refreshSize()
+    refreshSize(notify = false)
     currentColumns
 
   override def rows: Int =
-    refreshSize()
+    refreshSize(notify = false)
     currentRows
 
   override def moveBy(lines: Int): Unit =
@@ -86,26 +93,26 @@ final class PosixTerminal(
   override def clearScreen(): Unit     = write("\u001b[2J\u001b[H")
 
   private def enableRawMode(): Unit =
-    if savedState != null then return
-    val original = stdlib.malloc(sizeof[termios.termios]).asInstanceOf[Ptr[termios.termios]]
-    if original == null then throw OutOfMemoryError("failed to allocate termios state")
-    if termios.tcgetattr(unistd.STDIN_FILENO, original) != 0 then
-      stdlib.free(original.asInstanceOf[Ptr[Byte]])
-      throw IllegalStateException("tcgetattr failed")
+    if savedState == null then
+      val original = stdlib.malloc(sizeof[termios.termios]).asInstanceOf[Ptr[termios.termios]]
+      if original == null then throw OutOfMemoryError("failed to allocate termios state")
+      if termios.tcgetattr(unistd.STDIN_FILENO, original) != 0 then
+        stdlib.free(original.asInstanceOf[Ptr[Byte]])
+        throw IllegalStateException("tcgetattr failed")
 
-    val raw = stackalloc[termios.termios]()
-    !raw = !original
-    raw.c_iflag = clearFlags(raw.c_iflag, BRKINT | ICRNL | INPCK | ISTRIP | IXON)
-    raw.c_oflag = clearFlags(raw.c_oflag, OPOST)
-    raw.c_cflag = setFlags(raw.c_cflag, CS8)
-    raw.c_lflag = clearFlags(raw.c_lflag, ECHO | ICANON | IEXTEN | ISIG)
-    raw.c_cc(termios.VMIN) = 0.toUByte
-    raw.c_cc(termios.VTIME) = 1.toUByte
+      val raw = stackalloc[termios.termios]()
+      !raw = !original
+      raw.c_iflag = clearFlags(raw.c_iflag, BRKINT | ICRNL | INPCK | ISTRIP | IXON)
+      raw.c_oflag = clearFlags(raw.c_oflag, OPOST)
+      raw.c_cflag = setFlags(raw.c_cflag, CS8)
+      raw.c_lflag = clearFlags(raw.c_lflag, ECHO | ICANON | IEXTEN | ISIG)
+      raw.c_cc(termios.VMIN) = 0.toUByte
+      raw.c_cc(termios.VTIME) = 1.toUByte
 
-    if termios.tcsetattr(unistd.STDIN_FILENO, TCSAFLUSH, raw) != 0 then
-      stdlib.free(original.asInstanceOf[Ptr[Byte]])
-      throw IllegalStateException("tcsetattr raw mode failed")
-    savedState = original
+      if termios.tcsetattr(unistd.STDIN_FILENO, TCSAFLUSH, raw) != 0 then
+        stdlib.free(original.asInstanceOf[Ptr[Byte]])
+        throw IllegalStateException("tcsetattr raw mode failed")
+      savedState = original
 
   private def restoreMode(): Unit =
     if savedState != null then
@@ -113,7 +120,7 @@ final class PosixTerminal(
       stdlib.free(savedState.asInstanceOf[Ptr[Byte]])
       savedState = null
 
-  private def refreshSize(): Unit =
+  private def refreshSize(notify: Boolean): Boolean =
     val winsize = stackalloc[Winsize]()
     if ioctl.ioctl(
         unistd.STDOUT_FILENO,
@@ -123,8 +130,36 @@ final class PosixTerminal(
     then
       val rows = winsize._1.toInt
       val cols = winsize._2.toInt
-      if rows > 0 then currentRows = rows
-      if cols > 0 then currentColumns = cols
+      if rows > 0 && cols > 0 then
+        val changed = (rows !== currentRows) || (cols !== currentColumns)
+        currentRows = rows
+        currentColumns = cols
+        if changed && notify then resizeHandler()
+        changed
+      else false
+    else false
+
+  private def startResizePolling(): Unit =
+    if (resizeThread eq null) then
+      resizePolling = true
+      val thread = Thread(() => resizeLoop(), "scala-tui-posix-terminal-resize")
+      thread.setDaemon(true)
+      resizeThread = thread
+      thread.start()
+
+  private def stopResizePolling(): Unit =
+    resizePolling = false
+    Option(resizeThread).foreach(_.interrupt())
+    resizeThread = null
+
+  private def resizeLoop(): Unit =
+    while resizePolling do
+      try
+        Thread.sleep(PosixTerminal.ResizePollMillis)
+        refreshSize(notify = true)
+      catch
+        case _: InterruptedException => resizePolling = false
+        case _: Throwable            => ()
 
   private def readLoop(): Unit =
     val buffer = stackalloc[CChar](4096)
@@ -148,6 +183,8 @@ final class PosixTerminal(
     (value.toInt | mask).toUInt
 
 object PosixTerminal:
+  private val ResizePollMillis = 150L
+
   private val TIOCGWINSZ: CLongInt =
     if Option(System.getProperty("os.name")).exists(_.toLowerCase.contains("mac")) then
       0x40087468L.toSize

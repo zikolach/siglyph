@@ -55,20 +55,27 @@ private final class DemoRoot(tui: TUI) extends Component:
         case Focus.EditorPane => editor.handleInput(event)
 
   override def render(width: Int): Vector[String] =
-    Vector("scala-tui multiline editor demo") ++
+    val renderWidth = math.max(1, width)
+    Vector(fit("scala-tui multiline editor demo", renderWidth)) ++
       Ansi.wrapTextWithAnsi(
         "Tab focus • ↑↓ actions • Enter submit • Shift+Enter newline • Ctrl+L clear • Esc/Ctrl+C quit",
-        width
+        renderWidth
       ) ++
       Vector(
         "",
-        if focus === Focus.Actions then "Actions (focused):" else "Actions:"
+        fit(if focus === Focus.Actions then "Actions (focused):" else "Actions:", renderWidth)
       ) ++
-      actions.render(width) ++
+      actions.render(renderWidth) ++
       Vector("") ++
-      messagesText.render(width) ++
-      Vector("", if focus === Focus.EditorPane then "Editor (focused):" else "Editor:") ++
-      editor.render(width)
+      messagesText.render(renderWidth) ++
+      Vector(
+        "",
+        fit(if focus === Focus.EditorPane then "Editor (focused):" else "Editor:", renderWidth)
+      ) ++
+      editor.render(renderWidth)
+
+  private def fit(value: String, width: Int): String =
+    Ansi.truncateToWidth(value, width, "")
 
   private def addMessage(value: String): Unit =
     val trimmed = value.trim

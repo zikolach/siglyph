@@ -68,6 +68,12 @@ Default prompt-like behavior submits on `Enter` and inserts a newline on `Shift+
 
 The first editor component intentionally defers autocomplete, overlays, undo/kill-ring, large-paste marker compaction, IME cursor markers, and hardware cursor positioning.
 
+## Resize and narrow terminals
+
+Interactive runtimes clamp render dimensions to positive sizes, redraw fully when terminal width or height changes, and sanitize final over-wide output before writing to the terminal. Components should still obey the render-width contract in tests, but the runtime protects live terminal sessions from crashing when a component or demo line is too wide during resize.
+
+JVM and Scala Native interactive backends poll terminal dimensions while running and request redraws when size changes, without adding runtime dependencies.
+
 ## Development
 
 Import project to IntelliJ IDEA:

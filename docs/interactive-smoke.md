@@ -18,6 +18,8 @@ Expected behavior:
 - `Enter` submits editor text or selects an action.
 - `Shift+Enter` inserts a newline in the editor when the terminal reports a normalized modified Enter event.
 - Arrow keys, `Home` / `End`, `Backspace`, `Delete`, `Ctrl+K`, and `Ctrl+W` edit the buffer.
+- Resize the terminal narrower and wider; the demo redraws without crashing and every line remains within the visible width.
+- Resize terminal height; stale content is cleared by a full redraw.
 - `Esc` and `Ctrl+C` exit and restore the terminal.
 
 ## Scala Native interactive demo
@@ -28,10 +30,12 @@ Build:
 mill interactiveNativeDemo.nativeLink
 ```
 
-Run the linked binary from Mill's output directory in an interactive terminal. Expected behavior matches the JVM multiline editor demo, using `PosixTerminal` instead of `SttyTerminal`.
+Run the linked binary from Mill's output directory in an interactive terminal. Expected behavior matches the JVM multiline editor demo, including narrow-width and height resize redraw checks, using `PosixTerminal` instead of `SttyTerminal`.
 
 ## Lifecycle notes
 
 - `SttyTerminal.stop()` and `PosixTerminal.stop()` are intended to be idempotent.
 - Both interactive backends disable bracketed paste during stop.
+- Both interactive backends poll terminal dimensions while running and request redraws on size changes.
 - `TUI.run()` wraps startup and waiting in `try/finally` so terminal state is restored when the run loop exits or fails after startup.
+- `TUI` sanitizes final over-wide output before writing to protect live sessions; component tests should still verify direct render-width contracts.
