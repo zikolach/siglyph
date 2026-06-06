@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Markdown renderer implementation and width-safe output
-The markdown module SHALL provide a concrete renderer that converts markdown text into width-safe terminal lines through the existing `MarkdownRenderer` contract.
+The markdown module SHALL provide a concrete dependency-free basic renderer that converts markdown text into width-safe terminal lines through the existing `MarkdownRenderer` contract.
 
 #### Scenario: Markdown renders to terminal lines
 - **WHEN** `render(markdown, width)` is called with headings, bullet lists, code spans, and block quotes
@@ -12,7 +12,7 @@ The markdown module SHALL provide a concrete renderer that converts markdown tex
 - **THEN** headings, fences, and list rows are wrapped or truncated so every line remains within width when measured by visible width semantics
 
 ### Requirement: Parser abstraction remains pluggable
-The markdown module SHALL keep parser strategy pluggable so JVM and Native implementations can evolve independently of the shared component API.
+The markdown module SHALL keep parser strategy pluggable so dependency-free, JVM-specific, and Native-specific implementations can evolve independently of the shared component API.
 
 #### Scenario: Shared API remains stable across implementations
 - **WHEN** a parser implementation is swapped for another backend-compatible implementation
@@ -21,6 +21,14 @@ The markdown module SHALL keep parser strategy pluggable so JVM and Native imple
 #### Scenario: Parser errors do not crash rendering
 - **WHEN** the selected parser reports invalid or unsupported markdown input
 - **THEN** rendering emits readable fallback text rather than throwing from component rendering
+
+#### Scenario: Third-party parser adapters are optional
+- **WHEN** an application wants richer Markdown parsing than the dependency-free baseline
+- **THEN** it can opt into an approved adapter module without adding that third-party parser dependency to `core` or to the baseline `markdown` module
+
+#### Scenario: Adapter availability differs by platform
+- **WHEN** JVM and Scala Native require different parser strategies
+- **THEN** optional adapter modules preserve the same public renderer/component contract while selecting platform-compatible internals
 
 ### Requirement: Feature parity roadmap is explicit and testable
 The renderer SHALL document supported and intentionally unsupported markdown constructs, and unsupported constructs must remain readable.

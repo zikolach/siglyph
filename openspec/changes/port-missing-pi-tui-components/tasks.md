@@ -1,11 +1,11 @@
 ## 1. Advanced Input and Editor Editing Parity
 
 - [ ] 1.1 Add a shared undo stack and kill-ring utility model in `core` for use by text components.
-- [ ] 1.2 Extend `Input` to expose and apply undo, redo, yank, and yank-pop command behavior while preserving existing single-line callbacks.
+- [ ] 1.2 Extend `Input` to expose and apply `pi-tui`-aligned undo-only, yank, and yank-pop command behavior while preserving existing single-line callbacks.
 - [ ] 1.3 Add word-boundary helpers for Unicode-aware word navigation and word deletion used by both `Input` and `Editor`.
 - [ ] 1.4 Add large-paste marker insertion in `EditorBuffer` and rendering metadata for collapsed large-paste display.
 - [ ] 1.5 Add marker expansion behavior on submit or explicit expansion request while preserving submitted logical text.
-- [ ] 1.6 Add kill-ring-backed delete/yank history for editor delete commands (`deleteWord*`, `deleteToStart`, `deleteToEnd`, etc.).
+- [ ] 1.6 Add kill-ring-backed delete/yank history for editor delete commands (`deleteWord*`, `deleteToStart`, `deleteToEnd`, etc.) with upstream default keybindings (`Ctrl+-` undo, `Ctrl+Y` yank, `Alt+Y` yank-pop, etc.).
 - [ ] 1.7 Add IME/hardware cursor marker support in focused `Editor`/`Input` output with no marker leakage into logical text values.
 
 ## 2. Combined Slash and Path Autocomplete
@@ -18,23 +18,24 @@
 
 ## 3. Markdown Rendering Component
 
-- [ ] 3.1 Implement a concrete default markdown pipeline in `markdown` module under the existing `MarkdownRenderer` API.
-- [ ] 3.2 Implement parser abstraction boundaries that allow JVM/Native strategy selection without changing the public API.
+- [ ] 3.1 Implement a concrete dependency-free basic markdown pipeline in `markdown` module under the existing `MarkdownRenderer` API.
+- [ ] 3.2 Implement parser abstraction boundaries that allow dependency-free/JVM/Native strategy selection without changing the public API.
 - [ ] 3.3 Support and test a minimum markdown subset (headings, paragraphs, inline code, fenced/indented code, emphasis, lists, links, block quotes, horizontal rules, and tables where feasible).
 - [ ] 3.4 Add parser error-to-fallback behavior that keeps rendering stable for unsupported constructs.
 - [ ] 3.5 Ensure markdown output participates in width-aware truncation and sanitization behavior.
+- [ ] 3.6 Document optional third-party parser adapter module boundaries and do not add mandatory parser dependencies without explicit dependency approval.
 
 ## 4. Image Rendering and Runtime Capability Wiring
 
-- [ ] 4.1 Add capability-aware image model/types and protocol helpers for Kitty and iTerm2 output paths.
-- [ ] 4.2 Add `Image` component in core/shared modules that emits protocol escapes only when `TerminalCapabilities.images` is available.
+- [ ] 4.1 Add capability-aware image model/types and dependency-free protocol helpers for Kitty and iTerm2 output paths in core where needed by terminal/runtime decisions.
+- [ ] 4.2 Add an optional image module with an `Image` component that emits protocol escapes only when `TerminalCapabilities.images` is available.
 - [ ] 4.3 Add image fallback rendering (readable metadata/placeholder) when image support is unavailable.
-- [ ] 4.4 Add image lifecycle helpers for ID reuse/cleanup in helper APIs where protocol defines reuse behavior.
+- [ ] 4.4 Add image lifecycle helpers for ID reuse/cleanup in helper APIs where protocol defines reuse behavior, keeping dependency-requiring file/dimension/scaling helpers optional.
 - [ ] 4.5 Add tests for supported protocol rendering, unsupported fallback, and sanitized width-safe output.
 
 ## 5. Public API and Documentation
 
-- [ ] 5.1 Extend public APIs and Scaladoc for `Input`, `Editor`, autocomplete providers, image options, and markdown/renderer contracts.
+- [ ] 5.1 Extend public APIs and Scaladoc for `Input`, `Editor`, autocomplete providers, optional image options, and markdown/renderer contracts.
 - [ ] 5.2 Update README, parity docs, and smoke docs with explicit new controls, capabilities, and intentional deviations.
 - [ ] 5.3 Update post-MVP plan or roadmap files with this batch of parity work and any deferred follow-ups.
 

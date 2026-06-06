@@ -12,15 +12,19 @@ The public component APIs SHALL expose configuration and callback points needed 
 - **THEN** new editing APIs are additive and do not break existing callback signatures or core module compatibility
 
 ### Requirement: Public image APIs are stable and dependency-light
-The developer API SHALL expose image-related data types and renderer helpers in a way that does not require platform-specific dependencies at call sites.
+The developer API SHALL expose core image-related capability data types and optional image-module renderer helpers in a way that does not require platform-specific dependencies at call sites.
 
 #### Scenario: Applications can construct image options and helpers
-- **WHEN** an application configures image rendering options
+- **WHEN** an application depends on the optional image module and configures image rendering options
 - **THEN** it can do so from `scalatui` public types only, without JVM/Native-specific import branches
 
 #### Scenario: Public API does not force terminal backend coupling
 - **WHEN** applications run on JVM or Scala Native
 - **THEN** image types and markdown/autocomplete models remain usable without depending on concrete terminal backend classes
+
+#### Scenario: Core-only applications avoid image dependencies
+- **WHEN** an application does not opt into image rendering modules
+- **THEN** it can use `core` terminal capability APIs without transitively depending on image decoding, scaling, or media libraries
 
 ### Requirement: Public markdown/autocomplete contracts are composable
 The markdown and autocomplete contracts SHALL remain composable with existing `Component`, `TUI`, and effect runtimes.

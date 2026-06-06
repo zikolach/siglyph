@@ -16,7 +16,7 @@ The terminal runtime SHALL continue to report image capability from environment 
 - **THEN** image-dependent code follows the injected protocol path deterministically
 
 ### Requirement: Output for protocol escapes is bounded by runtime safety expectations
-The runtime shall treat image escape sequences as render output and preserve existing synchronization/sanitization protections for all lines.
+The runtime SHALL treat image escape sequences as render output and preserve existing synchronization/sanitization protections for all lines.
 
 #### Scenario: Image escapes do not bypass width/sanitization flow
 - **WHEN** a frame contains image-related output
