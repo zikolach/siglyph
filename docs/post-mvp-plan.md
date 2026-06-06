@@ -4,10 +4,10 @@ The first milestone intentionally stops at the core renderer, terminal abstracti
 
 ## Components
 
-- `TruncatedText`: single-line status/header component with ANSI-safe truncation and padding.
-- `Loader`: animated spinner driven by the TUI render scheduler.
-- `SettingsList`: selectable setting rows with value cycling and optional submenus.
-- Overlays: composited modal/non-modal components with placement, sizing, visibility, and focus policies.
+- `TruncatedText`: single-line status/header component with ANSI-safe truncation and padding. Initial implementation is in place.
+- `SettingsList`: selectable setting rows with value cycling, descriptions, scroll indicators, and optional dependency-free filtering. Initial implementation is in place; submenus and fuzzy ranking remain follow-ups.
+- `Loader`: tick-driven spinner/message component with cancellation support. Initial implementation is in place; automatic scheduler integration remains a follow-up.
+- Overlays: composited modal/non-modal components with placement, sizing, visibility, and focus policies. Initial implementation is in place.
 - Image helpers: Kitty/iTerm2 escape encoders, image dimension sniffers, and fallback rendering.
 
 ## Editor and autocomplete
@@ -19,12 +19,12 @@ The first milestone intentionally stops at the core renderer, terminal abstracti
 
 Suggested follow-up chain after the editor-buffer foundation:
 
-1. Overlay and autocomplete components anchored by the editor.
+1. Optional loader scheduler integration if applications need runtime-owned ticking beyond the current manual `tick()` API.
 2. Undo/kill-ring helpers and large-paste marker compaction/expansion.
-3. IME cursor markers and hardware cursor positioning if component-level fake cursors prove insufficient.
-4. Terminal runtime polish: resize signals, PTY/manual smoke coverage, lifecycle docs.
+3. SettingsList submenus and fuzzy ranking if real applications need them.
+4. IME cursor markers and hardware cursor positioning if component-level fake cursors prove insufficient.
 5. Markdown parser selection and JVM/Native-compatible renderer.
-6. Public API stabilization after editor and overlay pressure is real.
+6. Public API stabilization after editor, overlay, and settings-list pressure is real.
 
 ## Images
 

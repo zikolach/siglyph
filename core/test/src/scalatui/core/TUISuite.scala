@@ -1,6 +1,7 @@
 package scalatui.core
 
 import scalatui.ansi.Ansi
+import scalatui.components.{Loader, LoaderIndicatorOptions, LoaderOptions}
 import scalatui.terminal.{KeyModifiers, TerminalInput, TerminalKey, VirtualTerminal}
 
 import java.util.concurrent.atomic.AtomicReference
@@ -166,6 +167,35 @@ class TUISuite extends munit.FunSuite:
 
     tui.flushRender()
     assert(terminal.output.contains("two" + TUI.LineReset), terminal.output)
+
+  test("contextual loader state changes request coalesced renders and detach safely"):
+    val terminal = VirtualTerminal(20, 5)
+    val loader   = Loader(LoaderOptions(
+      indicator = LoaderIndicatorOptions(Vector("a", "b")),
+      leadingBlankLine = false
+    ))
+    val tui      = TUI(terminal)
+    tui.addChild(loader)
+    tui.start()
+    terminal.clearWrites()
+
+    loader.setMessage("Go")
+    assertEquals(terminal.output, "")
+    tui.flushRender()
+    assert(terminal.output.contains("a Go"), terminal.output)
+
+    terminal.clearWrites()
+    loader.start()
+    loader.tick()
+    assertEquals(terminal.output, "")
+    tui.flushRender()
+    assert(terminal.output.contains("b Go"), terminal.output)
+
+    terminal.clearWrites()
+    assertEquals(tui.removeChild(loader), true)
+    loader.setMessage("detached")
+    tui.flushRender()
+    assertEquals(terminal.output, "")
 
   test("focused component receives input and rerenders"):
     val terminal  = VirtualTerminal(20, 5)

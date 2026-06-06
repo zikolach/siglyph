@@ -30,7 +30,7 @@ class InteractiveDemoSuite extends munit.FunSuite:
     assert(terminal.output.nonEmpty, terminal.output)
 
   test("interactive demo shows slash-command autocomplete overlay"):
-    val terminal = VirtualTerminal(60, 20)
+    val terminal = VirtualTerminal(60, 24)
     val tui      = TUI(terminal)
     InteractiveDemo.install(tui)
     tui.start()
@@ -42,18 +42,38 @@ class InteractiveDemoSuite extends munit.FunSuite:
     tui.flushRender()
 
     val suggestions = Ansi.strip(terminal.output)
-    assert(suggestions.contains("help"), terminal.output)
-    assert(suggestions.contains("clear"), terminal.output)
+    assert(suggestions.contains("help"), suggestions)
+    assert(suggestions.contains("clear"), suggestions)
     val lines       = suggestions.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1).toVector
     val editorLine  = lines.indexWhere(_.contains("Editor"))
     val helpLine    = lines.indexWhere(_.contains("help"))
-    assert(editorLine >= 0, terminal.output)
-    assert(helpLine > editorLine, terminal.output)
+    assert(editorLine >= 0, suggestions)
+    assert(helpLine > editorLine, suggestions)
 
     terminal.sendInput(TerminalInput.Key(TerminalKey.Down))
     terminal.sendInput(TerminalInput.Key(TerminalKey.Enter))
 
-    assert(Ansi.strip(terminal.output).contains("/clear"), terminal.output)
+    assert(Ansi.strip(terminal.output).contains("/clear"), Ansi.strip(terminal.output))
+
+  test("interactive demo actions tick and cancel loader components"):
+    val terminal = VirtualTerminal(80, 24)
+    val tui      = TUI(terminal)
+    InteractiveDemo.install(tui)
+    tui.start()
+    terminal.clearWrites()
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Tab))
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Down))
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Down))
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Enter))
+
+    assert(Ansi.strip(terminal.output).contains("◓ Tick me from Actions"), terminal.output)
+
+    terminal.clearWrites()
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Down))
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Enter))
+
+    assert(Ansi.strip(terminal.output).contains("! Cancelled"), terminal.output)
 
   test("interactive demo keeps autocomplete overlay safe during narrow resize"):
     val terminal = VirtualTerminal(60, 20)

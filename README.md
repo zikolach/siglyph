@@ -26,7 +26,7 @@ Images and richer Markdown are planned after the first milestone. The multiline 
 
 ## Demos
 
-Render a non-interactive frame using the stream backend:
+Render a non-interactive static component showcase using the stream backend. It includes `TruncatedText` and `SettingsList` alongside the original MVP widgets:
 
 ```bash
 mill demo.run
@@ -44,11 +44,11 @@ Build the Scala Native interactive demo:
 mill interactiveNativeDemo.nativeLink
 ```
 
-The interactive demo now showcases the multiline editor, overlay-backed slash-command autocomplete, and resize-safe rendering. Controls are:
+The interactive demo showcases the multiline editor, overlay-backed slash-command autocomplete, tick-driven loaders, cancellable loaders, and resize-safe rendering. Controls are:
 
 - `Tab` switches focus between actions and editor
 - `↑` / `↓` move through actions when the action list is focused
-- `Enter` submits editor text, selects the focused action, or accepts the selected autocomplete suggestion
+- `Enter` submits editor text, selects the focused action, ticks/cancels loaders through actions, or accepts the selected autocomplete suggestion
 - `Shift+Enter` inserts a newline in the editor when the terminal reports a normalized modified Enter event
 - Type `/` in the editor to show application-supplied slash-command suggestions; `↑` / `↓` navigate suggestions, `Enter` or `Tab` accepts, and `Esc` cancels
 - `Ctrl+A` / `Ctrl+E`, arrows, `Home` / `End`, `Backspace`, `Delete`, `Ctrl+K`, and `Ctrl+W` edit the multiline buffer
@@ -70,6 +70,21 @@ Default prompt-like behavior submits on `Enter` and inserts a newline on `Shift+
 The editor can be configured with `scalatui.autocomplete.AutocompleteProvider` implementations. Suggestions are displayed through the generic TUI overlay stack and default to editor-adjacent placement, so applications do not need to compute terminal rows for normal editor autocomplete. Provider lookups use a cancellable callback boundary so applications can bridge file, network, `Future`, or other effect runtimes without adding dependencies to `scala-tui` itself. Slash-command helpers are metadata providers only; applications remain responsible for interpreting submitted commands.
 
 The first editor component intentionally still defers undo/kill-ring, large-paste marker compaction, IME cursor markers, and hardware cursor positioning.
+
+## Utility components
+
+`scalatui.components.TruncatedText` renders a single logical line for status/header text. It keeps only the text before the first newline, truncates by ANSI-aware visible terminal width, supports horizontal and vertical padding, and returns width-safe lines for JVM and Native.
+
+`scalatui.components.SettingsList` renders interactive configuration rows with stable ids, labels, current values, optional descriptions, optional cycle values, hints, and scroll indicators. Controls are:
+
+- `↑` / `↓` move selection
+- `Enter` or `Space` cycles the selected row when cycle values are configured
+- `Esc` invokes the cancel callback
+- When dependency-free filtering is enabled, printable characters append to the search query and `Backspace` edits it; matching uses case-insensitive containment across id, label, value, and description
+
+`scalatui.components.Loader` renders a width-safe indicator plus message for long-running work. It is deliberately tick-driven in shared core: call `start()` to mark it running, call `tick()` from application-owned scheduling to advance frames, use `setMessage(...)` / `setIndicator(...)` to update display state, and call `stop()` when work completes. State changes request renders automatically when the loader is attached to a `TUI`, but no background thread, timer, or effect runtime is created by the component.
+
+`scalatui.components.CancellableLoader` extends loader behavior with dependency-free cancellation. `Esc` or explicit `cancel()` marks its `CancellationToken` as cancelled and invokes `onCancel` at most once. This intentionally differs from `pi-tui`'s Node `setInterval` and JavaScript `AbortSignal`; automatic scheduler integration remains a possible follow-up.
 
 ## Resize and narrow terminals
 

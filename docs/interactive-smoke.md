@@ -1,6 +1,6 @@
 # Interactive Smoke Coverage
 
-Manual smoke checks for interactive runtime demos and the multiline editor demo:
+Manual smoke checks for interactive runtime demos and the multiline editor demo. Static utility components are shown by `mill demo.run`; tick-driven `Loader` and `CancellableLoader` are shown in the shared interactive demo actions so their state can change live.
 
 ## JVM interactive demo
 
@@ -15,10 +15,11 @@ Expected behavior:
 - Terminal enters raw mode and hides the cursor.
 - Bracketed paste mode is enabled while running and disabled on exit.
 - `Tab` switches focus between the action list and multiline editor.
-- `Enter` submits editor text, selects an action, or accepts a visible autocomplete suggestion.
+- `Enter` submits editor text, selects an action, ticks/cancels loader components through the action list, or accepts a visible autocomplete suggestion.
 - `Shift+Enter` inserts a newline in the editor when the terminal reports a normalized modified Enter event.
 - Type `/` at the start of editor input to show slash-command autocomplete suggestions adjacent to the editor area.
 - With suggestions visible, `↑` / `↓` navigates, `Enter` or `Tab` accepts, and `Esc` cancels without changing editor text.
+- When the action list is focused, select `Tick loader` to advance the loader frame and `Cancel loader` to update the cancellable loader state.
 - Arrow keys, `Home` / `End`, `Backspace`, `Delete`, `Ctrl+K`, and `Ctrl+W` edit the buffer.
 - Resize the terminal narrower and wider; the demo redraws without crashing and every line remains within the visible width.
 - Resize terminal height; the existing TUI frame is repainted in place and any visible overlay is re-resolved/clamped to the new dimensions without clearing scrollback.

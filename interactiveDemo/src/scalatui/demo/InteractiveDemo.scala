@@ -2,7 +2,17 @@ package scalatui.demo
 
 import scalatui.ansi.Ansi
 import scalatui.autocomplete.{SlashCommand, SlashCommandAutocompleteProvider}
-import scalatui.components.{Editor, EditorOptions, SelectItem, SelectList, Text}
+import scalatui.components.{
+  CancellableLoader,
+  Editor,
+  EditorOptions,
+  Loader,
+  LoaderIndicatorOptions,
+  LoaderOptions,
+  SelectItem,
+  SelectList,
+  Text
+}
 import scalatui.core.{Component, ComponentFrameBuilder, TUI}
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{TerminalInput, TerminalKey}
@@ -32,26 +42,44 @@ private final class DemoRoot(tui: TUI) extends Component:
       )))
     )
   )
+  private val loader       = Loader(LoaderOptions(
+    message = "Tick me from Actions",
+    indicator = LoaderIndicatorOptions(frames = Vector("◐", "◓", "◑", "◒")),
+    leadingBlankLine = false
+  ))
+  private val cancellable  = CancellableLoader(LoaderOptions(
+    message = "Cancel me from Actions",
+    indicator = LoaderIndicatorOptions(frames = Vector("!")),
+    leadingBlankLine = false
+  ))
   private val actions      = SelectList(
     Vector(
       SelectItem("submit", "Submit editor text"),
       SelectItem("clear", "Clear submitted messages"),
+      SelectItem("tick-loader", "Tick loader"),
+      SelectItem("cancel-loader", "Cancel loader"),
       SelectItem("quit", "Quit")
     ),
-    maxVisible = 3
+    maxVisible = 5
   )
 
   actions.onSelect = item =>
     item.value match
-      case "submit" => addMessage(editor.text)
-      case "clear"  =>
+      case "submit"        => addMessage(editor.text)
+      case "clear"         =>
         messages = Vector.empty
         updateMessages()
-      case "quit"   => tui.requestExit()
-      case _        => ()
+      case "tick-loader"   => loader.tick()
+      case "cancel-loader" => cancellable.cancel()
+      case "quit"          => tui.requestExit()
+      case _               => ()
 
+  cancellable.onCancel = () => cancellable.setMessage("Cancelled")
+  loader.start()
   updateFocus()
   editor.tuiContext_=(Some(tui))
+  loader.tuiContext_=(Some(tui))
+  cancellable.tuiContext_=(Some(tui))
 
   override def handleInput(event: TerminalInput): Unit = event match
     case TerminalInput.Key(TerminalKey.Tab, _)                                      =>
@@ -70,7 +98,7 @@ private final class DemoRoot(tui: TUI) extends Component:
     val frame       = ComponentFrameBuilder(renderWidth)
     frame.addLines(Vector(fit("scala-tui multiline editor demo", renderWidth)))
     frame.addLines(Ansi.wrapTextWithAnsi(
-      "Tab focus • ↑↓ actions • Enter submit • Shift+Enter newline • type / for commands • Ctrl+L clear • Esc/Ctrl+C quit",
+      "Tab focus • ↑↓ actions • Enter submit/select • Shift+Enter newline • type / for commands • loader actions tick/cancel • Ctrl+L clear • Esc/Ctrl+C quit",
       renderWidth
     ))
     frame.addLines(Vector(
@@ -78,6 +106,10 @@ private final class DemoRoot(tui: TUI) extends Component:
       fit(if focus === Focus.Actions then "Actions (focused):" else "Actions:", renderWidth)
     ))
     frame.addComponent(actions)
+    frame.addLine(fit(
+      s"Loader: ${plainLoaderLine(loader, renderWidth)} | ${plainLoaderLine(cancellable, renderWidth)}",
+      renderWidth
+    ))
     frame.addLine("")
     frame.addComponent(messagesText)
     frame.addLines(Vector(
@@ -89,6 +121,9 @@ private final class DemoRoot(tui: TUI) extends Component:
 
   private def fit(value: String, width: Int): String =
     Ansi.truncateToWidth(value, width, "")
+
+  private def plainLoaderLine(component: Component, width: Int): String =
+    component.render(width).headOption.map(Ansi.strip).getOrElse("").trim
 
   private def addMessage(value: String): Unit =
     val trimmed = value.trim
