@@ -78,7 +78,7 @@ out/interactiveNativeDemo/nativeLink.dest/out
 
 Interactive demo controls:
 
-- `Tab` switches focus between actions and input
+- `Ctrl+T` switches focus between actions and input
 - `↑` / `↓` move through actions when the action list is focused
 - `Enter` submits input or selects the focused action
 - `Ctrl+L` clears messages

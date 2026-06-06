@@ -27,17 +27,16 @@ object EditorLayout:
   /** Compute wrapped visual lines and cursor coordinates for `buffer` at `width` columns. */
   def fromBuffer(buffer: EditorBuffer, width: Int): EditorLayout =
     val maxWidth    = math.max(1, width)
-    val visualLines = buffer.lines.zipWithIndex.flatMap { (line, index) =>
-      wrapLogicalLine(line, index, maxWidth)
+    val visualLines = buffer.lines.zipWithIndex.flatMap { (_, index) =>
+      wrapLogicalLine(buffer.clustersForLine(index), index, maxWidth)
     }
     EditorLayout(visualLines, cursorFor(buffer, visualLines))
 
   private def wrapLogicalLine(
-      line: String,
+      clusters: Vector[String],
       logicalLine: Int,
       width: Int
   ): Vector[EditorVisualLine] =
-    val clusters = Unicode.graphemeClusters(line)
     if clusters.isEmpty then Vector(EditorVisualLine(logicalLine, 0, 0, "", 0))
     else
       val result       = Vector.newBuilder[EditorVisualLine]
@@ -90,14 +89,16 @@ object EditorLayout:
       (cursor.column === line.endColumn && isLastVisualLine(line, lineIndexes.map(_._1)))
     }.getOrElse(lineIndexes.last)
 
-    EditorVisualCursor(selected._2, cursorColumn(buffer.lines(cursor.line), selected._1, cursor))
+    EditorVisualCursor(
+      selected._2,
+      cursorColumn(buffer.clustersForLine(cursor.line), selected._1, cursor)
+    )
 
   private def cursorColumn(
-      logicalText: String,
+      clusters: Vector[String],
       visualLine: EditorVisualLine,
       cursor: EditorCursor
   ): Int =
-    val clusters = Unicode.graphemeClusters(logicalText)
     Unicode.stringWidth(clusters.slice(visualLine.startColumn, cursor.column).mkString)
 
   private def isLastVisualLine(

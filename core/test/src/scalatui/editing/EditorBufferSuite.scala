@@ -73,9 +73,40 @@ class EditorBufferSuite extends munit.FunSuite:
     assertEquals(buffer.text, "hello")
     assertEquals(buffer.cursor, EditorCursor(0, 5))
 
+  test("word navigation honors punctuation and unicode boundaries"):
+    val buffer = EditorBuffer.fromText("hello, 世界 again", EditorCursor(0, 0))
+    buffer.moveWordForwards()
+    assertEquals(buffer.cursor, EditorCursor(0, 5))
+    buffer.moveWordForwards()
+    assertEquals(buffer.cursor, EditorCursor(0, 6))
+    buffer.moveWordForwards()
+    assertEquals(buffer.cursor, EditorCursor(0, 9))
+    buffer.moveWordBackwards()
+    assertEquals(buffer.cursor, EditorCursor(0, 7))
+
   test("multiline paste preserves line breaks and unicode"):
     val buffer = EditorBuffer.fromText("ab", EditorCursor(0, 1))
     buffer.insertPaste("X\n界e\u0301\nY")
     assertEquals(buffer.lines, Vector("aX", "界e\u0301", "Yb"))
     assertEquals(buffer.cursor, EditorCursor(2, 1))
     assertEquals(buffer.text, "aX\n界e\u0301\nYb")
+
+  test("large paste inserts compact marker and submit expands logical text"):
+    val pasted = (1 to 11).map(i => s"line$i").mkString("\n")
+    val buffer = EditorBuffer.fromText("ab", EditorCursor(0, 1))
+    buffer.insertPaste(pasted)
+
+    assertEquals(buffer.lines, Vector("a[paste #1 +11 lines]b"))
+    assertEquals(buffer.cursor, EditorCursor(0, 2))
+    assertEquals(buffer.pasteMarkers.get(1), Some(pasted))
+    assertEquals(buffer.submitText, s"a${pasted}b")
+
+  test("large paste markers expand in buffer on demand"):
+    val pasted = "x" * 1001
+    val buffer = EditorBuffer.empty
+    buffer.insertPaste(pasted)
+
+    assertEquals(buffer.text, "[paste #1 1001 chars]")
+    buffer.expandPasteMarkersInBuffer()
+    assertEquals(buffer.text, pasted)
+    assertEquals(buffer.pasteMarkers, Map.empty[Int, String])

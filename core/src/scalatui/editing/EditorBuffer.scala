@@ -23,6 +23,8 @@ final class EditorBuffer private (
     private var currentLines: Vector[String],
     initialCursor: EditorCursor
 ):
+  private var currentPastes = Map.empty[Int, String]
+  private var pasteCounter  = 0
   private var currentCursor = clamp(initialCursor)
 
   /** Current logical lines. The returned vector is a snapshot and can be used safely in tests. */
@@ -34,8 +36,29 @@ final class EditorBuffer private (
   /** Current buffer contents joined with `\n` separators. */
   def text: String = currentLines.mkString("\n")
 
-  /** Text to pass to submit callbacks; currently the same as [[text]]. */
-  def submitText: String = text
+  /** Marker-aware logical clusters for a line; large-paste markers are returned as one cluster. */
+  def clustersForLine(line: Int): Vector[String] = lineClusters(currentLines(line))
+
+  /** Text to pass to submit callbacks, with large-paste markers expanded. */
+  def submitText: String = expandPasteMarkers(text)
+
+  /** Large-paste marker metadata retained by marker id. */
+  def pasteMarkers: Map[Int, String] = currentPastes
+
+  /** Detached snapshot suitable for undo stacks. */
+  def snapshot: EditorBuffer.Snapshot =
+    EditorBuffer.Snapshot(currentLines, currentCursor, currentPastes, pasteCounter)
+
+  /** Restore a snapshot previously returned by [[snapshot]]. */
+  def restore(snapshot: EditorBuffer.Snapshot): Unit =
+    currentLines = if snapshot.lines.isEmpty then Vector("") else snapshot.lines
+    currentPastes = snapshot.pasteMarkers
+    pasteCounter = snapshot.pasteCounter
+    currentCursor = clamp(snapshot.cursor)
+
+  /** Whether `segment` is a valid large-paste marker currently tracked by this buffer. */
+  def isPasteMarker(segment: String): Boolean =
+    pasteMarkerId(segment).exists(currentPastes.contains)
 
   /** Move the cursor to `cursor`, clamped to the valid buffer range. */
   def setCursor(cursor: EditorCursor): Unit =
@@ -95,21 +118,33 @@ final class EditorBuffer private (
 
   /** Insert pasted text, preserving normalized logical newlines and Unicode content. */
   def insertPaste(text: String): Unit =
-    val parts = normalizeNewlines(text).split("\n", -1).toVector
-    if parts.length === 1 then insertClusters(Unicode.graphemeClusters(parts.head))
+    val normalized = normalizeNewlines(text)
+    if isLargePaste(normalized) then insertLargePasteMarker(normalized)
     else
-      val cs          = currentLineClusters
-      val prefix      = cs.take(currentCursor.column).mkString
-      val suffix      = cs.drop(currentCursor.column).mkString
-      val replacement = Vector(prefix + parts.head) ++ parts.slice(
-        1,
-        parts.length - 1
-      ) ++ Vector(parts.last + suffix)
-      currentLines = currentLines.patch(currentCursor.line, replacement, 1)
-      currentCursor = EditorCursor(
-        currentCursor.line + parts.length - 1,
-        Unicode.graphemeClusters(parts.last).length
-      )
+      val parts = normalized.split("\n", -1).toVector
+      if parts.length === 1 then insertClusters(Unicode.graphemeClusters(parts.head))
+      else
+        val cs          = currentLineClusters
+        val prefix      = cs.take(currentCursor.column).mkString
+        val suffix      = cs.drop(currentCursor.column).mkString
+        val replacement = Vector(prefix + parts.head) ++ parts.slice(
+          1,
+          parts.length - 1
+        ) ++ Vector(parts.last + suffix)
+        currentLines = currentLines.patch(currentCursor.line, replacement, 1)
+        currentCursor = EditorCursor(
+          currentCursor.line + parts.length - 1,
+          Unicode.graphemeClusters(parts.last).length
+        )
+
+  /** Replace all large-paste markers with their original logical pasted content. */
+  def expandPasteMarkersInBuffer(): Unit =
+    if currentPastes.nonEmpty then
+      currentLines = submitText.split("\n", -1).toVector match
+        case Vector() => Vector("")
+        case lines    => lines
+      currentPastes = Map.empty
+      currentCursor = clamp(currentCursor)
 
   /** Delete the previous grapheme cluster or merge with the previous line. */
   def backspace(): Unit =
@@ -142,16 +177,56 @@ final class EditorBuffer private (
     val cs = currentLineClusters
     replaceCurrentLine(cs.take(currentCursor.column).mkString)
 
+  /** Delete from the start of the current logical line to the cursor. */
+  def deleteToStartOfLine(): Unit =
+    val cs = currentLineClusters
+    replaceCurrentLine(cs.drop(currentCursor.column).mkString)
+    currentCursor = currentCursor.copy(column = 0)
+
+  /** Move to the previous word boundary on the current line, or previous line end. */
+  def moveWordBackwards(): Unit =
+    if currentCursor.column > 0 then
+      currentCursor = currentCursor.copy(column =
+        WordNavigation.findWordBackward(
+          currentLineClusters,
+          currentCursor.column,
+          isPasteMarker
+        )
+      )
+    else if currentCursor.line > 0 then
+      val previousLine = currentCursor.line - 1
+      currentCursor = EditorCursor(previousLine, lineLength(previousLine))
+
+  /** Move to the next word boundary on the current line, or next line start. */
+  def moveWordForwards(): Unit =
+    val cs = currentLineClusters
+    if currentCursor.column < cs.length then
+      currentCursor = currentCursor.copy(column =
+        WordNavigation.findWordForward(
+          cs,
+          currentCursor.column,
+          isPasteMarker
+        )
+      )
+    else if currentCursor.line < currentLines.length - 1 then
+      currentCursor = EditorCursor(currentCursor.line + 1, 0)
+
   /** Delete the word before the cursor, or merge with the previous line at line start. */
   def deleteWordBackwards(): Unit =
     if currentCursor.column > 0 then
-      val cs = currentLineClusters
-      var i  = currentCursor.column
-      while i > 0 && cs(i - 1).forall(_.isWhitespace) do i -= 1
-      while i > 0 && !cs(i - 1).forall(_.isWhitespace) do i -= 1
-      replaceCurrentLine((cs.take(i) ++ cs.drop(currentCursor.column)).mkString)
-      currentCursor = currentCursor.copy(column = i)
+      val cs    = currentLineClusters
+      val start = WordNavigation.findWordBackward(cs, currentCursor.column, isPasteMarker)
+      replaceCurrentLine((cs.take(start) ++ cs.drop(currentCursor.column)).mkString)
+      currentCursor = currentCursor.copy(column = start)
     else backspace()
+
+  /** Delete the word after the cursor, or merge with the next line at line end. */
+  def deleteWordForwards(): Unit =
+    val cs = currentLineClusters
+    if currentCursor.column < cs.length then
+      val end = WordNavigation.findWordForward(cs, currentCursor.column, isPasteMarker)
+      replaceCurrentLine((cs.take(currentCursor.column) ++ cs.drop(end)).mkString)
+    else delete()
 
   private def insertClusters(inserted: Vector[String]): Unit =
     if inserted.nonEmpty then
@@ -165,9 +240,9 @@ final class EditorBuffer private (
     currentLines = currentLines.updated(currentCursor.line, value)
 
   private def currentLineClusters: Vector[String] =
-    Unicode.graphemeClusters(currentLines(currentCursor.line))
+    lineClusters(currentLines(currentCursor.line))
 
-  private def lineLength(line: Int): Int = Unicode.graphemeClusters(currentLines(line)).length
+  private def lineLength(line: Int): Int = lineClusters(currentLines(line)).length
 
   private def clamp(cursor: EditorCursor): EditorCursor =
     val line = math.max(0, math.min(currentLines.length - 1, cursor.line))
@@ -176,7 +251,57 @@ final class EditorBuffer private (
   private def normalizeNewlines(value: String): String =
     value.replace("\r\n", "\n").replace('\r', '\n')
 
+  private def isLargePaste(value: String): Boolean =
+    value.split("\n", -1).length > EditorBuffer.LargePasteLineThreshold ||
+      Unicode.graphemeClusters(value).length > EditorBuffer.LargePasteCharacterThreshold
+
+  private def insertLargePasteMarker(value: String): Unit =
+    pasteCounter += 1
+    val id     = pasteCounter
+    val lines  = value.split("\n", -1).length
+    currentPastes = currentPastes.updated(id, value)
+    val marker =
+      if lines > EditorBuffer.LargePasteLineThreshold then s"[paste #$id +$lines lines]"
+      else s"[paste #$id ${Unicode.graphemeClusters(value).length} chars]"
+    insertClusters(Vector(marker))
+
+  private def expandPasteMarkers(value: String): String =
+    currentPastes.foldLeft(value) { case (result, (id, paste)) =>
+      EditorBuffer.PasteMarkerForId(id).replaceAllIn(result, _ => paste)
+    }
+
+  private def lineClusters(value: String): Vector[String] =
+    if currentPastes.isEmpty || !value.contains("[paste #") then Unicode.graphemeClusters(value)
+    else
+      val out  = Vector.newBuilder[String]
+      var last = 0
+      for matchResult <- EditorBuffer.PasteMarker.findAllMatchIn(value) do
+        val id = matchResult.group(1).toInt
+        if currentPastes.contains(id) then
+          out ++= Unicode.graphemeClusters(value.substring(last, matchResult.start))
+          out += matchResult.matched
+          last = matchResult.end
+      out ++= Unicode.graphemeClusters(value.substring(last))
+      out.result()
+
+  private def pasteMarkerId(value: String): Option[Int] = value match
+    case EditorBuffer.PasteMarker(id, _*) => Some(id.toInt)
+    case _                                => None
+
 object EditorBuffer:
+  final case class Snapshot(
+      lines: Vector[String],
+      cursor: EditorCursor,
+      pasteMarkers: Map[Int, String],
+      pasteCounter: Int
+  ) derives CanEqual
+
+  val LargePasteLineThreshold: Int      = 10
+  val LargePasteCharacterThreshold: Int = 1000
+  private val PasteMarker               = "\\[paste #(\\d+)( (\\+\\d+ lines|\\d+ chars))?\\]".r
+  private def PasteMarkerForId(id: Int) =
+    ("\\[paste #" + id + "( (\\+\\d+ lines|\\d+ chars))?\\]").r
+
   /** Empty buffer with the cursor at the beginning. */
   def empty: EditorBuffer = fromText("", EditorCursor(0, 0))
 

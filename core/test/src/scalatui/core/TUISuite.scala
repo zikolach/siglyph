@@ -2,7 +2,17 @@ package scalatui.core
 
 import scalatui.ansi.Ansi
 import scalatui.components.{Loader, LoaderIndicatorOptions, LoaderOptions}
-import scalatui.terminal.{KeyModifiers, TerminalInput, TerminalKey, VirtualTerminal}
+import scalatui.terminal.{
+  ImageDimensions,
+  ImageProtocol,
+  ImageRenderOptions,
+  KeyModifiers,
+  TerminalCapabilities,
+  TerminalImageProtocol,
+  TerminalInput,
+  TerminalKey,
+  VirtualTerminal
+}
 
 import java.util.concurrent.atomic.AtomicReference
 
@@ -107,6 +117,24 @@ class TUISuite extends munit.FunSuite:
     val plainLines = visibleOutputLines(terminal.output)
     assert(plainLines.exists(_.contains("a界")), terminal.output)
     assert(plainLines.forall(_.length <= 3), plainLines.toString)
+    assertEquals(tui.sanitizedLineCount, 1)
+
+  test("image protocol escapes remain in synchronized sanitized output"):
+    val terminal = VirtualTerminal(3, 5)
+    val sequence = TerminalImageProtocol.renderBase64Image(
+      "AAAA",
+      ImageDimensions(10, 10),
+      TerminalCapabilities(trueColor = true, hyperlinks = true, images = Some(ImageProtocol.Kitty)),
+      terminalWidth = 3,
+      ImageRenderOptions(imageId = Some(5))
+    ).get.sequence
+    val tui      = TUI(terminal)
+    tui.addChild(MutableLine(sequence + "abcdef"))
+
+    tui.start()
+
+    assert(terminal.output.contains("\u001b_G"), terminal.output)
+    assert(terminal.output.contains("abc" + Ansi.Reset + TUI.LineReset), terminal.output)
     assertEquals(tui.sanitizedLineCount, 1)
 
   test("input-triggered over-wide render is sanitized without uncaught exception"):

@@ -37,6 +37,34 @@ Markdown is intentionally isolated in the `markdown` module. No parser dependenc
 - Works on JVM and Native with no runtime dependency.
 - Highest implementation and maintenance effort.
 
-## Recommendation for now
+## Current baseline
 
-Start with the pluggable API only. Before adding a dependency, verify cross-platform support and decide whether Markdown should have separate JVM and Native implementations.
+`markdown` now includes a dependency-free line-oriented baseline behind
+`scalatui.markdown.MarkdownRenderer`:
+
+- `MarkdownParser` is the parser strategy boundary.
+- `BasicMarkdownParser` supports the portable first subset without third-party dependencies.
+- `BasicMarkdownRenderer` converts parsed blocks to width-safe terminal lines.
+- `Markdown` is a normal component wrapper with padding support.
+
+The dependency-free subset is intentionally conservative: headings, paragraphs, inline emphasis
+normalization, inline code, links, fenced/indented code, ordered/unordered lists, block quotes,
+horizontal rules, and simple pipe tables remain readable and width-safe. Unsupported constructs
+fall back to readable plain/minimal formatting rather than throwing during component rendering.
+
+## Optional adapter boundary
+
+Richer Markdown support should be added as optional modules rather than mandatory dependencies:
+
+- A future JVM adapter can wrap `commonmark-java` or `flexmark-java` behind `MarkdownParser` or
+  `MarkdownRenderer`.
+- A future Native adapter can use a Native-compatible parser if one is approved.
+- Adapter modules must preserve the public renderer/component contract so applications can swap
+  implementations without changing UI code.
+- No parser dependency should be added to `core` or to the baseline `markdown` module without
+  explicit dependency approval.
+
+## Recommendation for optional parser work
+
+Before adding an adapter dependency, verify cross-platform support, artifact size, license, and
+whether JVM and Native should have separate implementation modules.

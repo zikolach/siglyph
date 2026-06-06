@@ -22,7 +22,7 @@ The first usable milestone targets:
 - Core renderer foundation.
 - MVP components: `Text`, `Box`, `Spacer`, `SelectList`, and `Input`.
 
-Images and richer Markdown are planned after the first milestone. The multiline editor now starts with a pure `EditorBuffer` model plus a rendered `Editor` component in `core`, keeping text mutation and visual layout testable. The core runtime also includes a generic overlay stack and editor autocomplete contracts for dependency-free suggestions. Markdown will live in a separate pluggable module so parser dependencies can be evaluated explicitly for JVM and Native.
+The multiline editor now starts with a pure `EditorBuffer` model plus a rendered `Editor` component in `core`, keeping text mutation and visual layout testable. The core runtime also includes a generic overlay stack, editor autocomplete contracts for dependency-free suggestions, image protocol capability helpers, and optional cursor markers for IME/hardware-cursor workflows. Markdown lives in a separate pluggable module with a dependency-free baseline renderer so parser dependencies can still be evaluated explicitly for richer JVM and Native adapters.
 
 ## Demos
 
@@ -44,14 +44,15 @@ Build the Scala Native interactive demo:
 mill interactiveNativeDemo.nativeLink
 ```
 
-The interactive demo showcases the multiline editor, overlay-backed slash-command autocomplete, tick-driven loaders, cancellable loaders, and resize-safe rendering. Controls are:
+The interactive demo showcases the multiline editor, overlay-backed slash-command autocomplete, tick-driven loaders, cancellable loaders, and resize-safe rendering. Controls include:
 
-- `Tab` switches focus between actions and editor
+- `Ctrl+T` switches focus between actions and editor
 - `↑` / `↓` move through actions when the action list is focused
 - `Enter` submits editor text, selects the focused action, ticks/cancels loaders through actions, or accepts the selected autocomplete suggestion
 - `Shift+Enter` inserts a newline in the editor when the terminal reports a normalized modified Enter event
-- Type `/` in the editor to show application-supplied slash-command suggestions; `↑` / `↓` navigate suggestions, `Enter` or `Tab` accepts, and `Esc` cancels
+- Type `/`, `./`, or `@` in the editor and press `Tab` to autocomplete; `↑` / `↓` navigate suggestions, `Enter` or `Tab` accepts, and `Esc` cancels
 - `Ctrl+A` / `Ctrl+E`, arrows, `Home` / `End`, `Backspace`, `Delete`, `Ctrl+K`, and `Ctrl+W` edit the multiline buffer
+- `Ctrl+-` undoes the previous edit, `Ctrl+Y` yanks the latest killed text, `Alt+Y` yank-pops, `Alt+D` / `Alt+Delete` deletes a word forward, and `Alt+Left` / `Alt+Right` or `Ctrl+Left` / `Ctrl+Right` move by word where the terminal reports those modifiers
 - `Ctrl+L` clears submitted messages
 - `Esc` or `Ctrl+C` exits and restores terminal state
 
@@ -63,13 +64,21 @@ mill keyTester.run
 
 ## Multiline editor API
 
-`scalatui.components.Editor` is a rendered multiline component backed by `scalatui.editing.EditorBuffer`. It exposes `onChange` and `onSubmit` callbacks, focus-aware fake cursor rendering, Unicode/grapheme-aware edits, and configurable Enter behavior via `EditorEnterBehavior`.
+`scalatui.components.Editor` is a rendered multiline component backed by `scalatui.editing.EditorBuffer`. It exposes `onChange` and `onSubmit` callbacks, focus-aware fake cursor rendering with a zero-width `CursorMarker`, Unicode/grapheme-aware edits, pi-tui-style undo/kill-ring behavior, large-paste marker compaction/expansion, and configurable Enter behavior via `EditorEnterBehavior`.
 
 Default prompt-like behavior submits on `Enter` and inserts a newline on `Shift+Enter`. Editor-like behavior can be configured with `EditorEnterBehavior.NewlineOnEnter()`, where plain `Enter` inserts a newline and `Cmd/Super+Enter` submits. Modified Enter support depends on terminal/parser normalization.
 
 The editor can be configured with `scalatui.autocomplete.AutocompleteProvider` implementations. Suggestions are displayed through the generic TUI overlay stack and default to editor-adjacent placement, so applications do not need to compute terminal rows for normal editor autocomplete. Provider lookups use a cancellable callback boundary so applications can bridge file, network, `Future`, or other effect runtimes without adding dependencies to `scala-tui` itself. Slash-command helpers are metadata providers only; applications remain responsible for interpreting submitted commands.
 
-The first editor component intentionally still defers undo/kill-ring, large-paste marker compaction, IME cursor markers, and hardware cursor positioning.
+`CombinedAutocompleteProvider` composes slash-command suggestions with a dependency-free path/attachment completion source. It parses slash prefixes, quoted paths, `@` attachment markers, delimiter-aware replacements, and force-refresh requests (`Tab`) deterministically while preserving cancellation/stale-response safety in the editor.
+
+Large bracketed pastes are compacted to markers such as `[paste #1 +11 lines]` in the rendered buffer. `onSubmit` receives expanded logical text, and applications can call `expandPasteMarkers()` to replace markers in the visible buffer before submission.
+
+## Markdown and images
+
+`markdown` provides `MarkdownParser`, `MarkdownRenderer`, `BasicMarkdownRenderer`, and a `Markdown` component. The baseline renderer is dependency-free and supports a conservative readable subset: headings, paragraphs, inline emphasis normalization, inline code, links, fenced/indented code, lists, block quotes, horizontal rules, and simple pipe tables. Richer parser integrations should live in optional adapter modules.
+
+`core` exposes dependency-free image protocol helpers under `scalatui.terminal.TerminalImageProtocol` plus `ImageDimensions`, `ImageRenderOptions`, and related types. The optional `image` module provides `scalatui.image.Image`, which emits Kitty/iTerm2 escapes when `TerminalCapabilities.images` is available and renders a readable fallback otherwise. Image file loading, dimension sniffing, scaling, or transcoding are intentionally left to future optional helpers or application code.
 
 ## Utility components
 

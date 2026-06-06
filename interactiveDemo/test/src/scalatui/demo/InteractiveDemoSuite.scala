@@ -2,7 +2,7 @@ package scalatui.demo
 
 import scalatui.ansi.Ansi
 import scalatui.core.TUI
-import scalatui.terminal.{TerminalInput, TerminalKey, VirtualTerminal}
+import scalatui.terminal.{KeyModifiers, TerminalInput, TerminalKey, VirtualTerminal}
 
 class InteractiveDemoSuite extends munit.FunSuite:
   test("interactive demo writes width-safe output at narrow widths"):
@@ -55,6 +55,24 @@ class InteractiveDemoSuite extends munit.FunSuite:
 
     assert(Ansi.strip(terminal.output).contains("/clear"), Ansi.strip(terminal.output))
 
+  test("interactive demo lets Tab reach editor autocomplete"):
+    val terminal = VirtualTerminal(60, 24)
+    val tui      = TUI(terminal)
+    InteractiveDemo.install(tui)
+    tui.start()
+    terminal.clearWrites()
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character(".")))
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("/")))
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Tab))
+    terminal.clearWrites()
+    tui.requestRender(force = true)
+    tui.flushRender()
+
+    val output = Ansi.strip(terminal.output)
+    assert(output.contains("README.md"), output)
+    assert(output.contains("Editor (focused)"), output)
+
   test("interactive demo actions tick and cancel loader components"):
     val terminal = VirtualTerminal(80, 24)
     val tui      = TUI(terminal)
@@ -62,7 +80,7 @@ class InteractiveDemoSuite extends munit.FunSuite:
     tui.start()
     terminal.clearWrites()
 
-    terminal.sendInput(TerminalInput.Key(TerminalKey.Tab))
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("t"), KeyModifiers(ctrl = true)))
     terminal.sendInput(TerminalInput.Key(TerminalKey.Down))
     terminal.sendInput(TerminalInput.Key(TerminalKey.Down))
     terminal.sendInput(TerminalInput.Key(TerminalKey.Enter))

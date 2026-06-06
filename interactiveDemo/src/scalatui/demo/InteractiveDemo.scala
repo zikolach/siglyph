@@ -1,7 +1,12 @@
 package scalatui.demo
 
 import scalatui.ansi.Ansi
-import scalatui.autocomplete.{SlashCommand, SlashCommandAutocompleteProvider}
+import scalatui.autocomplete.{
+  CombinedAutocompleteProvider,
+  PathCompletion,
+  PathCompletionProvider,
+  SlashCommand
+}
 import scalatui.components.{
   CancellableLoader,
   Editor,
@@ -35,11 +40,17 @@ private final class DemoRoot(tui: TUI) extends Component:
   private val editor       = Editor(options =
     EditorOptions(
       onSubmit = addMessage,
-      autocompleteProvider = Some(SlashCommandAutocompleteProvider(Vector(
-        SlashCommand("help", Some("Show demo help")),
-        SlashCommand("clear", Some("Clear submitted messages")),
-        SlashCommand("quit", Some("Exit the demo"))
-      )))
+      autocompleteProvider = Some(CombinedAutocompleteProvider(
+        commands = Vector(
+          SlashCommand("help", Some("Show demo help")),
+          SlashCommand("clear", Some("Clear submitted messages")),
+          SlashCommand("quit", Some("Exit the demo"))
+        ),
+        pathProvider = Some(PathCompletionProvider.sync(request =>
+          val prefix = request.prefix.rawPrefix
+          DemoRoot.PathSuggestions.filter(item => prefix.isEmpty || item.path.startsWith(prefix))
+        ))
+      ))
     )
   )
   private val loader       = Loader(LoaderOptions(
@@ -56,6 +67,8 @@ private final class DemoRoot(tui: TUI) extends Component:
     Vector(
       SelectItem("submit", "Submit editor text"),
       SelectItem("clear", "Clear submitted messages"),
+      SelectItem("large-paste", "Insert large paste marker"),
+      SelectItem("expand-paste", "Expand paste markers"),
       SelectItem("tick-loader", "Tick loader"),
       SelectItem("cancel-loader", "Cancel loader"),
       SelectItem("quit", "Quit")
@@ -69,6 +82,16 @@ private final class DemoRoot(tui: TUI) extends Component:
       case "clear"         =>
         messages = Vector.empty
         updateMessages()
+      case "large-paste"   =>
+        editor.handleInput(
+          TerminalInput.Paste((1 to 12).map(i => s"pasted line $i").mkString("\n"))
+        )
+        focus = Focus.EditorPane
+        updateFocus()
+      case "expand-paste"  =>
+        editor.expandPasteMarkers()
+        focus = Focus.EditorPane
+        updateFocus()
       case "tick-loader"   => loader.tick()
       case "cancel-loader" => cancellable.cancel()
       case "quit"          => tui.requestExit()
@@ -82,7 +105,7 @@ private final class DemoRoot(tui: TUI) extends Component:
   cancellable.tuiContext_=(Some(tui))
 
   override def handleInput(event: TerminalInput): Unit = event match
-    case TerminalInput.Key(TerminalKey.Tab, _)                                      =>
+    case TerminalInput.Key(TerminalKey.Character("t"), modifiers) if modifiers.ctrl =>
       focus = if focus === Focus.EditorPane then Focus.Actions else Focus.EditorPane
       updateFocus()
     case TerminalInput.Key(TerminalKey.Character("l"), modifiers) if modifiers.ctrl =>
@@ -98,7 +121,7 @@ private final class DemoRoot(tui: TUI) extends Component:
     val frame       = ComponentFrameBuilder(renderWidth)
     frame.addLines(Vector(fit("scala-tui multiline editor demo", renderWidth)))
     frame.addLines(Ansi.wrapTextWithAnsi(
-      "Tab focus • ↑↓ actions • Enter submit/select • Shift+Enter newline • type / for commands • loader actions tick/cancel • Ctrl+L clear • Esc/Ctrl+C quit",
+      "Ctrl+T focus • ↑↓ actions • Enter submit/select • Shift+Enter newline • Tab autocompletes in editor (type /, ./, or @ first) • Ctrl+- undo • Ctrl+W kill word • Ctrl+Y yank • Alt+Y yank-pop • large-paste actions demo markers • Ctrl+L clear • Esc/Ctrl+C quit",
       renderWidth
     ))
     frame.addLines(Vector(
@@ -156,3 +179,11 @@ private final class DemoRoot(tui: TUI) extends Component:
 
   private def updateFocus(): Unit =
     editor.focused = focus === Focus.EditorPane
+
+private object DemoRoot:
+  val PathSuggestions: Vector[PathCompletion] = Vector(
+    PathCompletion("./README.md", "README.md"),
+    PathCompletion("./docs/interactive-smoke.md", "interactive-smoke.md"),
+    PathCompletion("./core/src/scalatui/components/Editor.scala", "Editor.scala"),
+    PathCompletion("screenshots/demo image.png", "demo image.png")
+  )

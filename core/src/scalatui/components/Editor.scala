@@ -3,7 +3,7 @@ package scalatui.components
 import scalatui.ansi.Ansi
 import scalatui.autocomplete.*
 import scalatui.core.*
-import scalatui.editing.{EditorBuffer, EditorCursor}
+import scalatui.editing.{EditorBuffer, EditorCursor, KillRing, UndoStack, WordNavigation}
 import scalatui.syntax.Containment.*
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{KeyModifiers, TerminalInput, TerminalKey}
@@ -13,10 +13,10 @@ import scalatui.unicode.Unicode
  * Multiline text editor component backed by an [[EditorBuffer]].
  *
  * The editor owns focus state, delegates logical text mutations to `EditorBuffer`, wraps text to
- * the requested component width, renders a fake inverse-video cursor when focused, and can
- * integrate with autocomplete providers by showing selectable suggestions through a TUI overlay
- * host. It intentionally does not implement undo/kill-ring, large paste markers, IME cursor
- * markers, or hardware terminal cursor positioning.
+ * the requested component width, renders a fake inverse-video cursor with a zero-width cursor
+ * marker when focused, and can integrate with autocomplete providers by showing selectable
+ * suggestions through a TUI overlay host. Editing behavior includes `pi-tui`-aligned undo-only,
+ * kill-ring/yank/yank-pop commands, word movement/deletion, and large-paste marker expansion.
  *
  * @param initialText
  *   starting logical editor contents
@@ -44,6 +44,10 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
   var autocompleteMaxVisible: Int                                = math.max(1, options.autocompleteMaxVisible)
   var autocompleteTrigger: EditorAutocompleteTrigger             = options.autocompleteTrigger
   private var autocompletePlacement: EditorAutocompletePlacement = options.autocompletePlacement
+  private val undoStack                                          = UndoStack[EditorBuffer.Snapshot]()
+  private val killRing                                           = KillRing()
+  private var lastAction                                         = Option.empty[Editor.Action]
+  private var yankBaseSnapshot                                   = Option.empty[EditorBuffer.Snapshot]
 
   /** Current editor text joined with `\n` separators. */
   def text: String = synchronized(buffer.text)
@@ -77,12 +81,65 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
   def setText(value: String): Unit = synchronized {
     cancelAutocomplete()
     buffer = EditorBuffer(value)
+    resetEditingAction()
   }
 
   /** Move the editor cursor, clamped to valid logical buffer bounds. */
   def setCursor(cursor: EditorCursor): Unit = synchronized {
     cancelAutocomplete()
     buffer.setCursor(cursor)
+    resetEditingAction()
+  }
+
+  /** Undo the most recent editor mutation, returning whether state changed. */
+  def undo(): Boolean = synchronized {
+    undoStack.pop() match
+      case Some(snapshot) =>
+        val before = buffer.text
+        buffer.restore(snapshot)
+        resetEditingAction()
+        if buffer.text !== before then onChange(buffer.text)
+        true
+      case None           => false
+  }
+
+  /** Yank the most recent killed text into the editor. */
+  def yank(): Boolean = synchronized {
+    killRing.peek match
+      case Some(text) =>
+        val base    = buffer.snapshot
+        val changed = mutate(_.insert(text), refreshAutocomplete = false)
+        if changed !== InputResult.NoRender then
+          yankBaseSnapshot = Some(base)
+          lastAction = Some(Editor.Action.Yank)
+          true
+        else false
+      case None       => false
+  }
+
+  /** Replace the previous yank with the next kill-ring candidate. */
+  def yankPop(): Boolean = synchronized {
+    if !lastAction.contains(Editor.Action.Yank) || killRing.length <= 1 then false
+    else
+      yankBaseSnapshot match
+        case Some(base) =>
+          pushUndoSnapshot()
+          buffer.restore(base)
+          killRing.rotate()
+          val text = killRing.peek.getOrElse("")
+          buffer.insert(text)
+          onChange(buffer.text)
+          refreshAutocompleteIfActive()
+          lastAction = Some(Editor.Action.Yank)
+          true
+        case None       => false
+  }
+
+  /** Expand all compact large-paste markers into their original logical text. */
+  def expandPasteMarkers(): Unit = synchronized {
+    val before = buffer.text
+    buffer.expandPasteMarkersInBuffer()
+    if buffer.text !== before then onChange(buffer.text)
   }
 
   override def tuiContext_=(value: Option[TUIContext]): Unit = synchronized {
@@ -140,11 +197,27 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     case TerminalInput.Key(TerminalKey.Character("e"), modifiers) if modifiers.ctrl             =>
       move(_.moveToLineEnd())
     case TerminalInput.Key(TerminalKey.Character("k"), modifiers) if modifiers.ctrl             =>
-      mutate(_.deleteToEndOfLine())
+      killDeleteToEndOfLine()
+    case TerminalInput.Key(TerminalKey.Character("u"), modifiers) if modifiers.ctrl             =>
+      killDeleteToStartOfLine()
     case TerminalInput.Key(TerminalKey.Character("w"), modifiers) if modifiers.ctrl             =>
-      mutate(_.deleteWordBackwards())
+      killDeleteWordBackwards()
+    case TerminalInput.Key(TerminalKey.Character("d"), modifiers) if modifiers.alt              =>
+      killDeleteWordForwards()
+    case TerminalInput.Key(TerminalKey.Character("d"), modifiers) if modifiers.ctrl             =>
+      mutate(_.delete())
+    case TerminalInput.Key(TerminalKey.Character("b"), modifiers) if modifiers.alt              =>
+      move(_.moveWordBackwards())
+    case TerminalInput.Key(TerminalKey.Character("f"), modifiers) if modifiers.alt              =>
+      move(_.moveWordForwards())
+    case TerminalInput.Key(TerminalKey.Character("y"), modifiers) if modifiers.ctrl             =>
+      if yank() then InputResult.Render else InputResult.NoRender
+    case TerminalInput.Key(TerminalKey.Character("y"), modifiers) if modifiers.alt              =>
+      if yankPop() then InputResult.Render else InputResult.NoRender
+    case TerminalInput.Key(TerminalKey.Character("-"), modifiers) if modifiers.ctrl             =>
+      if undo() then InputResult.Render else InputResult.NoRender
     case TerminalInput.Key(TerminalKey.Character(text), modifiers)
-        if !modifiers.ctrl && !modifiers.superKey =>
+        if !modifiers.ctrl && !modifiers.alt && !modifiers.superKey =>
       val result = mutate(_.insert(text), refreshAutocomplete = false)
       maybeTriggerAutocompleteAfterText(text)
       result
@@ -155,11 +228,17 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     case TerminalInput.Key(TerminalKey.Enter, modifiers)                                        =>
       handleEnter(modifiers)
     case TerminalInput.Key(TerminalKey.Backspace, modifiers) if modifiers.alt || modifiers.ctrl =>
-      mutate(_.deleteWordBackwards())
+      killDeleteWordBackwards()
     case TerminalInput.Key(TerminalKey.Backspace, _)                                            =>
       mutate(_.backspace())
+    case TerminalInput.Key(TerminalKey.Delete, modifiers) if modifiers.alt                      =>
+      killDeleteWordForwards()
     case TerminalInput.Key(TerminalKey.Delete, _)                                               =>
       mutate(_.delete())
+    case TerminalInput.Key(TerminalKey.Left, modifiers) if modifiers.alt || modifiers.ctrl      =>
+      move(_.moveWordBackwards())
+    case TerminalInput.Key(TerminalKey.Right, modifiers) if modifiers.alt || modifiers.ctrl     =>
+      move(_.moveWordForwards())
     case TerminalInput.Key(TerminalKey.Left, _)                                                 =>
       move(_.moveLeft())
     case TerminalInput.Key(TerminalKey.Right, _)                                                =>
@@ -195,6 +274,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     operation(buffer)
     if buffer.cursor === before then InputResult.NoRender
     else
+      resetEditingAction()
       refreshAutocompleteIfActive()
       InputResult.Render
 
@@ -202,16 +282,67 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
       operation: EditorBuffer => Unit,
       refreshAutocomplete: Boolean = true
   ): InputResult =
+    val snapshot     = buffer.snapshot
     val beforeText   = buffer.text
     val beforeCursor = buffer.cursor
     operation(buffer)
     val textChanged  = buffer.text !== beforeText
     val changed      = textChanged || (buffer.cursor !== beforeCursor)
-    if textChanged then onChange(buffer.text)
+    if textChanged then
+      pushUndoSnapshot(snapshot)
+      resetEditingAction()
+      onChange(buffer.text)
     if changed then
       if refreshAutocomplete then refreshAutocompleteIfActive()
       InputResult.Render
     else InputResult.NoRender
+
+  private def killDeleteWordBackwards(): InputResult =
+    val cs      = buffer.clustersForLine(buffer.cursor.line)
+    val deleted =
+      if buffer.cursor.column > 0 then
+        val start = WordNavigation.findWordBackward(cs, buffer.cursor.column, buffer.isPasteMarker)
+        cs.slice(start, buffer.cursor.column).mkString
+      else ""
+    performKill(deleted, prepend = true)(_.deleteWordBackwards())
+
+  private def killDeleteWordForwards(): InputResult =
+    val cs      = buffer.clustersForLine(buffer.cursor.line)
+    val deleted =
+      if buffer.cursor.column < cs.length then
+        val end = WordNavigation.findWordForward(cs, buffer.cursor.column, buffer.isPasteMarker)
+        cs.slice(buffer.cursor.column, end).mkString
+      else ""
+    performKill(deleted, prepend = false)(_.deleteWordForwards())
+
+  private def killDeleteToStartOfLine(): InputResult =
+    val cs      = buffer.clustersForLine(buffer.cursor.line)
+    val deleted = cs.take(buffer.cursor.column).mkString
+    performKill(deleted, prepend = true)(_.deleteToStartOfLine())
+
+  private def killDeleteToEndOfLine(): InputResult =
+    val cs      = buffer.clustersForLine(buffer.cursor.line)
+    val deleted = cs.drop(buffer.cursor.column).mkString
+    performKill(deleted, prepend = false)(_.deleteToEndOfLine())
+
+  private def performKill(
+      deleted: String,
+      prepend: Boolean
+  )(operation: EditorBuffer => Unit): InputResult =
+    val wasKill = lastAction.contains(Editor.Action.Kill)
+    val result  = mutate(operation)
+    if (result !== InputResult.NoRender) && deleted.nonEmpty then
+      killRing.push(deleted, prepend = prepend, accumulate = wasKill)
+      lastAction = Some(Editor.Action.Kill)
+      yankBaseSnapshot = None
+    result
+
+  private def pushUndoSnapshot(snapshot: EditorBuffer.Snapshot = buffer.snapshot): Unit =
+    undoStack.push(snapshot)
+
+  private def resetEditingAction(): Unit =
+    lastAction = None
+    yankBaseSnapshot = None
 
   private def maybeTriggerAutocompleteAfterText(inserted: String): Unit =
     if provider.nonEmpty && autocompleteTrigger.triggerSlash && (inserted === "/") && currentLineBeforeCursor === "/"
@@ -343,15 +474,18 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     base.copy(maxHeight = base.maxHeight.orElse(Some(OverlaySize.Absolute(autocompleteMaxVisible))))
 
   private def renderCursor(line: EditorVisualLine): String =
-    val clusters      = Unicode.graphemeClusters(buffer.lines(line.logicalLine))
+    val clusters      = buffer.clustersForLine(line.logicalLine)
     val segment       = clusters.slice(line.startColumn, line.endColumn)
     val cursorInLine  = buffer.cursor.column - line.startColumn
     val before        = segment.take(cursorInLine).mkString
     val cursorCluster = segment.lift(cursorInLine).getOrElse(" ")
     val after         = segment.drop(cursorInLine + 1).mkString
-    s"$before\u001b[7m$cursorCluster\u001b[27m$after"
+    s"$before${CursorMarker.Sequence}\u001b[7m$cursorCluster\u001b[27m$after"
 
 object Editor:
+  private enum Action derives CanEqual:
+    case Kill, Yank
+
   final case class AutocompleteSnapshot(lines: Vector[String], cursor: EditorCursor, text: String)
       derives CanEqual
 
@@ -361,8 +495,10 @@ object Editor:
       list: SelectList,
       overlay: AutocompleteOverlay
   ):
-    def selectedItem: Option[AutocompleteItem] = list.selected.map { item =>
-      AutocompleteItem(item.value, item.label, item.description)
+    def selectedItem: Option[AutocompleteItem] = list.selected.flatMap { item =>
+      suggestions.items.find(candidate =>
+        candidate.value === item.value && candidate.label === item.label && candidate.description === item.description
+      )
     }
 
   final class AutocompleteOverlay(owner: Editor, list: SelectList) extends Component:

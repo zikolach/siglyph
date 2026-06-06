@@ -8,29 +8,29 @@ The first milestone intentionally stops at the core renderer, terminal abstracti
 - `SettingsList`: selectable setting rows with value cycling, descriptions, scroll indicators, and optional dependency-free filtering. Initial implementation is in place; submenus and fuzzy ranking remain follow-ups.
 - `Loader`: tick-driven spinner/message component with cancellation support. Initial implementation is in place; automatic scheduler integration remains a follow-up.
 - Overlays: composited modal/non-modal components with placement, sizing, visibility, and focus policies. Initial implementation is in place.
-- Image helpers: Kitty/iTerm2 escape encoders, image dimension sniffers, and fallback rendering.
+- Image helpers: Kitty/iTerm2 escape encoders and fallback rendering are in place through dependency-free core helpers plus the optional `image` module. Image dimension sniffers/file loaders/scalers remain optional follow-ups.
 
 ## Editor and autocomplete
 
-- `EditorBuffer`: pure text model for multiline editing, grapheme-aware movement, split/merge, delete, and paste insertion. Initial foundation is in place; undo/kill-ring and large-paste marker expansion remain follow-ups.
-- Multiline `Editor`: rendered MVP with visual wrapping, fake cursor, core editing keys, callbacks, and configurable submit/newline behavior. IME cursor markers, hardware cursor positioning, undo/kill-ring, autocomplete overlays, and large paste markers remain follow-ups.
-- Autocomplete APIs: slash commands, file paths, `@` attachment paths, provider abstraction, and selectable suggestion UI.
-- Paste expansion: replace visible large-paste markers with original content on submit.
+- `EditorBuffer`: pure text model for multiline editing, grapheme-aware movement, split/merge, delete, paste insertion, large-paste marker compaction, and marker expansion. Initial foundation is in place.
+- Multiline `Editor`: rendered editor with visual wrapping, fake cursor, cursor marker emission, core editing keys, callbacks, configurable submit/newline behavior, undo/kill-ring/yank/yank-pop, autocomplete overlays, and large paste markers. Runtime-owned hardware cursor placement remains a follow-up.
+- Autocomplete APIs: slash commands, path/attachment parsing, cancellable provider abstraction, and selectable suggestion UI are in place. Concrete filesystem enumeration can be supplied by applications or future optional helper modules.
+- Paste expansion: visible large-paste markers expand in `onSubmit` and through explicit editor APIs.
 
 Suggested follow-up chain after the editor-buffer foundation:
 
 1. Optional loader scheduler integration if applications need runtime-owned ticking beyond the current manual `tick()` API.
-2. Undo/kill-ring helpers and large-paste marker compaction/expansion.
+2. Runtime-owned hardware cursor positioning using emitted cursor markers, if needed for IME-heavy applications.
 3. SettingsList submenus and fuzzy ranking if real applications need them.
-4. IME cursor markers and hardware cursor positioning if component-level fake cursors prove insufficient.
-5. Markdown parser selection and JVM/Native-compatible renderer.
+4. Optional filesystem autocomplete helpers if applications want built-in local path enumeration.
+5. Richer Markdown parser adapters for JVM/Native-compatible rendering.
 6. Public API stabilization after editor, overlay, and settings-list pressure is real.
 
 ## Images
 
-- Start with terminal capability detection already present in the core.
-- Add Kitty and iTerm2 protocol encoders in a later helper module or component package.
-- Keep images optional and fallback to readable text when unsupported.
+- Terminal capability detection and Kitty/iTerm2 protocol helpers are present in core.
+- The optional `image` module provides a dependency-free `Image` component for already-base64 image data and caller-supplied dimensions.
+- Keep file loading, header parsing, scaling, and transcoding optional. Fallback remains readable text when unsupported.
 
 ## Intentional deviations from pi-tui so far
 

@@ -2,7 +2,7 @@ package scalatui.components
 
 import scalatui.ansi.Ansi
 import scalatui.autocomplete.*
-import scalatui.core.{InputResult, OverlayOptions, OverlaySize, TUI}
+import scalatui.core.{CursorMarker, InputResult, OverlayOptions, OverlaySize, TUI}
 import scalatui.editing.EditorCursor
 import scalatui.terminal.{KeyModifiers, TerminalInput, TerminalKey, VirtualTerminal}
 
@@ -14,7 +14,7 @@ class EditorSuite extends munit.FunSuite:
     assertEquals(editor.render(10).head, "abc")
 
     editor.focused = true
-    assertEquals(editor.render(10).head, "a\u001b[7mb\u001b[27mc")
+    assertEquals(editor.render(10).head, s"a${CursorMarker.Sequence}\u001b[7mb\u001b[27mc")
 
   test("renders inverse space at line end and keeps output within width"):
     val editor = Editor("abcd")
@@ -27,7 +27,7 @@ class EditorSuite extends munit.FunSuite:
 
     val roomy = Editor("ab")
     roomy.focused = true
-    assertEquals(roomy.render(5).head, "ab\u001b[7m \u001b[27m")
+    assertEquals(roomy.render(5).head, s"ab${CursorMarker.Sequence}\u001b[7m \u001b[27m")
 
   test("inserts printable input and multiline paste via editor buffer"):
     var changed = Vector.empty[String]
@@ -42,6 +42,23 @@ class EditorSuite extends munit.FunSuite:
     assertEquals(editor.text, "a界\ne\u0301")
     assertEquals(editor.lines, Vector("a界", "e\u0301"))
     assertEquals(changed.lastOption, Some("a界\ne\u0301"))
+
+  test("large paste renders compact marker and submits expanded text"):
+    val pasted    = (1 to 11).map(i => s"line$i").mkString("\n")
+    var submitted = ""
+    val editor    = Editor("ab", EditorOptions(onSubmit = text => submitted = text))
+    editor.setCursor(EditorCursor(0, 1))
+    editor.focused = true
+
+    assertEquals(editor.handleInputResult(TerminalInput.Paste(pasted)), InputResult.Render)
+    assertEquals(editor.text, "a[paste #1 +11 lines]b")
+    assert(editor.render(80).head.contains("[paste #1 +11 lines]"))
+
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Enter))
+    assertEquals(submitted, s"a${pasted}b")
+
+    editor.expandPasteMarkers()
+    assertEquals(editor.text, s"a${pasted}b")
 
   test("handles deletion keys and readline-style movement"):
     val editor = Editor("hello world")
@@ -68,6 +85,67 @@ class EditorSuite extends munit.FunSuite:
       KeyModifiers(ctrl = true)
     ))
     assertEquals(editor.text, "")
+
+  test("editor supports pi-tui undo-only kill-ring yank and yank-pop"):
+    val editor = Editor("hello world again")
+    editor.handleInputResult(TerminalInput.Key(
+      TerminalKey.Character("w"),
+      KeyModifiers(ctrl = true)
+    ))
+    editor.handleInputResult(TerminalInput.Key(
+      TerminalKey.Character("w"),
+      KeyModifiers(ctrl = true)
+    ))
+    assertEquals(editor.text, "hello ")
+
+    editor.handleInputResult(TerminalInput.Key(
+      TerminalKey.Character("y"),
+      KeyModifiers(ctrl = true)
+    ))
+    assertEquals(editor.text, "hello world again")
+
+    editor.handleInputResult(TerminalInput.Key(
+      TerminalKey.Character("-"),
+      KeyModifiers(ctrl = true)
+    ))
+    assertEquals(editor.text, "hello ")
+
+    val cycle = Editor("one two")
+    cycle.handleInputResult(TerminalInput.Key(
+      TerminalKey.Character("w"),
+      KeyModifiers(ctrl = true)
+    ))
+    cycle.handleInputResult(TerminalInput.Key(
+      TerminalKey.Character("a"),
+      KeyModifiers(ctrl = true)
+    ))
+    cycle.handleInputResult(TerminalInput.Key(
+      TerminalKey.Character("k"),
+      KeyModifiers(ctrl = true)
+    ))
+    cycle.handleInputResult(TerminalInput.Key(
+      TerminalKey.Character("y"),
+      KeyModifiers(ctrl = true)
+    ))
+    assertEquals(cycle.text, "one ")
+    cycle.handleInputResult(TerminalInput.Key(TerminalKey.Character("y"), KeyModifiers(alt = true)))
+    assertEquals(cycle.text, "two")
+
+  test("editor supports pi-tui word movement and forward word deletion bindings"):
+    val editor = Editor("hello, 世界 again")
+    editor.handleInputResult(TerminalInput.Key(
+      TerminalKey.Character("a"),
+      KeyModifiers(ctrl = true)
+    ))
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Right, KeyModifiers(alt = true)))
+    assertEquals(editor.cursor, EditorCursor(0, 5))
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Right, KeyModifiers(alt = true)))
+    assertEquals(editor.cursor, EditorCursor(0, 6))
+    editor.handleInputResult(TerminalInput.Key(
+      TerminalKey.Character("d"),
+      KeyModifiers(alt = true)
+    ))
+    assertEquals(editor.text, "hello, again")
 
   test("moves cursor with arrows home and end"):
     val editor = Editor("ab\ncd")
