@@ -12,6 +12,24 @@ class TerminalInputParserSuite extends munit.FunSuite:
       TerminalInput.Key(TerminalKey.Left, KeyModifiers(ctrl = true))
     )
 
+  test("parses legacy alt+arrow variants"):
+    assertEquals(
+      TerminalInputParser.parseOne("\u001bB"),
+      TerminalInput.Key(TerminalKey.Left, KeyModifiers(alt = true))
+    )
+    assertEquals(
+      TerminalInputParser.parseOne("\u001bF"),
+      TerminalInput.Key(TerminalKey.Right, KeyModifiers(alt = true))
+    )
+    assertEquals(
+      TerminalInputParser.parseOne("\u001bb"),
+      TerminalInput.Key(TerminalKey.Left, KeyModifiers(alt = true))
+    )
+    assertEquals(
+      TerminalInputParser.parseOne("\u001bf"),
+      TerminalInput.Key(TerminalKey.Right, KeyModifiers(alt = true))
+    )
+
   test("parses kitty csi-u printable key"):
     assertEquals(
       TerminalInputParser.parseOne("\u001b[97;5u"),

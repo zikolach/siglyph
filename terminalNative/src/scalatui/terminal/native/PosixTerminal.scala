@@ -32,8 +32,10 @@ final class PosixTerminal(
   @volatile private var currentRows                         = initialRows
   private var inputThread: Thread | Null                    = null
   private var resizeThread: Thread | Null                   = null
+  private var flushThread: Thread | Null                    = null
   private var savedState: Ptr[termios.termios]              = null
   private val inputBuffer                                   = TerminalInputBuffer()
+  private val inputLock                                     = Object()
 
   override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
     if !running then
@@ -48,10 +50,14 @@ final class PosixTerminal(
         enableRawMode()
         write("\u001b[?2004h")
         running = true
-        val thread = Thread(() => readLoop(), "scala-tui-posix-terminal-input")
+        val thread  = Thread(() => readLoop(), "scala-tui-posix-terminal-input")
+        val flusher = Thread(() => flushLoop(), "scala-tui-posix-terminal-flush")
         thread.setDaemon(true)
+        flusher.setDaemon(true)
         inputThread = thread
+        flushThread = flusher
         thread.start()
+        flusher.start()
         startResizePolling()
       catch
         case e: Throwable =>
@@ -66,8 +72,10 @@ final class PosixTerminal(
       running = false
       stopResizePolling()
       Option(inputThread).foreach(_.interrupt())
+      Option(flushThread).foreach(_.interrupt())
       inputThread = null
-      inputBuffer.clear()
+      flushThread = null
+      inputLock.synchronized(inputBuffer.clear())
       restoreMode()
 
   override def write(data: String): Unit =
@@ -166,15 +174,29 @@ final class PosixTerminal(
     while running do
       val read = unistd.read(unistd.STDIN_FILENO, buffer, 4096.toUSize)
       if read < 0 then running = false
-      else if read == 0 then inputBuffer.flush().foreach(inputHandler)
+      else if read == 0 then ()
       else
-        val bytes = Array.ofDim[Byte](read)
-        var i     = 0
+        val bytes  = Array.ofDim[Byte](read)
+        var i      = 0
         while i < read do
           bytes(i) = (!(buffer + i)).toByte
           i += 1
-        val data  = String(bytes, java.nio.charset.StandardCharsets.UTF_8)
-        inputBuffer.process(data).foreach(inputHandler)
+        val data   = String(bytes, java.nio.charset.StandardCharsets.UTF_8)
+        val inputs = inputLock.synchronized(inputBuffer.process(data))
+        inputs.foreach(inputHandler)
+
+  private def flushLoop(): Unit =
+    while running do
+      try
+        Thread.sleep(PosixTerminal.IncompleteEscapeFlushMillis)
+        flushPending()
+      catch
+        case _: InterruptedException => running = false
+        case _: Throwable            => ()
+
+  private def flushPending(): Unit =
+    val inputs = inputLock.synchronized(inputBuffer.flush())
+    inputs.foreach(inputHandler)
 
   private def clearFlags(value: termios.tcflag_t, mask: Int): termios.tcflag_t =
     (value.toInt & ~mask).toUInt
@@ -183,7 +205,8 @@ final class PosixTerminal(
     (value.toInt | mask).toUInt
 
 object PosixTerminal:
-  private val ResizePollMillis = 150L
+  private val ResizePollMillis            = 150L
+  private val IncompleteEscapeFlushMillis = 75L
 
   private val TIOCGWINSZ: CLongInt =
     if Option(System.getProperty("os.name")).exists(_.toLowerCase.contains("mac")) then

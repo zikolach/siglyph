@@ -56,6 +56,12 @@ class ComponentsSuite extends munit.FunSuite:
     assertEquals(input.value, "ab")
     assertEquals(Ansi.strip(rendered), "ab ")
 
+  test("unfocused input does not emit cursor marker"):
+    val input    = Input("ab")
+    val rendered = input.render(10).head
+
+    assert(!rendered.contains(CursorMarker.Sequence), rendered)
+
   test("input supports readline-style ctrl shortcuts"):
     val input = Input("hello world")
     input.handleInput(TerminalInput.Key(TerminalKey.Character("a"), KeyModifiers(ctrl = true)))

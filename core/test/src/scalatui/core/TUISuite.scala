@@ -33,6 +33,68 @@ class TUISuite extends munit.FunSuite:
     assert(output.contains(TUI.SyncEnd))
     assert(!output.contains("\u001b[2J\u001b[H\u001b[3J"), output)
 
+  test("hardware cursor positioning is disabled by default and strips markers"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal)
+    tui.addChild(MutableLine(s"ab${CursorMarker.Sequence}\u001b[7mc\u001b[27m"))
+
+    tui.start()
+
+    assert(!terminal.output.contains(CursorMarker.Sequence), terminal.output)
+    assert(terminal.output.contains("ab\u001b[7mc\u001b[27m" + TUI.LineReset), terminal.output)
+
+  test("hardware cursor positioning moves cursor to marker when enabled"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal, TUIOptions(hardwareCursorPositioning = true))
+    tui.addChild(MutableLine(s"ab${CursorMarker.Sequence}\u001b[7mc\u001b[27m"))
+
+    tui.start()
+
+    assert(!terminal.output.contains(CursorMarker.Sequence), terminal.output)
+    assert(terminal.output.contains(s"\r\u001b[2C${TUI.SyncEnd}"), terminal.output)
+
+  test("hardware cursor positioning preserves no-marker render behavior"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal, TUIOptions(hardwareCursorPositioning = true))
+    tui.addChild(MutableLine("hello"))
+
+    tui.start()
+
+    assert(terminal.output.contains("hello" + TUI.LineReset + TUI.SyncEnd), terminal.output)
+    assert(!terminal.output.contains("\u001b[2C"), terminal.output)
+
+  test("overlay composition determines surviving cursor marker"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal, TUIOptions(hardwareCursorPositioning = true))
+    tui.addChild(MutableLine(s"a${CursorMarker.Sequence}\u001b[7mb\u001b[27m"))
+    tui.showOverlay(
+      MutableLine("zz"),
+      OverlayOptions(
+        width = Some(OverlaySize.Absolute(2)),
+        row = Some(OverlaySize.Absolute(0)),
+        col = Some(OverlaySize.Absolute(0)),
+        focusCapturing = false
+      )
+    )
+
+    tui.start()
+
+    assert(!terminal.output.contains(CursorMarker.Sequence), terminal.output)
+    assert(!terminal.output.contains("\u001b[1C"), terminal.output)
+    assert(Ansi.strip(terminal.output).contains("zz"), terminal.output)
+
+  test("differential renderer compares marker-stripped frames"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal)
+    tui.addChild(MutableLine(s"a${CursorMarker.Sequence}\u001b[7mb\u001b[27m"))
+    tui.start()
+    terminal.clearWrites()
+
+    tui.requestRender()
+    tui.flushRender()
+
+    assertEquals(terminal.output, "")
+
   test("partial render moves to first changed line and writes changed tail"):
     val terminal = VirtualTerminal(20, 5)
     val first    = MutableLine("first")

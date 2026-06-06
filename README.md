@@ -36,12 +36,20 @@ Run the JVM interactive demo in a macOS/Linux TTY:
 
 ```bash
 mill interactiveJvmDemo.run
+# Optional: enable hardware cursor positioning for manual validation
+mill interactiveJvmDemo.run -- --hardware-cursor
 ```
 
 Build the Scala Native interactive demo:
 
 ```bash
 mill interactiveNativeDemo.nativeLink
+```
+
+From the output binary path (example):
+
+```bash
+out/interactiveNativeDemo/nativeLink.dest/out --hardware-cursor
 ```
 
 The interactive demo showcases the multiline editor, overlay-backed slash-command autocomplete, tick-driven loaders, cancellable loaders, and resize-safe rendering. Controls include:
@@ -65,6 +73,8 @@ mill keyTester.run
 ## Multiline editor API
 
 `scalatui.components.Editor` is a rendered multiline component backed by `scalatui.editing.EditorBuffer`. It exposes `onChange` and `onSubmit` callbacks, focus-aware fake cursor rendering with a zero-width `CursorMarker`, Unicode/grapheme-aware edits, pi-tui-style undo/kill-ring behavior, large-paste marker compaction/expansion, and configurable Enter behavior via `EditorEnterBehavior`.
+
+By default the runtime preserves existing fake-cursor-only behavior while stripping cursor markers before terminal output. Applications that want terminal-native cursor/IME positioning can opt in with `TUIOptions(hardwareCursorPositioning = true)` when constructing `TUI`; the shared renderer scans the final composited frame, strips marker metadata, and moves the hardware cursor to the focused editor/input cursor without replacing the visible fake cursor.
 
 Default prompt-like behavior submits on `Enter` and inserts a newline on `Shift+Enter`. Editor-like behavior can be configured with `EditorEnterBehavior.NewlineOnEnter()`, where plain `Enter` inserts a newline and `Cmd/Super+Enter` submits. Modified Enter support depends on terminal/parser normalization.
 

@@ -361,7 +361,7 @@ The `Input` and `Editor` components SHALL map advanced editing commands to the c
 - **THEN** the Scala implementation documents the deviation and preserves the closest typed-input behavior without changing logical editing semantics
 
 ### Requirement: Hardware cursor marker support
-When IME and terminal marker workflows are enabled, focused editing components SHALL emit a zero-width cursor marker in front of the visual cursor position while preserving fake-cursor rendering.
+When IME and terminal marker workflows are enabled, focused editing components SHALL emit a zero-width cursor marker in front of the visual cursor position while preserving fake-cursor rendering, and the marker SHALL be suitable for runtime hardware cursor positioning.
 
 #### Scenario: Cursor marker is emitted on focused input
 - **WHEN** an `Input` or `Editor` is focused and renders a fake cursor
@@ -370,4 +370,12 @@ When IME and terminal marker workflows are enabled, focused editing components S
 #### Scenario: Marker does not alter semantic text
 - **WHEN** callbacks observe the submitted editor value
 - **THEN** no marker sequence appears in logical text values returned by `onSubmit` or `text` getters
+
+#### Scenario: Unfocused editors do not claim hardware cursor
+- **WHEN** an `Input` or `Editor` is not focused
+- **THEN** it does not emit a cursor marker for hardware cursor positioning
+
+#### Scenario: Autocomplete ownership suppresses editor marker when appropriate
+- **WHEN** editor autocomplete has a focus-capturing suggestion overlay that owns keyboard input
+- **THEN** the editor does not emit a stale hardware cursor marker that would compete with the active overlay focus target
 

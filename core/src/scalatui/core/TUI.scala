@@ -6,8 +6,21 @@ import scalatui.terminal.{Terminal, TerminalInput, TerminalKey}
 
 import scala.collection.mutable.ArrayBuffer
 
+/**
+ * Runtime options for [[TUI]].
+ *
+ * @param hardwareCursorPositioning
+ *   When true, the shared renderer strips focused editor cursor markers from the final frame and
+ *   moves the terminal hardware cursor to the marker position after output. The default is false so
+ *   existing applications keep relying on the rendered fake cursor only. This option is
+ *   backend-independent and does not require application code to emit raw terminal escape strings.
+ */
+final case class TUIOptions(hardwareCursorPositioning: Boolean = false) derives CanEqual
+
 /** Main terminal UI runtime with a small differential renderer. */
-final class TUI(val terminal: Terminal) extends TUIContext, OverlayHost:
+final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
+    extends TUIContext,
+      OverlayHost:
   private val root                                    = Container()
   private val lifecycleLock                           = Object()
   private val overlayStack                            = ArrayBuffer.empty[TUI.OverlayEntry]
@@ -139,7 +152,15 @@ final class TUI(val terminal: Terminal) extends TUIContext, OverlayHost:
   def stop(): Unit = lifecycleLock.synchronized {
     if running then
       running = false
-      if previousLines.nonEmpty then terminal.write("\r\n")
+      if previousLines.nonEmpty then
+        val builder = StringBuilder()
+        appendVerticalMove(
+          builder,
+          fromRow = cursorRow,
+          toRow = math.max(0, previousLines.length - 1)
+        )
+        builder.append("\r\n")
+        terminal.write(builder.result())
       terminal.showCursor()
       terminal.stop()
       lifecycleLock.notifyAll()
@@ -314,60 +335,112 @@ final class TUI(val terminal: Terminal) extends TUIContext, OverlayHost:
     val height       = positiveDimension(terminal.rows)
     val rawLines     = root.render(width)
     val overlayLines = renderOverlays(rawLines, width, height)
-    val newLines     = applyLineResets(sanitizeLines(overlayLines, width))
+    val frame        = prepareFrame(overlayLines, width)
+    val newLines     = frame.lines
 
     val widthChanged  = (previousWidth !== 0) && (previousWidth !== width)
     val heightChanged = (previousHeight !== 0) && (previousHeight !== height)
     if previousLines.isEmpty then
       val shouldClear = clearRequested
       clearRequested = false
-      fullRender(newLines, width, height, clear = shouldClear)
+      fullRender(frame, width, height, clear = shouldClear)
     else if widthChanged || heightChanged then
       clearRequested = false
-      redrawFromFrameStart(newLines, width, height)
+      redrawFromFrameStart(frame, width, height)
     else
       clearRequested = false
       val firstChanged = firstChangedLine(previousLines, newLines)
-      if firstChanged >= 0 then partialRender(newLines, firstChanged)
+      if firstChanged >= 0 then partialRender(frame, firstChanged)
+      else positionHardwareCursorOnly(frame.position)
       previousLines = newLines
       previousWidth = width
       previousHeight = height
 
-  private def fullRender(lines: Vector[String], width: Int, height: Int, clear: Boolean): Unit =
+  private def fullRender(
+      frame: CursorMarker.ScanResult,
+      width: Int,
+      height: Int,
+      clear: Boolean
+  ): Unit =
     val builder = StringBuilder()
     builder.append(SyncStart)
     if clear then builder.append("\u001b[2J\u001b[H\u001b[3J")
-    builder.append(lines.mkString("\r\n"))
+    builder.append(frame.lines.mkString("\r\n"))
+    appendHardwareCursorMove(builder, frame)
     builder.append(SyncEnd)
     terminal.write(builder.result())
-    previousLines = lines
+    previousLines = frame.lines
     previousWidth = width
     previousHeight = height
-    cursorRow = math.max(0, lines.length - 1)
+    cursorRow = finalCursorRow(frame)
 
-  private def redrawFromFrameStart(lines: Vector[String], width: Int, height: Int): Unit =
+  private def redrawFromFrameStart(frame: CursorMarker.ScanResult, width: Int, height: Int): Unit =
     val builder = StringBuilder()
     builder.append(SyncStart)
-    if cursorRow > 0 then builder.append(s"\u001b[${cursorRow}A")
+    appendVerticalMove(builder, fromRow = cursorRow, toRow = 0)
     builder.append("\r\u001b[J")
-    builder.append(lines.mkString("\r\n"))
+    builder.append(frame.lines.mkString("\r\n"))
+    appendHardwareCursorMove(builder, frame)
     builder.append(SyncEnd)
     terminal.write(builder.result())
-    previousLines = lines
+    previousLines = frame.lines
     previousWidth = width
     previousHeight = height
-    cursorRow = math.max(0, lines.length - 1)
+    cursorRow = finalCursorRow(frame)
 
-  private def partialRender(lines: Vector[String], firstChanged: Int): Unit =
-    val moveUp  = math.max(0, cursorRow - firstChanged)
+  private def partialRender(frame: CursorMarker.ScanResult, firstChanged: Int): Unit =
     val builder = StringBuilder()
     builder.append(SyncStart)
-    if moveUp > 0 then builder.append(s"\u001b[${moveUp}A")
+    appendVerticalMove(builder, fromRow = cursorRow, toRow = firstChanged)
     builder.append("\r\u001b[J")
-    builder.append(lines.drop(firstChanged).mkString("\r\n"))
+    builder.append(frame.lines.drop(firstChanged).mkString("\r\n"))
+    appendHardwareCursorMove(builder, frame)
     builder.append(SyncEnd)
     terminal.write(builder.result())
-    cursorRow = math.max(0, lines.length - 1)
+    cursorRow = finalCursorRow(frame)
+
+  private def positionHardwareCursorOnly(position: Option[CursorMarker.Position]): Unit =
+    if options.hardwareCursorPositioning then
+      position.foreach { target =>
+        val builder = StringBuilder()
+        appendVerticalMove(builder, fromRow = cursorRow, toRow = target.row)
+        builder.append("\r")
+        appendMoveRight(builder, target.column)
+        if builder.nonEmpty then
+          terminal.write(builder.result())
+          cursorRow = target.row
+      }
+
+  private def prepareFrame(lines: Vector[String], width: Int): CursorMarker.ScanResult =
+    CursorMarker.stripAndLocate(applyLineResets(sanitizeLines(lines, width)))
+
+  private def appendHardwareCursorMove(
+      builder: StringBuilder,
+      frame: CursorMarker.ScanResult
+  ): Unit =
+    if options.hardwareCursorPositioning then
+      frame.position.foreach { target =>
+        appendVerticalMove(
+          builder,
+          fromRow = math.max(0, frame.lines.length - 1),
+          toRow = target.row
+        )
+        builder.append("\r")
+        appendMoveRight(builder, target.column)
+      }
+
+  private def finalCursorRow(frame: CursorMarker.ScanResult): Int =
+    if options.hardwareCursorPositioning then
+      frame.position.map(_.row).getOrElse(math.max(0, frame.lines.length - 1))
+    else math.max(0, frame.lines.length - 1)
+
+  private def appendVerticalMove(builder: StringBuilder, fromRow: Int, toRow: Int): Unit =
+    val delta = toRow - fromRow
+    if delta > 0 then builder.append(s"\u001b[${delta}B")
+    else if delta < 0 then builder.append(s"\u001b[${-delta}A")
+
+  private def appendMoveRight(builder: StringBuilder, columns: Int): Unit =
+    if columns > 0 then builder.append(s"\u001b[${columns}C")
 
   private def positiveDimension(value: Int): Int = math.max(1, value)
 

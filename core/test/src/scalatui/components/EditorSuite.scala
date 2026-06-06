@@ -29,6 +29,21 @@ class EditorSuite extends munit.FunSuite:
     roomy.focused = true
     assertEquals(roomy.render(5).head, s"ab${CursorMarker.Sequence}\u001b[7m \u001b[27m")
 
+  test("editor suppresses cursor marker while autocomplete owns input"):
+    val editor = Editor(
+      "/",
+      EditorOptions(
+        autocompleteProvider = Some(SlashCommandAutocompleteProvider(Vector(SlashCommand("help")))),
+        autocompleteTrigger = EditorAutocompleteTrigger.ExplicitTabOnly
+      )
+    )
+    editor.focused = true
+
+    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Tab)), InputResult.Render)
+
+    val rendered = editor.render(20).head
+    assert(!rendered.contains(CursorMarker.Sequence), rendered)
+
   test("inserts printable input and multiline paste via editor buffer"):
     var changed = Vector.empty[String]
     val editor  = Editor(options = EditorOptions(onChange = text => changed :+= text))
