@@ -12,7 +12,7 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 env:
@@ -69,3 +69,51 @@ jobs:
           mill mill.javalib.MavenPublishModule/publishAll \
             --releaseUri "$GITHUB_PACKAGES_URI" \
             --snapshotUri "$GITHUB_PACKAGES_URI"
+
+      - name: Collect release artifacts
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          rm -rf release-artifacts
+          mkdir -p release-artifacts
+          cp out/core/jar.dest/out.jar "release-artifacts/siglyph-core_3-${version}.jar"
+          cp out/terminalJvm/jar.dest/out.jar "release-artifacts/siglyph-terminal-jvm_3-${version}.jar"
+          cp out/markdown/jar.dest/out.jar "release-artifacts/siglyph-markdown_3-${version}.jar"
+          cp out/image/jar.dest/out.jar "release-artifacts/siglyph-image_3-${version}.jar"
+          ls -lh release-artifacts
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          notes=$(cat <<EOF
+          Published Maven packages to GitHub Packages:
+
+          - \`io.github.zikolach:siglyph-core_3:${version}\`
+          - \`io.github.zikolach:siglyph-terminal-jvm_3:${version}\`
+          - \`io.github.zikolach:siglyph-markdown_3:${version}\`
+          - \`io.github.zikolach:siglyph-image_3:${version}\`
+
+          Maven repository:
+
+          \`https://maven.pkg.github.com/zikolach/siglyph\`
+          EOF
+          )
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$GITHUB_REF_NAME" \
+              --notes "$notes"
+            gh release upload "$GITHUB_REF_NAME" release-artifacts/*.jar \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release-artifacts/*.jar \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$GITHUB_REF_NAME" \
+              --notes "$notes"
+          fi
