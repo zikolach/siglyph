@@ -15,6 +15,9 @@ permissions:
   contents: read
   packages: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   publish-github-packages:
     name: Publish Maven packages to GitHub Packages
