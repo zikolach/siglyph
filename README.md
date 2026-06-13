@@ -14,6 +14,23 @@
 - JVM raw mode: initially via `stty`; it should fail clearly when raw-mode startup is requested and `stty` is unavailable.
 - Windows and Scala.js/browser support are out of scope for v0.
 
+## Packages
+
+Publishable Maven modules use group id `io.github.zikolach` and Scala 3 artifact suffixes:
+
+- `siglyph-core_3`
+- `siglyph-terminal-jvm_3`
+- `siglyph-markdown_3`
+- `siglyph-image_3`
+
+Release publishing is handled by GitHub Actions on `v*` tags, or manually through the `Publish` workflow. The build derives the package version from `SIGLYPH_VERSION`, then from tag names like `v0.1.0`, and otherwise defaults to `0.1.0-SNAPSHOT` for local builds.
+
+Packages are published to GitHub Packages at:
+
+```text
+https://maven.pkg.github.com/zikolach/siglyph
+```
+
 ## First milestone
 
 The first usable milestone targets:

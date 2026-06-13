@@ -1,0 +1,68 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish, for example 0.1.0 or 0.1.0-SNAPSHOT'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish-github-packages:
+    name: Publish Maven packages to GitHub Packages
+    runs-on: ubuntu-latest
+
+    env:
+      MILL_MAVEN_USERNAME: ${{ github.actor }}
+      MILL_MAVEN_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+      SIGLYPH_VERSION: ${{ inputs.version }}
+      GITHUB_PACKAGES_URI: https://maven.pkg.github.com/zikolach/siglyph
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Cache Scala and Mill dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/coursier
+            ~/.cache/mill
+            ~/.ivy2/cache
+            ~/.sbt
+          key: ${{ runner.os }}-scala-${{ hashFiles('build.mill', '.scalafix.conf', '.scalafmt.conf') }}
+          restore-keys: |
+            ${{ runner.os }}-scala-
+
+      - name: Install Mill
+        run: |
+          curl -fLo mill https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/1.1.6/mill-dist-1.1.6-mill.sh
+          chmod +x mill
+          echo "$PWD" >> "$GITHUB_PATH"
+          ./mill --version
+
+      - name: Compile all modules
+        run: mill __.compile
+
+      - name: Run tests
+        run: mill __.test
+
+      - name: Publish packages
+        run: |
+          mill mill.javalib.MavenPublishModule/publishAll \
+            --releaseUri "$GITHUB_PACKAGES_URI" \
+            --snapshotUri "$GITHUB_PACKAGES_URI"

@@ -1,9 +1,34 @@
 import mill.*
 import mill.scalalib.*
+import mill.scalalib.publish.*
 import mill.scalanativelib.*
+
+private val SiglyphOrganization = "io.github.zikolach"
+private val SiglyphRepoOwner    = "zikolach"
+private val SiglyphRepoName     = "siglyph"
+
+private def siglyphVersion(env: Map[String, String]): String =
+  env
+    .get("SIGLYPH_VERSION")
+    .filter(_.nonEmpty)
+    .orElse(env.get("GITHUB_REF_NAME").filter(_.startsWith("v")).map(_.stripPrefix("v")))
+    .getOrElse("0.1.0-SNAPSHOT")
 
 trait SiglyphModule extends ScalaModule {
   def scalaVersion = "3.7.4"
+}
+
+trait SiglyphPublishModule extends SiglyphModule with PublishModule {
+  def publishVersion = Task.Input { siglyphVersion(Task.env) }
+
+  def pomSettings = PomSettings(
+    description = "Node-free Scala terminal UI library inspired by pi-tui",
+    organization = SiglyphOrganization,
+    url = s"https://github.com/$SiglyphRepoOwner/$SiglyphRepoName",
+    licenses = Seq(License.MIT),
+    versionControl = VersionControl.github(SiglyphRepoOwner, SiglyphRepoName),
+    developers = Seq(Developer("zikolach", "zikolach", "https://github.com/zikolach"))
+  )
 }
 
 private def workspaceRoot: os.Path =
@@ -56,15 +81,17 @@ def quality = Task.Input {
   runScalafix()
 }
 
-object core extends SiglyphModule {
+object core extends SiglyphPublishModule {
+  def artifactName = "siglyph-core"
   object test extends ScalaTests {
     def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
     def testFramework = "munit.Framework"
   }
 }
 
-object terminalJvm extends SiglyphModule {
-  def moduleDeps = Seq(core)
+object terminalJvm extends SiglyphPublishModule {
+  def artifactName = "siglyph-terminal-jvm"
+  def moduleDeps   = Seq(core)
 }
 
 object coreNative extends ScalaNativeModule {
@@ -79,8 +106,9 @@ object terminalNative extends ScalaNativeModule {
   def moduleDeps         = Seq(coreNative)
 }
 
-object markdown extends SiglyphModule {
-  def moduleDeps = Seq(core)
+object markdown extends SiglyphPublishModule {
+  def artifactName = "siglyph-markdown"
+  def moduleDeps   = Seq(core)
 
   object test extends ScalaTests {
     def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
@@ -88,8 +116,9 @@ object markdown extends SiglyphModule {
   }
 }
 
-object image extends SiglyphModule {
-  def moduleDeps = Seq(core)
+object image extends SiglyphPublishModule {
+  def artifactName = "siglyph-image"
+  def moduleDeps   = Seq(core)
 
   object test extends ScalaTests {
     def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
