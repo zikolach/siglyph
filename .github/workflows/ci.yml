@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-package:
+    name: Test and package jars
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java and Mill
+        uses: coursier/setup-action@v1
+        with:
+          jvm: temurin:21
+          apps: mill:1.1.6
+
+      - name: Cache Scala dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/coursier
+            ~/.ivy2/cache
+            ~/.sbt
+          key: ${{ runner.os }}-scala-${{ hashFiles('build.mill', '.scalafix.conf', '.scalafmt.conf') }}
+          restore-keys: |
+            ${{ runner.os }}-scala-
+
+      - name: Compile all modules
+        run: mill __.compile
+
+      - name: Run tests
+        run: mill __.test
+
+      - name: Package jars
+        run: mill __.jar
+
+      - name: Collect packaged jars
+        run: |
+          set -euo pipefail
+          rm -rf artifacts/jars
+          mkdir -p artifacts/jars
+          for module in \
+            core \
+            coreNative \
+            terminalJvm \
+            terminalNative \
+            markdown \
+            image \
+            demo \
+            keyTester \
+            interactiveDemo \
+            interactiveDemoNative \
+            interactiveJvmDemo \
+            interactiveNativeDemo
+          do
+            src="out/${module}/jar.dest/out.jar"
+            if [ -f "${src}" ]; then
+              cp "${src}" "artifacts/jars/${module}.jar"
+            else
+              echo "Missing expected jar: ${src}" >&2
+              exit 1
+            fi
+          done
+          ls -lh artifacts/jars
+
+      - name: Upload jar artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: siglyph-jars
+          path: artifacts/jars/*.jar
+          if-no-files-found: error
