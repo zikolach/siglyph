@@ -17,22 +17,30 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Java and Mill
-        uses: coursier/setup-action@v1
+      - name: Set up Java
+        uses: actions/setup-java@v4
         with:
-          jvm: temurin:21
-          apps: mill:1.1.6
+          distribution: temurin
+          java-version: '21'
 
-      - name: Cache Scala dependencies
+      - name: Cache Scala and Mill dependencies
         uses: actions/cache@v4
         with:
           path: |
             ~/.cache/coursier
+            ~/.cache/mill
             ~/.ivy2/cache
             ~/.sbt
           key: ${{ runner.os }}-scala-${{ hashFiles('build.mill', '.scalafix.conf', '.scalafmt.conf') }}
           restore-keys: |
             ${{ runner.os }}-scala-
+
+      - name: Install Mill
+        run: |
+          curl -fLo mill https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/1.1.6/mill-dist-1.1.6-mill.sh
+          chmod +x mill
+          echo "$PWD" >> "$GITHUB_PATH"
+          ./mill --version
 
       - name: Compile all modules
         run: mill __.compile
