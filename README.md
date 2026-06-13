@@ -59,10 +59,12 @@ The interactive demo showcases the multiline editor, overlay-backed slash-comman
 - `Enter` submits editor text, selects the focused action, ticks/cancels loaders through actions, or accepts the selected autocomplete suggestion
 - `Shift+Enter` inserts a newline in the editor when the terminal reports a normalized modified Enter event
 - Type `/`, `./`, or `@` in the editor and press `Tab` to autocomplete; `↑` / `↓` navigate suggestions, `Enter` or `Tab` accepts, and `Esc` cancels
+- `PageUp` / `PageDown` page within wrapped multiline text; `Ctrl+]` and `Ctrl+Alt+]` jump among typed target characters
 - `Ctrl+A` / `Ctrl+E`, arrows, `Home` / `End`, `Backspace`, `Delete`, `Ctrl+K`, and `Ctrl+W` edit the multiline buffer
 - `Ctrl+-` undoes the previous edit, `Ctrl+Y` yanks the latest killed text, `Alt+Y` yank-pops, `Alt+D` / `Alt+Delete` deletes a word forward, and `Alt+Left` / `Alt+Right` or `Ctrl+Left` / `Ctrl+Right` move by word where the terminal reports those modifiers
 - `Ctrl+L` clears submitted messages
 - `Esc` or `Ctrl+C` exits and restores terminal state
+- Editor keybindings are configurable via `EditorOptions.keybindings` (`KeybindingManager`) and keep defaults unless overridden.
 
 Run the JVM key tester:
 

@@ -4,6 +4,9 @@ import scalatui.ansi.Ansi
 import scalatui.core.TUI
 import scalatui.terminal.{KeyModifiers, TerminalInput, TerminalKey, VirtualTerminal}
 
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+
 class InteractiveDemoSuite extends munit.FunSuite:
   test("interactive demo writes width-safe output at narrow widths"):
     Vector(1, 10, 22, 40, 80).foreach { width =>
@@ -50,10 +53,59 @@ class InteractiveDemoSuite extends munit.FunSuite:
     assert(editorLine >= 0, suggestions)
     assert(helpLine > editorLine, suggestions)
 
+    terminal.clearWrites()
     terminal.sendInput(TerminalInput.Key(TerminalKey.Down))
     terminal.sendInput(TerminalInput.Key(TerminalKey.Enter))
+    tui.requestRender(force = true)
+    tui.flushRender()
 
-    assert(Ansi.strip(terminal.output).contains("/clear"), Ansi.strip(terminal.output))
+    val postEnter      = Ansi.strip(terminal.output)
+    val lastFrame      = postEnter.split("scala-tui showcase demo").last
+    assert(
+      !lastFrame.contains("help — Show demo help"),
+      postEnter
+    )
+    assert(
+      lastFrame.contains("Submitted: (none)"),
+      postEnter
+    )
+
+  test("interactive demo shows accurate file-preview hidden-line counts"):
+    val terminal = VirtualTerminal(120, 40)
+    val tui      = TUI(terminal)
+    InteractiveDemo.install(tui)
+    tui.start()
+
+    val currentDir = System.getProperty("user.dir")
+    val tempFile   = Files.createTempFile("scala-tui-demo-preview-", ".txt")
+    try
+      Files.writeString(
+        tempFile,
+        (1 to 25).map(i => s"line-$i").mkString("\n"),
+        StandardCharsets.UTF_8
+      )
+      val absolutePath = tempFile.toAbsolutePath.toString
+
+      terminal.sendInput(TerminalInput.Key(TerminalKey.Character("m"), KeyModifiers(ctrl = true)))
+      terminal.sendInput(TerminalInput.Key(TerminalKey.Character("p"), KeyModifiers(ctrl = true)))
+
+      currentDir.foreach(_ =>
+        terminal.sendInput(TerminalInput.Key(TerminalKey.Backspace))
+      )
+      absolutePath.foreach { ch =>
+        terminal.sendInput(TerminalInput.Key(TerminalKey.Character(ch.toString)))
+      }
+      terminal.sendInput(TerminalInput.Key(TerminalKey.Enter))
+
+      terminal.clearWrites()
+      tui.requestRender(force = true)
+      tui.flushRender()
+
+      val output    = Ansi.strip(terminal.output)
+      val lastFrame = output.split("scala-tui showcase demo").last
+      assert(lastFrame.contains("... (+7 lines hidden)"), output)
+    finally
+      Files.deleteIfExists(tempFile)
 
   test("interactive demo lets Tab reach editor autocomplete"):
     val terminal = VirtualTerminal(60, 24)
@@ -83,15 +135,17 @@ class InteractiveDemoSuite extends munit.FunSuite:
     terminal.sendInput(TerminalInput.Key(TerminalKey.Character("t"), KeyModifiers(ctrl = true)))
     terminal.sendInput(TerminalInput.Key(TerminalKey.Down))
     terminal.sendInput(TerminalInput.Key(TerminalKey.Down))
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Down))
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Down))
     terminal.sendInput(TerminalInput.Key(TerminalKey.Enter))
 
-    assert(Ansi.strip(terminal.output).contains("◓ Tick me from Actions"), terminal.output)
+    assert(Ansi.strip(terminal.output).contains("◓ Tick me from Actions"), Ansi.strip(terminal.output))
 
     terminal.clearWrites()
     terminal.sendInput(TerminalInput.Key(TerminalKey.Down))
     terminal.sendInput(TerminalInput.Key(TerminalKey.Enter))
 
-    assert(Ansi.strip(terminal.output).contains("! Cancelled"), terminal.output)
+    assert(Ansi.strip(terminal.output).contains("! Cancelled"), Ansi.strip(terminal.output))
 
   test("interactive demo keeps autocomplete overlay safe during narrow resize"):
     val terminal = VirtualTerminal(60, 20)

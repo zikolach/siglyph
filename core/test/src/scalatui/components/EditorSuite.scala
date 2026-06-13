@@ -4,7 +4,7 @@ import scalatui.ansi.Ansi
 import scalatui.autocomplete.*
 import scalatui.core.{CursorMarker, InputResult, OverlayOptions, OverlaySize, TUI}
 import scalatui.editing.EditorCursor
-import scalatui.terminal.{KeyModifiers, TerminalInput, TerminalKey, VirtualTerminal}
+import scalatui.terminal.{KeyDescriptor, KeybindingManager, KeyModifiers, TerminalInput, TerminalKey, VirtualTerminal}
 
 class EditorSuite extends munit.FunSuite:
   test("renders focused fake cursor on character and hides it when unfocused"):
@@ -175,6 +175,153 @@ class EditorSuite extends munit.FunSuite:
     assertEquals(editor.cursor, EditorCursor(1, 1))
     editor.handleInputResult(TerminalInput.Key(TerminalKey.End))
     assertEquals(editor.cursor, EditorCursor(1, 2))
+
+  test("editor submit keybinding is configurable"):
+    var submitted = ""
+    val editor    = Editor(
+      options = EditorOptions(
+        enterBehavior = EditorEnterBehavior.NewlineOnEnter(),
+        keybindings = KeybindingManager.fromRawBindings(
+          Map(
+            "tui.input.submit" -> Vector(KeyDescriptor(TerminalKey.Character("x"), KeyModifiers(ctrl = true)))
+          )
+        ),
+        onSubmit = text => submitted = text
+      )
+    )
+
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("a")))
+    assertEquals(
+      editor.handleInputResult(TerminalInput.Key(TerminalKey.Enter)),
+      InputResult.Render
+    )
+    assertEquals(editor.text, "a\n")
+
+    assertEquals(
+      editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("x"), KeyModifiers(ctrl = true))),
+      InputResult.NoRender
+    )
+    assertEquals(submitted, "a\n")
+
+  test("editor supports custom movement, deletion, newline, and submit bindings"):
+    var submitted = ""
+    val editor    = Editor(
+      "abc",
+      EditorOptions(
+        keybindings = KeybindingManager.fromRawBindings(
+          Map(
+            "tui.editor.cursorLeft" -> Vector(KeyDescriptor(TerminalKey.Character("z"), KeyModifiers(alt = true))),
+            "tui.editor.deleteCharBackward" -> Vector(KeyDescriptor(TerminalKey.Character("x"), KeyModifiers(ctrl = true))),
+            "tui.input.newLine" -> Vector(KeyDescriptor(TerminalKey.Character("n"), KeyModifiers(ctrl = true))),
+            "tui.input.submit" -> Vector(KeyDescriptor(TerminalKey.Character("s"), KeyModifiers(ctrl = true)))
+          )
+        ),
+        onSubmit = text => submitted = text
+      )
+    )
+
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("z"), KeyModifiers(alt = true)))
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("x"), KeyModifiers(ctrl = true)))
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("n"), KeyModifiers(ctrl = true)))
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("s"), KeyModifiers(ctrl = true)))
+
+    assertEquals(editor.text, "a\nc")
+    assertEquals(submitted, "a\nc")
+
+  test("editor custom autocomplete select bindings and slash confirm semantics"):
+    var submitted = ""
+    val editor    = Editor(
+      options = EditorOptions(
+        autocompleteProvider = Some(
+          SlashCommandAutocompleteProvider(
+            Vector(
+              SlashCommand("help"),
+              SlashCommand("quit")
+            )
+          )
+        ),
+        keybindings = KeybindingManager.fromRawBindings(
+          Map(
+            "tui.select.down" -> Vector(KeyDescriptor(TerminalKey.Character("j"), KeyModifiers(alt = true)))
+          )
+        ),
+        onSubmit = text => submitted = text
+      )
+    )
+
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("/")))
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("j"), KeyModifiers(alt = true)))
+    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Enter)), InputResult.NoRender)
+    assertEquals(editor.text, "/quit ")
+    assertEquals(submitted, "/quit ")
+
+  test("autocomplete overlays consume selection commands before history while active"):
+    val alwaysProvider =
+      AutocompleteProvider.sync(_ =>
+        Some(AutocompleteSuggestions(Vector(AutocompleteItem("help", "help")), "/"))
+      )
+
+    val editor = Editor(options = EditorOptions(autocompleteProvider = Some(alwaysProvider)))
+    editor.addToHistory("first")
+
+    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Tab)), InputResult.Render)
+    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Up)), InputResult.Render)
+    assertEquals(editor.text, "")
+
+  test("supports command history browsing and restoration"):
+    val editor = Editor()
+    editor.addToHistory("second")
+    editor.addToHistory("first")
+
+    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Up)), InputResult.Render)
+    assertEquals(editor.text, "first")
+
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("x")))
+    assertEquals(editor.text, "xfirst")
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Down))
+    assertEquals(editor.text, "xfirst")
+
+    val clean = Editor()
+    clean.addToHistory("second")
+    clean.addToHistory("first")
+    assertEquals(clean.handleInputResult(TerminalInput.Key(TerminalKey.Up)), InputResult.Render)
+    assertEquals(clean.text, "first")
+    assertEquals(clean.handleInputResult(TerminalInput.Key(TerminalKey.Down)), InputResult.Render)
+    assertEquals(clean.text, "")
+
+  test("page up and page down preserve wrapped visual columns"):
+    val editor = Editor("abcdefghijklmnopqrst")
+    editor.render(1)
+    editor.setCursor(EditorCursor(0, 10))
+    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.PageUp)), InputResult.Render)
+    assertEquals(editor.cursor, EditorCursor(0, 5))
+    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.PageDown)), InputResult.Render)
+    assertEquals(editor.cursor, EditorCursor(0, 10))
+
+  test("jump keybinds jump to typed target characters"):
+    val editor = Editor("abracadabra")
+    editor.render(1)
+    editor.setCursor(EditorCursor(0, 0))
+    assertEquals(
+      editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("]"), KeyModifiers(ctrl = true))),
+      InputResult.NoRender
+    )
+    assertEquals(
+      editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("a"))),
+      InputResult.Render
+    )
+    assertEquals(editor.cursor, EditorCursor(0, 2))
+
+    editor.setCursor(EditorCursor(0, 3))
+    assertEquals(
+      editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("]"), KeyModifiers(ctrl = true, alt = true))),
+      InputResult.NoRender
+    )
+    assertEquals(
+      editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("a"))),
+      InputResult.Render
+    )
+    assertEquals(editor.cursor, EditorCursor(0, 2))
 
   test("submit-on-enter mode submits plain enter and inserts newline on shift enter"):
     var submitted = ""

@@ -24,6 +24,8 @@ object TerminalKey:
   case object Down                          extends TerminalKey
   case object Left                          extends TerminalKey
   case object Right                         extends TerminalKey
+  case object PageUp                        extends TerminalKey
+  case object PageDown                      extends TerminalKey
   final case class Character(value: String) extends TerminalKey
   final case class Function(index: Int)     extends TerminalKey
   final case class Unknown(name: String)    extends TerminalKey

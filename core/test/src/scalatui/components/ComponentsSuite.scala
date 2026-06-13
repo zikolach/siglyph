@@ -2,7 +2,7 @@ package scalatui.components
 
 import scalatui.ansi.Ansi
 import scalatui.core.CursorMarker
-import scalatui.terminal.{KeyModifiers, TerminalInput, TerminalKey}
+import scalatui.terminal.{KeyDescriptor, KeybindingManager, KeyModifiers, TerminalInput, TerminalKey}
 
 class ComponentsSuite extends munit.FunSuite:
   test("text wraps and pads within width"):
@@ -47,6 +47,51 @@ class ComponentsSuite extends munit.FunSuite:
 
     assertEquals(input.value, "x y🙂")
     assertEquals(submitted, "x y🙂")
+
+  test("input submit keybinding is configurable"):
+    val input = Input(
+      keybindings = KeybindingManager.fromRawBindings(
+        Map(
+          "tui.input.submit" -> Vector(
+            KeyDescriptor(TerminalKey.Character("s"), KeyModifiers(ctrl = true))
+          )
+        )
+      )
+    )
+    var submitted = ""
+    input.onSubmit = value => submitted = value
+
+    input.handleInput(TerminalInput.Key(TerminalKey.Character("a")))
+    input.handleInput(TerminalInput.Key(TerminalKey.Enter))
+
+    assertEquals(submitted, "")
+
+    input.handleInput(TerminalInput.Key(TerminalKey.Character("s"), KeyModifiers(ctrl = true)))
+    assertEquals(submitted, "a")
+
+  test("input supports custom movement, deletion, newline, and submit bindings"):
+    val input = Input(
+      keybindings = KeybindingManager.fromRawBindings(
+        Map(
+          "tui.editor.cursorLeft" -> Vector(KeyDescriptor(TerminalKey.Character("z"), KeyModifiers(alt = true))),
+          "tui.editor.deleteCharBackward" -> Vector(KeyDescriptor(TerminalKey.Character("x"), KeyModifiers(ctrl = true))),
+          "tui.input.newLine" -> Vector(KeyDescriptor(TerminalKey.Character("n"), KeyModifiers(ctrl = true))),
+          "tui.input.submit" -> Vector(KeyDescriptor(TerminalKey.Character("s"), KeyModifiers(ctrl = true)))
+        )
+      )
+    )
+    var submitted = ""
+    input.onSubmit = value => submitted = value
+
+    input.handleInput(TerminalInput.Key(TerminalKey.Character("a")))
+    input.handleInput(TerminalInput.Key(TerminalKey.Character("b")))
+    input.handleInput(TerminalInput.Key(TerminalKey.Character("z"), KeyModifiers(alt = true)))
+    input.handleInput(TerminalInput.Key(TerminalKey.Character("x"), KeyModifiers(ctrl = true)))
+    input.handleInput(TerminalInput.Key(TerminalKey.Character("n"), KeyModifiers(ctrl = true)))
+    input.handleInput(TerminalInput.Key(TerminalKey.Character("s"), KeyModifiers(ctrl = true)))
+
+    assertEquals(input.value, "\nb")
+    assertEquals(submitted, "\nb")
 
   test("input emits cursor marker without changing semantic value"):
     val input    = Input("ab")

@@ -42,11 +42,25 @@ class TerminalInputParserSuite extends munit.FunSuite:
       TerminalInput.Key(TerminalKey.Character("x"), KeyModifiers(alt = true))
     )
 
+  test("parses jump-forward keybinding escapes"):
+    assertEquals(
+      TerminalInputParser.parseOne("\u001d"),
+      TerminalInput.Key(TerminalKey.Character("]"), KeyModifiers(ctrl = true))
+    )
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b\u001d"),
+      TerminalInput.Key(TerminalKey.Character("]"), KeyModifiers(ctrl = true, alt = true))
+    )
+
   test("parses bracketed paste"):
     assertEquals(
       TerminalInputParser.parse("\u001b[200~hello\nworld\u001b[201~"),
       Vector(TerminalInput.Paste("hello\nworld"))
     )
+
+  test("parses page navigation keys"):
+    assertEquals(TerminalInputParser.parseOne("\u001b[5~"), TerminalInput.Key(TerminalKey.PageUp))
+    assertEquals(TerminalInputParser.parseOne("\u001b[6~"), TerminalInput.Key(TerminalKey.PageDown))
 
   test("normalizes common raw control bytes"):
     assertEquals(

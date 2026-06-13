@@ -4,11 +4,14 @@ import scalatui.ansi.Ansi
 import scalatui.core.{Component, CursorMarker, Focusable}
 import scalatui.editing.{KillRing, UndoStack, WordNavigation}
 import scalatui.syntax.Equality.*
-import scalatui.terminal.{KeyModifiers, TerminalInput, TerminalKey}
+import scalatui.terminal.{KeyModifiers, KeybindingCommand, KeybindingManager, TerminalInput, TerminalKey}
 import scalatui.unicode.Unicode
 
 /** Single-line text input with Unicode-aware editing and pi-tui-style undo/yank commands. */
-final class Input(initialValue: String = "") extends Component, Focusable:
+final class Input(
+    initialValue: String = "",
+    keybindings: KeybindingManager = KeybindingManager()
+) extends Component, Focusable:
   var onSubmit: String => Unit = _ => ()
   private var currentValue     = initialValue
   private var cursorCluster    = Unicode.graphemeClusters(initialValue).length
@@ -68,54 +71,47 @@ final class Input(initialValue: String = "") extends Component, Focusable:
   override def focused: Boolean                = isFocused
   override def focused_=(value: Boolean): Unit = isFocused = value
 
-  override def handleInput(input: TerminalInput): Unit = input match
-    case TerminalInput.Key(TerminalKey.Character("a"), modifiers) if modifiers.ctrl             =>
-      moveToStart()
-    case TerminalInput.Key(TerminalKey.Character("e"), modifiers) if modifiers.ctrl             =>
-      moveToEnd()
-    case TerminalInput.Key(TerminalKey.Character("b"), modifiers) if modifiers.ctrl             =>
-      moveLeft()
-    case TerminalInput.Key(TerminalKey.Character("f"), modifiers) if modifiers.ctrl             =>
-      moveRight()
-    case TerminalInput.Key(TerminalKey.Character("d"), modifiers) if modifiers.ctrl             =>
-      deleteForwards()
-    case TerminalInput.Key(TerminalKey.Character("d"), modifiers) if modifiers.alt              =>
-      deleteWordForwards()
-    case TerminalInput.Key(TerminalKey.Character("w"), modifiers) if modifiers.ctrl             =>
-      deleteWordBackwards()
-    case TerminalInput.Key(TerminalKey.Character("u"), modifiers) if modifiers.ctrl             =>
-      deleteToStart()
-    case TerminalInput.Key(TerminalKey.Character("k"), modifiers) if modifiers.ctrl             =>
-      deleteToEnd()
-    case TerminalInput.Key(TerminalKey.Character("y"), modifiers) if modifiers.ctrl             =>
-      yank()
-      ()
-    case TerminalInput.Key(TerminalKey.Character("y"), modifiers) if modifiers.alt              =>
-      yankPop()
-      ()
-    case TerminalInput.Key(TerminalKey.Character("-"), modifiers) if modifiers.ctrl             =>
+  override def handleInput(input: TerminalInput): Unit =
+    if keybindings.matches(input, KeybindingCommand.EditorUndo) then
       undo()
-      ()
-    case TerminalInput.Key(TerminalKey.Character(text), modifiers)
-        if !modifiers.ctrl && !modifiers.alt && !modifiers.superKey =>
-      insert(text)
-    case TerminalInput.Paste(text)                                                              =>
-      insert(text.replace('\n', ' ').replace('\r', ' '))
-    case TerminalInput.Key(TerminalKey.Enter, _)                                                => onSubmit(currentValue)
-    case TerminalInput.Key(TerminalKey.Backspace, modifiers) if modifiers.alt || modifiers.ctrl =>
+    else if keybindings.matches(input, KeybindingCommand.EditorDeleteWordBackward) then
       deleteWordBackwards()
-    case TerminalInput.Key(TerminalKey.Backspace, _)                                            => deleteBackwards()
-    case TerminalInput.Key(TerminalKey.Delete, modifiers) if modifiers.alt                      => deleteWordForwards()
-    case TerminalInput.Key(TerminalKey.Delete, _)                                               => deleteForwards()
-    case TerminalInput.Key(TerminalKey.Left, modifiers) if modifiers.alt || modifiers.ctrl      =>
+    else if keybindings.matches(input, KeybindingCommand.EditorDeleteToLineStart) then
+      deleteToStart()
+    else if keybindings.matches(input, KeybindingCommand.EditorDeleteToLineEnd) then
+      deleteToEnd()
+    else if keybindings.matches(input, KeybindingCommand.EditorDeleteCharForward) then
+      deleteForwards()
+    else if keybindings.matches(input, KeybindingCommand.EditorDeleteWordForward) then
+      deleteWordForwards()
+    else if keybindings.matches(input, KeybindingCommand.EditorDeleteCharBackward) then
+      deleteBackwards()
+    else if keybindings.matches(input, KeybindingCommand.EditorYank) then
+      yank()
+    else if keybindings.matches(input, KeybindingCommand.EditorYankPop) then
+      yankPop()
+    else if keybindings.matches(input, KeybindingCommand.EditorCursorWordLeft) then
       moveWordBackwards()
-    case TerminalInput.Key(TerminalKey.Right, modifiers) if modifiers.alt || modifiers.ctrl     =>
+    else if keybindings.matches(input, KeybindingCommand.EditorCursorWordRight) then
       moveWordForwards()
-    case TerminalInput.Key(TerminalKey.Left, _)                                                 => moveLeft()
-    case TerminalInput.Key(TerminalKey.Right, _)                                                => moveRight()
-    case TerminalInput.Key(TerminalKey.Home, _)                                                 => moveToStart()
-    case TerminalInput.Key(TerminalKey.End, _)                                                  => moveToEnd()
-    case _                                                                                      => ()
+    else if keybindings.matches(input, KeybindingCommand.EditorCursorLeft) then
+      moveLeft()
+    else if keybindings.matches(input, KeybindingCommand.EditorCursorRight) then
+      moveRight()
+    else if keybindings.matches(input, KeybindingCommand.EditorCursorLineStart) then
+      moveToStart()
+    else if keybindings.matches(input, KeybindingCommand.EditorCursorLineEnd) then
+      moveToEnd()
+    else if keybindings.matches(input, KeybindingCommand.InputSubmit) then
+      onSubmit(currentValue)
+    else if keybindings.matches(input, KeybindingCommand.InputNewLine) then
+      insert("\n")
+    else input match
+      case TerminalInput.Paste(text) => insert(text.replace('\n', ' ').replace('\r', ' '))
+      case TerminalInput.Key(TerminalKey.Character(text), modifiers)
+          if !modifiers.ctrl && !modifiers.alt && !modifiers.superKey =>
+        insert(text)
+      case _ => ()
 
   override def render(width: Int): Vector[String] =
     val cs     = clusters

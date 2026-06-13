@@ -2,6 +2,7 @@ package scalatui.components
 
 import scalatui.autocomplete.AutocompleteProvider
 import scalatui.core.{OverlayAnchor, OverlayOptions, OverlaySize}
+import scalatui.terminal.KeybindingManager
 
 /**
  * Public configuration for [[Editor]].
@@ -20,6 +21,8 @@ import scalatui.core.{OverlayAnchor, OverlayOptions, OverlaySize}
  *   automatic trigger policy for autocomplete requests
  * @param autocompletePlacement
  *   placement strategy used for autocomplete suggestions; defaults to editor-adjacent placement
+ * @param keybindings
+ *   command to input mapping resolved through the shared keybinding manager
  */
 final case class EditorOptions(
     enterBehavior: EditorEnterBehavior = EditorEnterBehavior.Default,
@@ -28,7 +31,8 @@ final case class EditorOptions(
     autocompleteProvider: Option[AutocompleteProvider] = None,
     autocompleteMaxVisible: Int = 5,
     autocompleteTrigger: EditorAutocompleteTrigger = EditorAutocompleteTrigger.Default,
-    autocompletePlacement: EditorAutocompletePlacement = EditorAutocompletePlacement.Default
+    autocompletePlacement: EditorAutocompletePlacement = EditorAutocompletePlacement.Default,
+    keybindings: KeybindingManager = KeybindingManager()
 )
 
 object EditorOptions:

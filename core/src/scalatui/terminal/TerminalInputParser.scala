@@ -25,6 +25,8 @@ object TerminalInputParser:
     "\u0017"       -> key(TerminalKey.Character("w"), KeyModifiers(ctrl = true)),
     "\u0019"       -> key(TerminalKey.Character("y"), KeyModifiers(ctrl = true)),
     "\u001f"       -> key(TerminalKey.Character("-"), KeyModifiers(ctrl = true)),
+    "\u001d"       -> key(TerminalKey.Character("]"), KeyModifiers(ctrl = true)),
+    "\u001b\u001d" -> key(TerminalKey.Character("]"), KeyModifiers(ctrl = true, alt = true)),
     "\u001b\u007f" -> key(TerminalKey.Backspace, KeyModifiers(alt = true)),
     "\u001bB"      -> key(TerminalKey.Left, KeyModifiers(alt = true)),
     "\u001bF"      -> key(TerminalKey.Right, KeyModifiers(alt = true)),
@@ -41,6 +43,8 @@ object TerminalInputParser:
     "\u001bOH"     -> key(TerminalKey.Home),
     "\u001bOF"     -> key(TerminalKey.End),
     "\u001b[3~"    -> key(TerminalKey.Delete),
+    "\u001b[5~"    -> key(TerminalKey.PageUp),
+    "\u001b[6~"    -> key(TerminalKey.PageDown),
     "\u001b[Z"     -> key(TerminalKey.Tab, KeyModifiers(shift = true))
   )
 
@@ -107,8 +111,8 @@ object TerminalInputParser:
   private def functionKey(number: Int): Option[TerminalKey] = number match
     case 2 => Some(TerminalKey.Unknown("insert"))
     case 3 => Some(TerminalKey.Delete)
-    case 5 => Some(TerminalKey.Unknown("pageUp"))
-    case 6 => Some(TerminalKey.Unknown("pageDown"))
+    case 5 => Some(TerminalKey.PageUp)
+    case 6 => Some(TerminalKey.PageDown)
     case _ => None
 
   private def codePointKey(codePoint: Int): TerminalKey = codePoint match

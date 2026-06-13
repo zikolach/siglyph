@@ -23,6 +23,20 @@ final class SelectList(items: Vector[SelectItem], maxVisible: Int = 10) extends 
     case TerminalInput.Key(TerminalKey.Escape, _) => onCancel()
     case _                                        => ()
 
+  /** Move selection up/down by logical items. */
+  def moveSelectionBy(delta: Int): Unit = moveSelection(delta)
+
+  /** Move selection by a full page of visible rows, clamped to item bounds. */
+  def moveSelectionByPage(pagesize: Int, direction: Int): Unit =
+    if items.nonEmpty then moveSelectionBy(pagesize * direction)
+
+  /** Confirm the currently selected entry, if any. */
+  def confirmSelection(): Unit =
+    selected.foreach(onSelect)
+
+  /** Cancel selection and close the overlay interaction. */
+  def cancelSelection(): Unit = onCancel()
+
   override def render(width: Int): Vector[String] =
     if items.isEmpty then Vector(Ansi.truncateToWidth("No items", width))
     else

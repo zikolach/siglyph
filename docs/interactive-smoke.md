@@ -21,6 +21,8 @@ Expected behavior:
 - `Shift+Enter` inserts a newline in the editor when the terminal reports a normalized modified Enter event.
 - Type `/`, `./`, or `@` in editor input and press `Tab` to show slash/path autocomplete suggestions adjacent to the editor area.
 - With suggestions visible, `↑` / `↓` navigates, `Enter` or `Tab` accepts, and `Esc` cancels without changing editor text.
+- `PageUp` / `PageDown` pages the cursor in wrapped multiline editor content.
+- `Ctrl+]` and `Ctrl+Alt+]` jump forward/backward to the next typed target character.
 - When the action list is focused, select `Tick loader` to advance the loader frame and `Cancel loader` to update the cancellable loader state.
 - Arrow keys, `Home` / `End`, `Backspace`, `Delete`, `Ctrl+K`, and `Ctrl+W` edit the buffer.
 - `Ctrl+-` undoes, `Ctrl+Y` yanks killed text, `Alt+Y` yank-pops, `Alt+D` / `Alt+Delete` deletes a word forward, and modified word-left/word-right shortcuts move by word when reported by the terminal.
@@ -29,6 +31,9 @@ Expected behavior:
 - Resize terminal height; the existing TUI frame is repainted in place and any visible overlay is re-resolved/clamped to the new dimensions without clearing scrollback.
 - For an app/demo configured with `TUIOptions(hardwareCursorPositioning = true)`, type in a focused `Input` or `Editor` and verify the terminal hardware cursor/IME candidate window tracks the fake cursor position. Cursor markers must not appear as visible output, and disabling the option must leave fake-cursor behavior unchanged.
 - `Esc` and `Ctrl+C` exit and restore the terminal.
+
+Autocomplete and select command defaults can be overridden via `EditorOptions.keybindings` (via `KeybindingManager`).
+See `docs/keybinding-defaults.md` for the complete default map, ambiguity notes, and unsupported terminal encodings.
 
 ## Scala Native interactive demo
 
