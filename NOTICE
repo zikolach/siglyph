@@ -1,0 +1,15 @@
+siglyph
+=======
+
+siglyph is a Scala terminal UI library inspired by and partially ported from
+pi-tui, part of the pi coding-agent project:
+
+  https://github.com/earendil-works/pi/tree/main/packages/tui
+
+The upstream pi project is licensed under the MIT License:
+
+  Copyright (c) 2025 Mario Zechner
+
+Where behavior, structure, naming, or tests intentionally mirror pi-tui, this
+repository preserves that upstream attribution. The full siglyph license is in
+LICENSE.

@@ -162,3 +162,15 @@ mill quality         # run formatting and Scalafix checks
 ```
 
 Public APIs should include Scaladoc, and user-visible behavior should be reflected in README/docs or the relevant OpenSpec artifacts.
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, style notes, and pull-request expectations. Please also review the [Code of Conduct](CODE_OF_CONDUCT.md) and [Security Policy](SECURITY.md).
+
+## Attribution
+
+siglyph is inspired by and partially ported from [`pi-tui`](https://github.com/earendil-works/pi/tree/main/packages/tui), part of the MIT-licensed `pi` project. See [NOTICE](NOTICE) for upstream attribution.
+
+## License
+
+siglyph is licensed under the [MIT License](LICENSE).
