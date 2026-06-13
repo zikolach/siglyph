@@ -88,16 +88,41 @@ jobs:
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           notes=$(cat <<EOF
-          Published Maven packages to GitHub Packages:
+          Published to GitHub Packages.
 
-          - \`io.github.zikolach:siglyph-core_3:${version}\`
-          - \`io.github.zikolach:siglyph-terminal-jvm_3:${version}\`
-          - \`io.github.zikolach:siglyph-markdown_3:${version}\`
-          - \`io.github.zikolach:siglyph-image_3:${version}\`
+          ## SBT
 
-          Maven repository:
+          \`\`\`scala
+          resolvers += "GitHub Packages: siglyph" at "https://maven.pkg.github.com/zikolach/siglyph"
 
-          \`https://maven.pkg.github.com/zikolach/siglyph\`
+          libraryDependencies ++= Seq(
+            "io.github.zikolach" %% "siglyph-core" % "${version}",
+            "io.github.zikolach" %% "siglyph-terminal-jvm" % "${version}",
+            "io.github.zikolach" %% "siglyph-markdown" % "${version}",
+            "io.github.zikolach" %% "siglyph-image" % "${version}"
+          )
+          \`\`\`
+
+          ## Mill
+
+          \`\`\`scala
+          object app extends ScalaModule {
+            def scalaVersion = "3.7.4"
+
+            def repositories = Task {
+              super.repositories() ++ Seq("https://maven.pkg.github.com/zikolach/siglyph")
+            }
+
+            def mvnDeps = Seq(
+              mvn"io.github.zikolach::siglyph-core::${version}",
+              mvn"io.github.zikolach::siglyph-terminal-jvm::${version}",
+              mvn"io.github.zikolach::siglyph-markdown::${version}",
+              mvn"io.github.zikolach::siglyph-image::${version}"
+            )
+          }
+          \`\`\`
+
+          Private GitHub Packages consumers need credentials with \`read:packages\` access.
           EOF
           )
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
