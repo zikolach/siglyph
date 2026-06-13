@@ -60,7 +60,7 @@ class InteractiveDemoSuite extends munit.FunSuite:
     tui.flushRender()
 
     val postEnter      = Ansi.strip(terminal.output)
-    val lastFrame      = postEnter.split("scala-tui showcase demo").last
+    val lastFrame      = postEnter.split("siglyph showcase demo").last
     assert(
       !lastFrame.contains("help — Show demo help"),
       postEnter
@@ -102,7 +102,7 @@ class InteractiveDemoSuite extends munit.FunSuite:
       tui.flushRender()
 
       val output    = Ansi.strip(terminal.output)
-      val lastFrame = output.split("scala-tui showcase demo").last
+      val lastFrame = output.split("siglyph showcase demo").last
       assert(lastFrame.contains("... (+7 lines hidden)"), output)
     finally
       Files.deleteIfExists(tempFile)

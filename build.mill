@@ -2,7 +2,7 @@ import mill.*
 import mill.scalalib.*
 import mill.scalanativelib.*
 
-trait ScalaTuiModule extends ScalaModule {
+trait SiglyphModule extends ScalaModule {
   def scalaVersion = "3.7.4"
 }
 
@@ -56,14 +56,14 @@ def quality = Task.Input {
   runScalafix()
 }
 
-object core extends ScalaTuiModule {
+object core extends SiglyphModule {
   object test extends ScalaTests {
     def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
     def testFramework = "munit.Framework"
   }
 }
 
-object terminalJvm extends ScalaTuiModule {
+object terminalJvm extends SiglyphModule {
   def moduleDeps = Seq(core)
 }
 
@@ -79,7 +79,7 @@ object terminalNative extends ScalaNativeModule {
   def moduleDeps         = Seq(coreNative)
 }
 
-object markdown extends ScalaTuiModule {
+object markdown extends SiglyphModule {
   def moduleDeps = Seq(core)
 
   object test extends ScalaTests {
@@ -88,7 +88,7 @@ object markdown extends ScalaTuiModule {
   }
 }
 
-object image extends ScalaTuiModule {
+object image extends SiglyphModule {
   def moduleDeps = Seq(core)
 
   object test extends ScalaTests {
@@ -97,15 +97,15 @@ object image extends ScalaTuiModule {
   }
 }
 
-object demo extends ScalaTuiModule {
+object demo extends SiglyphModule {
   def moduleDeps = Seq(core)
 }
 
-object keyTester extends ScalaTuiModule {
+object keyTester extends SiglyphModule {
   def moduleDeps = Seq(terminalJvm)
 }
 
-object interactiveDemo extends ScalaTuiModule {
+object interactiveDemo extends SiglyphModule {
   def moduleDeps = Seq(core)
 
   object test extends ScalaTests {
@@ -121,7 +121,7 @@ object interactiveDemoNative extends ScalaNativeModule {
   def sources            = Task.Sources(workspaceRoot / "interactiveDemo" / "src")
 }
 
-object interactiveJvmDemo extends ScalaTuiModule {
+object interactiveJvmDemo extends SiglyphModule {
   def moduleDeps = Seq(terminalJvm, interactiveDemo)
 }
 

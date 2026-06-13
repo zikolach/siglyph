@@ -1,6 +1,6 @@
-# scala-tui
+# siglyph
 
-`scala-tui` is a Scala 3 terminal UI library inspired by [`pi-tui`](https://github.com/earendil-works/pi/tree/main/packages/tui). The goal is to provide a Node-free, dependency-light TUI for Scala applications while preserving the important behavior of `pi-tui`: component rendering, differential terminal output, typed input, Unicode-aware text handling, and testable terminal backends.
+`siglyph` is a Scala 3 terminal UI library inspired by [`pi-tui`](https://github.com/earendil-works/pi/tree/main/packages/tui). The goal is to provide a Node-free, dependency-light TUI for Scala applications while preserving the important behavior of `pi-tui`: component rendering, differential terminal output, typed input, Unicode-aware text handling, and testable terminal backends.
 
 ## Initial scope
 
@@ -80,7 +80,7 @@ By default the runtime preserves existing fake-cursor-only behavior while stripp
 
 Default prompt-like behavior submits on `Enter` and inserts a newline on `Shift+Enter`. Editor-like behavior can be configured with `EditorEnterBehavior.NewlineOnEnter()`, where plain `Enter` inserts a newline and `Cmd/Super+Enter` submits. Modified Enter support depends on terminal/parser normalization.
 
-The editor can be configured with `scalatui.autocomplete.AutocompleteProvider` implementations. Suggestions are displayed through the generic TUI overlay stack and default to editor-adjacent placement, so applications do not need to compute terminal rows for normal editor autocomplete. Provider lookups use a cancellable callback boundary so applications can bridge file, network, `Future`, or other effect runtimes without adding dependencies to `scala-tui` itself. Slash-command helpers are metadata providers only; applications remain responsible for interpreting submitted commands.
+The editor can be configured with `scalatui.autocomplete.AutocompleteProvider` implementations. Suggestions are displayed through the generic TUI overlay stack and default to editor-adjacent placement, so applications do not need to compute terminal rows for normal editor autocomplete. Provider lookups use a cancellable callback boundary so applications can bridge file, network, `Future`, or other effect runtimes without adding dependencies to `siglyph` itself. Slash-command helpers are metadata providers only; applications remain responsible for interpreting submitted commands.
 
 `CombinedAutocompleteProvider` composes slash-command suggestions with a dependency-free path/attachment completion source. It parses slash prefixes, quoted paths, `@` attachment markers, delimiter-aware replacements, and force-refresh requests (`Tab`) deterministically while preserving cancellation/stale-response safety in the editor.
 

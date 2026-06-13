@@ -224,7 +224,7 @@ private final class DemoRoot(tui: TUI) extends Component:
   override def render(width: Int): Vector[String] =
     val renderWidth = math.max(1, width)
     val frame = ComponentFrameBuilder(renderWidth)
-    frame.addLines(Vector(fit("scala-tui showcase demo", renderWidth)))
+    frame.addLines(Vector(fit("siglyph showcase demo", renderWidth)))
     frame.addLines(Ansi.wrapTextWithAnsi(
       "Ctrl+T focus • Ctrl+M switch editor/file-manager modes • Esc/Ctrl+C quit",
       renderWidth
