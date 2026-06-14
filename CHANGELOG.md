@@ -7,6 +7,10 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed editor submit callbacks so UI updates made during `onSubmit` render immediately.
+
 ## [0.1.1] - 2026-06-14
 
 ### Added

@@ -359,7 +359,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
   private def submit(): InputResult =
     cancelAutocomplete()
     onSubmit(buffer.submitText)
-    InputResult.NoRender
+    InputResult.Render
 
   private def move(operation: EditorBuffer => Unit): InputResult =
     val before = buffer.cursor

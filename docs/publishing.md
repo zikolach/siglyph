@@ -8,7 +8,7 @@ GitHub Packages, and is prepared for Maven Central publishing.
 `build.mill` derives the package version from:
 
 1. `SIGLYPH_VERSION`, when set;
-2. tag names like `v0.1.1`, via `GITHUB_REF_NAME`;
+2. tag names like `v0.1.2`, via `GITHUB_REF_NAME`;
 3. `0.1.0-SNAPSHOT` for local builds.
 
 ## GitHub Packages
@@ -50,7 +50,7 @@ Snapshot dry run, which does not require a PGP key:
 MILL_TESTS_PUBLISH_DRY_RUN=1 \
 MILL_SONATYPE_USERNAME=dummy \
 MILL_SONATYPE_PASSWORD=dummy \
-SIGLYPH_VERSION=0.1.1-SNAPSHOT \
+SIGLYPH_VERSION=0.1.2-SNAPSHOT \
 mill mill.javalib.SonatypeCentralPublishModule/publishAll
 ```
 
@@ -60,7 +60,7 @@ GitHub Packages dry run:
 MILL_TESTS_PUBLISH_DRY_RUN=1 \
 MILL_MAVEN_USERNAME=dummy \
 MILL_MAVEN_PASSWORD=dummy \
-SIGLYPH_VERSION=0.1.1 \
+SIGLYPH_VERSION=0.1.2 \
 mill mill.javalib.MavenPublishModule/publishAll \
   --releaseUri https://maven.pkg.github.com/zikolach/siglyph \
   --snapshotUri https://maven.pkg.github.com/zikolach/siglyph

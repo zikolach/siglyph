@@ -199,7 +199,7 @@ class EditorSuite extends munit.FunSuite:
 
     assertEquals(
       editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("x"), KeyModifiers(ctrl = true))),
-      InputResult.NoRender
+      InputResult.Render
     )
     assertEquals(submitted, "a\n")
 
@@ -251,7 +251,7 @@ class EditorSuite extends munit.FunSuite:
 
     editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("/")))
     editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("j"), KeyModifiers(alt = true)))
-    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Enter)), InputResult.NoRender)
+    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Enter)), InputResult.Render)
     assertEquals(editor.text, "/quit ")
     assertEquals(submitted, "/quit ")
 
@@ -335,7 +335,7 @@ class EditorSuite extends munit.FunSuite:
 
     assertEquals(
       editor.handleInputResult(TerminalInput.Key(TerminalKey.Enter)),
-      InputResult.NoRender
+      InputResult.Render
     )
     assertEquals(submitted, "\n")
 
@@ -354,7 +354,7 @@ class EditorSuite extends munit.FunSuite:
 
     assertEquals(
       editor.handleInputResult(TerminalInput.Key(TerminalKey.Enter, KeyModifiers(superKey = true))),
-      InputResult.NoRender
+      InputResult.Render
     )
     assertEquals(submitted, "hi\n")
 

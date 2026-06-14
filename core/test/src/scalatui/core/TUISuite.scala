@@ -1,7 +1,14 @@
 package scalatui.core
 
 import scalatui.ansi.Ansi
-import scalatui.components.{Loader, LoaderIndicatorOptions, LoaderOptions}
+import scalatui.components.{
+  Editor,
+  EditorOptions,
+  Loader,
+  LoaderIndicatorOptions,
+  LoaderOptions,
+  Text
+}
 import scalatui.terminal.{
   ImageDimensions,
   ImageProtocol,
@@ -304,6 +311,24 @@ class TUISuite extends munit.FunSuite:
     terminal.sendInput(TerminalInput.Key(TerminalKey.Character("x")))
 
     assert(terminal.output.contains("x" + TUI.LineReset), terminal.output)
+
+  test("editor submit callback mutations rerender immediately"):
+    val terminal = VirtualTerminal(40, 8)
+    val output   = Text("Submitted: (none)")
+    val editor   = Editor(
+      "hello",
+      EditorOptions(onSubmit = text => output.text = s"Submitted: $text")
+    )
+    val tui      = TUI(terminal)
+    tui.addChild(output)
+    tui.addChild(editor)
+    tui.setFocus(editor)
+    tui.start()
+    terminal.clearWrites()
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Enter))
+
+    assert(terminal.output.contains("Submitted: hello"), terminal.output)
 
   test("input result can report handled input without render"):
     val terminal  = VirtualTerminal(20, 5)
