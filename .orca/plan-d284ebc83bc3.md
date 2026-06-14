@@ -20,7 +20,7 @@ Status: [x]
 Implement an optional PathCompletionProvider helper that enumerates filesystem entries deterministically, enforces max-results, and filters hidden/git entries according to configuration. Include fake-temp-directory tests for result bounds, sort order, directory/file handling, and unreadable or missing paths.
 
 ## Task: Support path completion quoting and attachment prefixes
-Status: [ ]
+Status: [x]
 
 Extend the filesystem path helper acceptance logic to preserve attachment prefixes such as @ and @" and apply required quoting/escaping rules. Include tests for spaces, existing quotes, attachment syntax, and plain path completions.
 

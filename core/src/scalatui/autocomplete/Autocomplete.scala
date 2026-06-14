@@ -325,11 +325,19 @@ object CompletionPrefixParser:
     var quote    = -1
     var i        = 0
     while i < text.length do
-      if text.charAt(i) === '"' then
+      if text.charAt(i) === '"' && !isEscaped(text, i) then
         inQuotes = !inQuotes
         if inQuotes then quote = i
       i += 1
     Option.when(inQuotes)(quote)
+
+  private def isEscaped(text: String, index: Int): Boolean =
+    var backslashes = 0
+    var i           = index - 1
+    while i >= 0 && text.charAt(i) === '\\' do
+      backslashes += 1
+      i -= 1
+    backslashes % 2 === 1
 
   private def lastTokenStart(text: String): Int =
     var i = text.length - 1
@@ -352,12 +360,37 @@ object CompletionPrefixParser:
 
   private def prefixFromToken(token: String): PathCompletionPrefix =
     if token.startsWith("@\"") then
-      PathCompletionPrefix(token, token.drop(2), isAttachment = true, isQuoted = true)
+      PathCompletionPrefix(
+        token,
+        unescapeQuotedPathPrefix(token.drop(2)),
+        isAttachment = true,
+        isQuoted = true
+      )
     else if token.startsWith("\"") then
-      PathCompletionPrefix(token, token.drop(1), isAttachment = false, isQuoted = true)
+      PathCompletionPrefix(
+        token,
+        unescapeQuotedPathPrefix(token.drop(1)),
+        isAttachment = false,
+        isQuoted = true
+      )
     else if token.startsWith("@") then
       PathCompletionPrefix(token, token.drop(1), isAttachment = true, isQuoted = false)
     else PathCompletionPrefix(token, token, isAttachment = false, isQuoted = false)
+
+  private def unescapeQuotedPathPrefix(prefix: String): String =
+    val builder = StringBuilder()
+    var i       = 0
+    while i < prefix.length do
+      val char = prefix.charAt(i)
+      if char === '\\' && i + 1 < prefix.length &&
+        (prefix.charAt(i + 1) === '"' || prefix.charAt(i + 1) === '\\')
+      then
+        builder.append(prefix.charAt(i + 1))
+        i += 2
+      else
+        builder.append(char)
+        i += 1
+    builder.result()
 
 /** Provider that composes slash-command, trigger, and path/attachment completions. */
 final class CombinedAutocompleteProvider(
@@ -446,9 +479,19 @@ final class CombinedAutocompleteProvider(
     )
 
   private def completionValue(path: String, prefix: PathCompletionPrefix): String =
-    val needsQuotes = prefix.isQuoted || path.exists(_.isWhitespace)
+    val needsQuotes = prefix.isQuoted || path.exists(_.isWhitespace) || path.exists(needsEscaping)
     val marker      = if prefix.isAttachment then "@" else ""
-    if needsQuotes then s"$marker\"$path\"" else s"$marker$path"
+    if needsQuotes then s"$marker\"${escapeQuotedPath(path)}\"" else s"$marker$path"
+
+  private def needsEscaping(char: Char): Boolean =
+    char === '"' || char === '\\'
+
+  private def escapeQuotedPath(path: String): String =
+    path.flatMap {
+      case '"'  => "\\\""
+      case '\\' => "\\\\"
+      case char => char.toString
+    }
 
   private def pathFuzzyQuery(prefix: PathCompletionPrefix): String =
     val raw       = prefix.rawPrefix

@@ -177,6 +177,22 @@ class FileSystemPathCompletionProviderSuite extends munit.FunSuite:
       )
     }
 
+  test("filesystem provider keeps plain path completions unquoted when safe"):
+    withTempDirectory { root =>
+      val docs     = Files.createDirectory(root.resolve("docs"))
+      Files.writeString(docs.resolve("plain.md"), "hello")
+      val provider = CombinedAutocompleteProvider(
+        pathProvider = Some(FileSystemPathCompletionProvider(FileSystemPathCompletionOptions(
+          baseDirectory = root.toFile
+        )))
+      )
+
+      val suggestions = requestAutocompleteAtEnd(provider, "open docs/pl").get
+
+      assertEquals(suggestions.prefix, "docs/pl")
+      assertEquals(suggestions.items.map(_.value), Vector("docs/plain.md"))
+    }
+
   test("filesystem provider quotes whitespace path completions through combined provider"):
     withTempDirectory { root =>
       val docs     = Files.createDirectory(root.resolve("docs"))
@@ -196,6 +212,38 @@ class FileSystemPathCompletionProviderSuite extends munit.FunSuite:
 
       assertEquals(suggestions.prefix, "docs/read")
       assertEquals(suggestions.items.map(_.value), Vector("\"docs/read me.md\""))
+    }
+
+  test("filesystem provider preserves existing plain quoted path completions"):
+    withTempDirectory { root =>
+      val docs     = Files.createDirectory(root.resolve("docs"))
+      Files.writeString(docs.resolve("plain.md"), "hello")
+      val provider = CombinedAutocompleteProvider(
+        pathProvider = Some(FileSystemPathCompletionProvider(FileSystemPathCompletionOptions(
+          baseDirectory = root.toFile
+        )))
+      )
+
+      val suggestions = requestAutocompleteAtEnd(provider, "open \"docs/pl").get
+
+      assertEquals(suggestions.prefix, "\"docs/pl")
+      assertEquals(suggestions.items.map(_.value), Vector("\"docs/plain.md\""))
+    }
+
+  test("filesystem provider escapes quotes inside quoted path completions"):
+    withTempDirectory { root =>
+      val docs     = Files.createDirectory(root.resolve("docs"))
+      Files.writeString(docs.resolve("quote\"name.md"), "hello")
+      val provider = CombinedAutocompleteProvider(
+        pathProvider = Some(FileSystemPathCompletionProvider(FileSystemPathCompletionOptions(
+          baseDirectory = root.toFile
+        )))
+      )
+
+      val suggestions = requestAutocompleteAtEnd(provider, "open docs/quote").get
+
+      assertEquals(suggestions.prefix, "docs/quote")
+      assertEquals(suggestions.items.map(_.value), Vector("\"docs/quote\\\"name.md\""))
     }
 
   test("filesystem provider quotes bare attachment path completions"):
@@ -290,6 +338,12 @@ class FileSystemPathCompletionProviderSuite extends munit.FunSuite:
     )
     failed.foreach(throw _)
     result
+
+  private def requestAutocompleteAtEnd(
+      provider: AutocompleteProvider,
+      text: String
+  ): Option[AutocompleteSuggestions] =
+    requestAutocomplete(provider, AutocompleteRequest(Vector(text), EditorCursor(0, text.length)))
 
   private def requestAutocomplete(
       provider: AutocompleteProvider,

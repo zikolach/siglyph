@@ -83,6 +83,46 @@ class AutocompleteSuite extends munit.FunSuite:
     ))
     assertEquals(result.lines, Vector("attach @\"docs/read me.md\" tail"))
 
+  test("quoted path completion escapes backslashes in accepted values"):
+    val provider = CombinedAutocompleteProvider(
+      pathProvider = Some(PathCompletionProvider.sync(_ =>
+        Vector(PathCompletion("docs/back\\slash.md", "back\\slash.md"))
+      ))
+    )
+
+    val suggestions = requestSync(
+      provider,
+      AutocompleteRequest(Vector("open docs/back"), EditorCursor(0, 14), force = false)
+    ).get
+
+    assertEquals(suggestions.items.map(_.value), Vector("\"docs/back\\\\slash.md\""))
+
+  test("escaped quoted path prefixes unescape raw provider prefix and preserve replacement text"):
+    var seenPrefix = Option.empty[PathCompletionPrefix]
+    val provider   = CombinedAutocompleteProvider(
+      pathProvider = Some(PathCompletionProvider.sync { request =>
+        seenPrefix = Some(request.prefix)
+        Vector(PathCompletion("docs/quote\"name.md", "quote\"name.md"))
+      })
+    )
+
+    val suggestions = requestSync(
+      provider,
+      AutocompleteRequest(Vector("open \"docs/quote\\\"n"), EditorCursor(0, 19), force = false)
+    ).get
+
+    assertEquals(
+      seenPrefix,
+      Some(PathCompletionPrefix(
+        "\"docs/quote\\\"n",
+        "docs/quote\"n",
+        isAttachment = false,
+        isQuoted = true
+      ))
+    )
+    assertEquals(suggestions.prefix, "\"docs/quote\\\"n")
+    assertEquals(suggestions.items.map(_.value), Vector("\"docs/quote\\\"name.md\""))
+
   test("slash fuzzy ranking is disabled by default"):
     val provider = SlashCommandAutocompleteProvider(Vector(
       SlashCommand("markdown"),
