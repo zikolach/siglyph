@@ -6,7 +6,13 @@ import scalatui.core.*
 import scalatui.editing.{EditorBuffer, EditorCursor, KillRing, UndoStack, WordNavigation}
 import scalatui.syntax.Containment.*
 import scalatui.syntax.Equality.*
-import scalatui.terminal.{KeybindingCommand, KeybindingManager, KeyModifiers, TerminalInput, TerminalKey}
+import scalatui.terminal.{
+  KeybindingCommand,
+  KeybindingManager,
+  KeyModifiers,
+  TerminalInput,
+  TerminalKey
+}
 import scalatui.unicode.Unicode
 
 /**
@@ -33,6 +39,8 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
   private var context                                            = Option.empty[TUIContext]
   private var provider                                           = options.autocompleteProvider
   private var currentAutocompleteHandle                          = Option.empty[AutocompleteRequestHandle]
+  private var pendingAutocompleteRefresh                         = Option.empty[AutocompleteRequestHandle]
+  private var pendingAutocompleteRefreshToken                    = 0L
   private var currentAutocompleteOverlay                         = Option.empty[OverlayHandle]
   private var currentAutocomplete                                = Option.empty[Editor.AutocompleteState]
   private var autocompleteRequestToken                           = 0L
@@ -45,6 +53,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
   var autocompleteMaxVisible: Int                                = math.max(1, options.autocompleteMaxVisible)
   var autocompleteTrigger: EditorAutocompleteTrigger             = options.autocompleteTrigger
   private var autocompletePlacement: EditorAutocompletePlacement = options.autocompletePlacement
+  private val autocompleteDebouncer                              = options.autocompleteDebouncer
   private val keybindings                                        = options.keybindings
   private val undoStack                                          = UndoStack[EditorBuffer.Snapshot]()
   private val killRing                                           = KillRing()
@@ -184,7 +193,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
   override def render(width: Int): Vector[String] = synchronized {
     val layout = EditorLayout.fromBuffer(buffer, width)
     lastRenderedVisualHeight = layout.lines.length
-    lastRenderedWidth        = width
+    lastRenderedWidth = width
     val lines  = layout.lines.zipWithIndex.map { (line, index) =>
       val rendered =
         if focused && currentAutocomplete.isEmpty && index === layout.cursor.row then
@@ -204,12 +213,16 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
         case _ if keybindings.matches(input, KeybindingCommand.InputTab) && provider.nonEmpty =>
           requestAutocomplete(force = true)
           InputResult.Render
-        case _                                                                             => handleEditingInput(input)
+        case _                                                                                => handleEditingInput(input)
 
   private def handleAutocompleteInput(input: TerminalInput): InputResult =
     currentAutocomplete match
-      case Some(state) if state.suggestions.items.nonEmpty =>
-        if keybindings.matches(input, KeybindingCommand.SelectCancel) || keybindings.matches(input, KeybindingCommand.InputCopy) then
+      case Some(state) if state.suggestions.items.nonEmpty                   =>
+        if keybindings.matches(
+            input,
+            KeybindingCommand.SelectCancel
+          ) || keybindings.matches(input, KeybindingCommand.InputCopy)
+        then
           cancelAutocomplete()
           InputResult.Render
         else if keybindings.matches(input, KeybindingCommand.SelectUp) then
@@ -234,116 +247,122 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
           acceptAutocomplete()
         else
           handleEditingInput(input)
-      case Some(_) if keybindings.matches(input, KeybindingCommand.SelectCancel) || keybindings.matches(input, KeybindingCommand.InputCopy) =>
+      case Some(_)
+          if keybindings.matches(
+            input,
+            KeybindingCommand.SelectCancel
+          ) || keybindings.matches(input, KeybindingCommand.InputCopy) =>
         cancelAutocomplete()
         InputResult.Render
       case Some(_) if keybindings.matches(input, KeybindingCommand.InputTab) =>
         requestAutocomplete(force = true)
         InputResult.Render
-      case Some(_) =>
+      case Some(_)                                                           =>
         handleEditingInput(input)
-      case None =>
+      case None                                                              =>
         handleEditingInput(input)
 
   private def handleEditingInput(input: TerminalInput): InputResult =
     if jumpMode.nonEmpty then
       handleJumpInput(input)
-    else input match
-      case TerminalInput.Key(TerminalKey.Enter, modifiers) =>
-        handleEnter(modifiers)
-      case _ if keybindings.matches(input, KeybindingCommand.EditorCursorUp) =>
-        val layout = EditorLayout.fromBuffer(buffer, math.max(1, lastRenderedWidth))
-        if shouldUseHistoryUp(layout) then navigateHistory(-1) else move(_.moveUp())
-      case _ if keybindings.matches(input, KeybindingCommand.EditorCursorDown) =>
-        val layout = EditorLayout.fromBuffer(buffer, math.max(1, lastRenderedWidth))
-        if shouldUseHistoryDown(layout) then navigateHistory(1) else move(_.moveDown())
-      case _ if keybindings.matches(input, KeybindingCommand.EditorPageUp) =>
-        pageScroll(-1)
-      case _ if keybindings.matches(input, KeybindingCommand.EditorPageDown) =>
-        pageScroll(1)
-      case _ if keybindings.matches(input, KeybindingCommand.EditorDeleteCharForward) =>
-        mutate(_.delete())
-      case _ if keybindings.matches(input, KeybindingCommand.EditorDeleteWordForward) =>
-        killDeleteWordForwards()
-      case _ if keybindings.matches(input, KeybindingCommand.EditorDeleteWordBackward) =>
-        killDeleteWordBackwards()
-      case _ if keybindings.matches(input, KeybindingCommand.EditorDeleteCharBackward) =>
-        move(_.backspace())
-      case _ if keybindings.matches(input, KeybindingCommand.EditorUndo) =>
-        if undo() then InputResult.Render else InputResult.NoRender
-      case _ if keybindings.matches(input, KeybindingCommand.EditorYank) =>
-        if yank() then InputResult.Render else InputResult.NoRender
-      case _ if keybindings.matches(input, KeybindingCommand.EditorYankPop) =>
-        if yankPop() then InputResult.Render else InputResult.NoRender
-      case _ if keybindings.matches(input, KeybindingCommand.EditorCursorWordLeft) =>
-        move(_.moveWordBackwards())
-      case _ if keybindings.matches(input, KeybindingCommand.EditorCursorWordRight) =>
-        move(_.moveWordForwards())
-      case _ if keybindings.matches(input, KeybindingCommand.EditorCursorLeft) =>
-        move(_.moveLeft())
-      case _ if keybindings.matches(input, KeybindingCommand.EditorCursorRight) =>
-        move(_.moveRight())
-      case _ if keybindings.matches(input, KeybindingCommand.EditorCursorLineStart) =>
-        move(_.moveToLineStart())
-      case _ if keybindings.matches(input, KeybindingCommand.EditorCursorLineEnd) =>
-        move(_.moveToLineEnd())
-      case _ if keybindings.matches(input, KeybindingCommand.EditorJumpForward) =>
-        jumpMode = Some(Editor.JumpDirection.Forward)
-        InputResult.NoRender
-      case _ if keybindings.matches(input, KeybindingCommand.EditorJumpBackward) =>
-        jumpMode = Some(Editor.JumpDirection.Backward)
-        InputResult.NoRender
-      case _ if keybindings.matches(input, KeybindingCommand.InputSubmit) =>
-        submit()
-      case _ if keybindings.matches(input, KeybindingCommand.InputTab) =>
-        if provider.nonEmpty then
-          requestAutocomplete(force = true)
-          InputResult.Render
-        else InputResult.NoRender
-      case _ if keybindings.matches(input, KeybindingCommand.InputNewLine) =>
-        mutate(_.insertNewline())
-      case _ if keybindings.matches(input, KeybindingCommand.EditorDeleteToLineStart) =>
-        killDeleteToStartOfLine()
-      case _ if keybindings.matches(input, KeybindingCommand.EditorDeleteToLineEnd) =>
-        killDeleteToEndOfLine()
-      case TerminalInput.Paste(text) =>
-        val result = mutate(_.insertPaste(text), refreshAutocomplete = false)
-        refreshAutocompleteIfActive()
-        result
-      case TerminalInput.Key(TerminalKey.Character(text), modifiers)
-          if !modifiers.ctrl && !modifiers.alt && !modifiers.superKey =>
-        val result = mutate(_.insert(text), refreshAutocomplete = false)
-        maybeTriggerAutocompleteAfterText(text)
-        result
-      case TerminalInput.Key(TerminalKey.Backspace, modifiers) if modifiers.alt || modifiers.ctrl =>
-        killDeleteWordBackwards()
-      case TerminalInput.Key(TerminalKey.Backspace, _) =>
-        move(_.backspace())
-      case TerminalInput.Key(TerminalKey.Delete, modifiers) if modifiers.alt =>
-        killDeleteWordForwards()
-      case TerminalInput.Key(TerminalKey.Delete, _) =>
-        mutate(_.delete())
-      case TerminalInput.Key(TerminalKey.Home, _) =>
-        move(_.moveToLineStart())
-      case TerminalInput.Key(TerminalKey.End, _) =>
-        move(_.moveToLineEnd())
-      case TerminalInput.Key(TerminalKey.PageUp, _) =>
-        pageScroll(-1)
-      case TerminalInput.Key(TerminalKey.PageDown, _) =>
-        pageScroll(1)
-      case TerminalInput.Key(TerminalKey.Left, modifiers) if modifiers.alt || modifiers.ctrl =>
-        move(_.moveWordBackwards())
-      case TerminalInput.Key(TerminalKey.Right, modifiers) if modifiers.alt || modifiers.ctrl =>
-        move(_.moveWordForwards())
-      case TerminalInput.Key(TerminalKey.Left, _) =>
-        move(_.moveLeft())
-      case TerminalInput.Key(TerminalKey.Right, _) =>
-        move(_.moveRight())
-      case TerminalInput.Key(TerminalKey.Up, _) =>
-        move(_.moveUp())
-      case TerminalInput.Key(TerminalKey.Down, _) =>
-        move(_.moveDown())
-      case _ => InputResult.Ignored
+    else
+      input match
+        case TerminalInput.Key(TerminalKey.Enter, modifiers)                                    =>
+          handleEnter(modifiers)
+        case _ if keybindings.matches(input, KeybindingCommand.EditorCursorUp)                  =>
+          val layout = EditorLayout.fromBuffer(buffer, math.max(1, lastRenderedWidth))
+          if shouldUseHistoryUp(layout) then navigateHistory(-1) else move(_.moveUp())
+        case _ if keybindings.matches(input, KeybindingCommand.EditorCursorDown)                =>
+          val layout = EditorLayout.fromBuffer(buffer, math.max(1, lastRenderedWidth))
+          if shouldUseHistoryDown(layout) then navigateHistory(1) else move(_.moveDown())
+        case _ if keybindings.matches(input, KeybindingCommand.EditorPageUp)                    =>
+          pageScroll(-1)
+        case _ if keybindings.matches(input, KeybindingCommand.EditorPageDown)                  =>
+          pageScroll(1)
+        case _ if keybindings.matches(input, KeybindingCommand.EditorDeleteCharForward)         =>
+          mutate(_.delete())
+        case _ if keybindings.matches(input, KeybindingCommand.EditorDeleteWordForward)         =>
+          killDeleteWordForwards()
+        case _ if keybindings.matches(input, KeybindingCommand.EditorDeleteWordBackward)        =>
+          killDeleteWordBackwards()
+        case _ if keybindings.matches(input, KeybindingCommand.EditorDeleteCharBackward)        =>
+          move(_.backspace())
+        case _ if keybindings.matches(input, KeybindingCommand.EditorUndo)                      =>
+          if undo() then InputResult.Render else InputResult.NoRender
+        case _ if keybindings.matches(input, KeybindingCommand.EditorYank)                      =>
+          if yank() then InputResult.Render else InputResult.NoRender
+        case _ if keybindings.matches(input, KeybindingCommand.EditorYankPop)                   =>
+          if yankPop() then InputResult.Render else InputResult.NoRender
+        case _ if keybindings.matches(input, KeybindingCommand.EditorCursorWordLeft)            =>
+          move(_.moveWordBackwards())
+        case _ if keybindings.matches(input, KeybindingCommand.EditorCursorWordRight)           =>
+          move(_.moveWordForwards())
+        case _ if keybindings.matches(input, KeybindingCommand.EditorCursorLeft)                =>
+          move(_.moveLeft())
+        case _ if keybindings.matches(input, KeybindingCommand.EditorCursorRight)               =>
+          move(_.moveRight())
+        case _ if keybindings.matches(input, KeybindingCommand.EditorCursorLineStart)           =>
+          move(_.moveToLineStart())
+        case _ if keybindings.matches(input, KeybindingCommand.EditorCursorLineEnd)             =>
+          move(_.moveToLineEnd())
+        case _ if keybindings.matches(input, KeybindingCommand.EditorJumpForward)               =>
+          jumpMode = Some(Editor.JumpDirection.Forward)
+          InputResult.NoRender
+        case _ if keybindings.matches(input, KeybindingCommand.EditorJumpBackward)              =>
+          jumpMode = Some(Editor.JumpDirection.Backward)
+          InputResult.NoRender
+        case _ if keybindings.matches(input, KeybindingCommand.InputSubmit)                     =>
+          submit()
+        case _ if keybindings.matches(input, KeybindingCommand.InputTab)                        =>
+          if provider.nonEmpty then
+            requestAutocomplete(force = true)
+            InputResult.Render
+          else InputResult.NoRender
+        case _ if keybindings.matches(input, KeybindingCommand.InputNewLine)                    =>
+          mutate(_.insertNewline())
+        case _ if keybindings.matches(input, KeybindingCommand.EditorDeleteToLineStart)         =>
+          killDeleteToStartOfLine()
+        case _ if keybindings.matches(input, KeybindingCommand.EditorDeleteToLineEnd)           =>
+          killDeleteToEndOfLine()
+        case TerminalInput.Paste(text)                                                          =>
+          val result = mutate(_.insertPaste(text), refreshAutocomplete = false)
+          refreshAutocompleteIfActive()
+          result
+        case TerminalInput.Key(TerminalKey.Character(text), modifiers)
+            if !modifiers.ctrl && !modifiers.alt && !modifiers.superKey =>
+          val result = mutate(_.insert(text), refreshAutocomplete = false)
+          maybeTriggerAutocompleteAfterText(text)
+          result
+        case TerminalInput.Key(TerminalKey.Backspace, modifiers)
+            if modifiers.alt || modifiers.ctrl =>
+          killDeleteWordBackwards()
+        case TerminalInput.Key(TerminalKey.Backspace, _)                                        =>
+          move(_.backspace())
+        case TerminalInput.Key(TerminalKey.Delete, modifiers) if modifiers.alt                  =>
+          killDeleteWordForwards()
+        case TerminalInput.Key(TerminalKey.Delete, _)                                           =>
+          mutate(_.delete())
+        case TerminalInput.Key(TerminalKey.Home, _)                                             =>
+          move(_.moveToLineStart())
+        case TerminalInput.Key(TerminalKey.End, _)                                              =>
+          move(_.moveToLineEnd())
+        case TerminalInput.Key(TerminalKey.PageUp, _)                                           =>
+          pageScroll(-1)
+        case TerminalInput.Key(TerminalKey.PageDown, _)                                         =>
+          pageScroll(1)
+        case TerminalInput.Key(TerminalKey.Left, modifiers) if modifiers.alt || modifiers.ctrl  =>
+          move(_.moveWordBackwards())
+        case TerminalInput.Key(TerminalKey.Right, modifiers) if modifiers.alt || modifiers.ctrl =>
+          move(_.moveWordForwards())
+        case TerminalInput.Key(TerminalKey.Left, _)                                             =>
+          move(_.moveLeft())
+        case TerminalInput.Key(TerminalKey.Right, _)                                            =>
+          move(_.moveRight())
+        case TerminalInput.Key(TerminalKey.Up, _)                                               =>
+          move(_.moveUp())
+        case TerminalInput.Key(TerminalKey.Down, _)                                             =>
+          move(_.moveDown())
+        case _                                                                                  => InputResult.Ignored
 
   private def handleEnter(modifiers: KeyModifiers): InputResult = enterBehavior match
     case EditorEnterBehavior.SubmitOnEnter(newlineModifiers) =>
@@ -477,35 +496,35 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
           val direction = jumpMode.get
           jumpMode = None
           if jumpToChar(text, direction) then InputResult.Render else InputResult.NoRender
-        case None =>
+        case None       =>
           jumpMode = None
           handleEditingInput(input)
 
   private def printableCharacter(input: TerminalInput): Option[String] = input match
     case TerminalInput.Key(TerminalKey.Character(text), modifiers)
         if !modifiers.ctrl && !modifiers.alt && !modifiers.superKey => Some(text)
-    case _                                                                => None
+    case _ => None
 
   private def jumpToChar(text: String, direction: Editor.JumpDirection): Boolean =
     val lines = buffer.lines
     if lines.isEmpty || text.isEmpty then false
     else
-      val isForward  = direction === Editor.JumpDirection.Forward
+      val isForward              = direction === Editor.JumpDirection.Forward
       val lineRange: Vector[Int] =
         if isForward then (buffer.cursor.line to lines.length - 1).toVector
         else (buffer.cursor.line to 0 by -1).toVector
-      var moved      = false
-      var foundLine  = buffer.cursor.line
-      var foundCol   = buffer.cursor.column
+      var moved                  = false
+      var foundLine              = buffer.cursor.line
+      var foundCol               = buffer.cursor.column
 
       lineRange.foreach { line =>
         if !moved then
           val lineClusters = Unicode.graphemeClusters(lines(line))
-          val start =
+          val start        =
             if line === buffer.cursor.line then
               if isForward then buffer.cursor.column + 1 else buffer.cursor.column
             else 0
-          val idx =
+          val idx          =
             if isForward then
               lineClusters.indexOf(text, start)
             else
@@ -531,7 +550,8 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     val pageSize   = 5
     val targetRow  = layout.cursor.row + direction * pageSize
     val boundedRow = math.max(0, math.min(layout.lines.length - 1, targetRow))
-    if boundedRow === layout.cursor.row then InputResult.NoRender else moveToVisualLine(layout, boundedRow)
+    if boundedRow === layout.cursor.row then InputResult.NoRender
+    else moveToVisualLine(layout, boundedRow)
 
   private def moveToVisualLine(layout: EditorLayout, targetRow: Int): InputResult =
     val targetLine     = layout.lines(targetRow)
@@ -542,7 +562,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
       targetLine.logicalLine,
       math.min(targetLine.startColumn + targetColIndex, targetLine.endColumn)
     )
-    val before = buffer.cursor
+    val before         = buffer.cursor
     buffer.setCursor(targetCursor)
     if before === targetCursor then InputResult.NoRender
     else
@@ -570,11 +590,35 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     else refreshAutocompleteIfActive()
 
   private def refreshAutocompleteIfActive(): Unit =
-    if currentAutocomplete.nonEmpty then requestAutocomplete(force = false)
-    else if currentAutocompleteHandle.nonEmpty then cancelAutocompleteRequest()
+    if currentAutocomplete.nonEmpty || currentAutocompleteHandle.nonEmpty || pendingAutocompleteRefresh.nonEmpty
+    then scheduleAutocompleteRefresh()
+
+  private def scheduleAutocompleteRefresh(): Unit =
+    if provider.nonEmpty then
+      cancelAutocompleteRequest()
+      cancelPendingAutocompleteRefresh()
+      pendingAutocompleteRefreshToken += 1
+      val refreshToken = pendingAutocompleteRefreshToken
+      val scheduled    = autocompleteDebouncer.schedule { () =>
+        val start = Editor.this.synchronized {
+          if refreshToken === pendingAutocompleteRefreshToken then
+            pendingAutocompleteRefresh = None
+            prepareAutocompleteRequestLocked(force = false)
+          else None
+        }
+        start.foreach(_.apply())
+      }
+      if !scheduled.ranSynchronously then pendingAutocompleteRefresh = Some(scheduled.handle)
 
   private def requestAutocomplete(force: Boolean): Unit =
-    provider.foreach { autocompleteProvider =>
+    cancelPendingAutocompleteRefresh()
+    requestAutocompleteNow(force)
+
+  private def requestAutocompleteNow(force: Boolean): Unit =
+    prepareAutocompleteRequestLocked(force).foreach(_.apply())
+
+  private def prepareAutocompleteRequestLocked(force: Boolean): Option[() => Unit] =
+    provider.map { autocompleteProvider =>
       cancelAutocompleteRequest()
       autocompleteRequestToken += 1
       val token     = autocompleteRequestToken
@@ -583,26 +627,38 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
       var completed = false
       val callback  = new AutocompleteCallback:
         override def complete(result: Option[AutocompleteSuggestions]): Unit =
-          Editor.this.synchronized {
+          val (overlayOperation, renderContext) = Editor.this.synchronized {
             if isCurrentAutocompleteRequest(token, snapshot) then
               completed = true
               currentAutocompleteHandle = None
-              result.filter(_.items.nonEmpty) match
-                case Some(suggestions) => showAutocomplete(suggestions, snapshot)
-                case None              => closeAutocompleteOverlay()
-              context.foreach(_.requestRender())
+              val operation = result.filter(_.items.nonEmpty) match
+                case Some(suggestions) =>
+                  prepareShowAutocompleteLocked(suggestions, snapshot, token)
+                case None              => prepareCloseAutocompleteOverlayLocked()
+              (operation, context)
+            else (None, None)
           }
+          overlayOperation.foreach(_.apply())
+          renderContext.foreach(_.requestRender())
 
-        override def fail(error: Throwable): Unit = Editor.this.synchronized {
-          if isCurrentAutocompleteRequest(token, snapshot) then
-            completed = true
-            currentAutocompleteHandle = None
-            closeAutocompleteOverlay()
-            context.foreach(_.requestRender())
+        override def fail(error: Throwable): Unit =
+          val (overlayOperation, renderContext) = Editor.this.synchronized {
+            if isCurrentAutocompleteRequest(token, snapshot) then
+              completed = true
+              currentAutocompleteHandle = None
+              (prepareCloseAutocompleteOverlayLocked(), context)
+            else (None, None)
+          }
+          overlayOperation.foreach(_.apply())
+          renderContext.foreach(_.requestRender())
+      () =>
+        val handle = autocompleteProvider.requestSuggestions(request, callback)
+        Editor.this.synchronized {
+          val current = isCurrentAutocompleteRequest(token, snapshot)
+          if current && !completed then
+            currentAutocompleteHandle = Some(handle)
+          else if !current then handle.cancel()
         }
-      val handle    = autocompleteProvider.requestSuggestions(request, callback)
-      if isCurrentAutocompleteRequest(token, snapshot) && !completed then
-        currentAutocompleteHandle = Some(handle)
     }
 
   private def isCurrentAutocompleteRequest(
@@ -615,6 +671,17 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
       suggestions: AutocompleteSuggestions,
       snapshot: Editor.AutocompleteSnapshot
   ): Unit =
+    prepareShowAutocompleteLocked(
+      suggestions,
+      snapshot,
+      autocompleteRequestToken
+    ).foreach(_.apply())
+
+  private def prepareShowAutocompleteLocked(
+      suggestions: AutocompleteSuggestions,
+      snapshot: Editor.AutocompleteSnapshot,
+      token: Long
+  ): Option[() => Unit] =
     val list             = SelectList(
       suggestions.items.map(item => SelectItem(item.value, item.label, item.description)),
       autocompleteMaxVisible
@@ -624,9 +691,32 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     currentAutocomplete = Some(state)
     val options          = currentOverlayOptions
     currentAutocompleteOverlay match
-      case Some(handle) => handle.update(overlayComponent, Some(options))
+      case Some(handle) =>
+        Some { () =>
+          val current = Editor.this.synchronized {
+            isCurrentAutocompleteRequest(
+              token,
+              snapshot
+            ) && currentAutocomplete.exists(_.overlay eq overlayComponent)
+          }
+          if current then handle.update(overlayComponent, Some(options))
+        }
       case None         =>
-        currentAutocompleteOverlay = context.map(_.overlays.showOverlay(overlayComponent, options))
+        val renderContext = context
+        Some { () =>
+          val shown      = renderContext.map(_.overlays.showOverlay(overlayComponent, options))
+          val staleShown = Editor.this.synchronized {
+            if isCurrentAutocompleteRequest(
+                token,
+                snapshot
+              ) && currentAutocomplete.exists(_.overlay eq overlayComponent)
+            then
+              currentAutocompleteOverlay = shown
+              None
+            else shown
+          }
+          staleShown.foreach(_.hide())
+        }
 
   private def acceptAutocomplete(): InputResult =
     handleAutocompleteSelection(submitOnSlash = false)
@@ -656,8 +746,14 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
         InputResult.Render
 
   private def cancelAutocomplete(): Unit =
+    cancelPendingAutocompleteRefresh()
     cancelAutocompleteRequest()
     closeAutocompleteOverlay()
+
+  private def cancelPendingAutocompleteRefresh(): Unit =
+    pendingAutocompleteRefreshToken += 1
+    pendingAutocompleteRefresh.foreach(_.cancel())
+    pendingAutocompleteRefresh = None
 
   private def cancelAutocompleteRequest(): Unit =
     autocompleteRequestToken += 1
@@ -665,9 +761,13 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     currentAutocompleteHandle = None
 
   private def closeAutocompleteOverlay(): Unit =
+    prepareCloseAutocompleteOverlayLocked().foreach(_.apply())
+
+  private def prepareCloseAutocompleteOverlayLocked(): Option[() => Unit] =
     currentAutocomplete = None
-    currentAutocompleteOverlay.foreach(_.hide())
+    val handle = currentAutocompleteOverlay
     currentAutocompleteOverlay = None
+    handle.map(overlay => () => overlay.hide())
 
   private def currentLineBeforeCursor: String =
     Unicode.graphemeClusters(buffer.lines(buffer.cursor.line)).take(buffer.cursor.column).mkString
@@ -680,6 +780,10 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
         requestRender = requestRender
       ))
     }
+
+  private def renderCurrentAutocompleteOverlay(width: Int): Vector[String] = synchronized {
+    currentAutocomplete.map(_.list.render(width)).getOrElse(Vector.empty)
+  }
 
   private def currentOverlayOptions: OverlayOptions =
     val base = autocompletePlacement match
@@ -728,7 +832,7 @@ object Editor:
     }
 
   final class AutocompleteOverlay(owner: Editor, list: SelectList) extends Component:
-    override def render(width: Int): Vector[String] = list.render(width)
+    override def render(width: Int): Vector[String] = owner.renderCurrentAutocompleteOverlay(width)
 
     override def handleInputResult(input: TerminalInput): InputResult = owner.synchronized {
       owner.handleAutocompleteInput(input)

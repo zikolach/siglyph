@@ -4,7 +4,7 @@
 - [x] 1.2 Add optional fuzzy ranking integration to slash/path/trigger autocomplete providers while preserving deterministic ordering for equal scores.
 - [x] 1.3 Add a cancellable filesystem `PathCompletionProvider` helper with max-results, hidden/git filtering, quoting, and attachment-prefix behavior.
 - [ ] 1.4 Add configurable stacked/natural trigger prefix support, including `#`, without adding command execution semantics to the TUI runtime.
-- [ ] 1.5 Add autocomplete refresh cancellation/debounce tests covering rapid typing, stale responses, and visible suggestion refresh behavior.
+- [x] 1.5 Add autocomplete refresh cancellation/debounce tests covering rapid typing, stale responses, and visible suggestion refresh behavior.
 - [ ] 1.6 Update editor/demo documentation to show built-in path and trigger autocomplete usage.
 
 ## 2. Selector and settings component parity

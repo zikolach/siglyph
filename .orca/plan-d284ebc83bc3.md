@@ -25,7 +25,7 @@ Status: [x]
 Extend the filesystem path helper acceptance logic to preserve attachment prefixes such as @ and @" and apply required quoting/escaping rules. Include tests for spaces, existing quotes, attachment syntax, and plain path completions.
 
 ## Task: Make autocomplete refresh cancellation and debouncing robust
-Status: [ ]
+Status: [x]
 
 Ensure rapid editor changes cancel stale autocomplete work, ignore late results, and keep visible suggestions until replacement or explicit cancellation. Include deterministic tests using controlled providers for rapid typing, stale callbacks, empty replacement, and visible suggestion refresh behavior.
 
