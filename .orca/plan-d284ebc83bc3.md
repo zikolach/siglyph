@@ -30,7 +30,7 @@ Status: [x]
 Ensure rapid editor changes cancel stale autocomplete work, ignore late results, and keep visible suggestions until replacement or explicit cancellation. Include deterministic tests using controlled providers for rapid typing, stale callbacks, empty replacement, and visible suggestion refresh behavior.
 
 ## Task: Add configurable stacked trigger prefix autocomplete
-Status: [ ]
+Status: [x]
 
 Support application-owned natural trigger prefixes including # through the combined autocomplete provider, with completion insertion only and no command execution semantics. Include tests for active-token detection, configured source dispatch, accepted replacement text, and non-trigger text fallback.
 

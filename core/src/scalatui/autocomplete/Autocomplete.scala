@@ -154,15 +154,18 @@ object TriggerPrefix:
   def from(value: String): Either[TriggerPrefixError, TriggerPrefix] =
     if value.isEmpty then Left(TriggerPrefixError.Empty)
     else if value.exists(_.isWhitespace) then Left(TriggerPrefixError.ContainsWhitespace)
+    else if value.exists(AutocompleteTokenCharacters.isDelimiter) then
+      Left(TriggerPrefixError.ContainsDelimiter)
     else Right(new TriggerPrefix(value))
 
 /** Reason a natural autocomplete trigger prefix was rejected. */
 enum TriggerPrefixError derives CanEqual:
-  case Empty, ContainsWhitespace
+  case Empty, ContainsWhitespace, ContainsDelimiter
 
   def message: String = this match
     case Empty              => "Trigger prefix must be non-empty"
     case ContainsWhitespace => "Trigger prefix must not contain whitespace"
+    case ContainsDelimiter  => "Trigger prefix must not contain token delimiters"
 
 /** Active trigger token parsed from the cursor context. */
 final case class TriggerCompletionPrefix(
@@ -172,6 +175,10 @@ final case class TriggerCompletionPrefix(
 )
 
 /** Dependency-free slash-command autocomplete provider helper. */
+private[autocomplete] object AutocompleteTokenCharacters:
+  val TokenDelimiters: Set[Char]       = Set(' ', '\t', '=', ',', ';', '(', ')', '[', ']', '{', '}')
+  def isDelimiter(char: Char): Boolean = TokenDelimiters.contains(char)
+
 final class SlashCommandAutocompleteProvider(
     commands: Vector[SlashCommand],
     fuzzyRanking: AutocompleteFuzzyRanking = AutocompleteFuzzyRanking.Disabled
@@ -269,8 +276,6 @@ object PathCompletionProvider:
 
 /** Deterministic cursor-context parser for trigger, path, and attachment prefixes. */
 object CompletionPrefixParser:
-  private val TokenDelimiters = Set(' ', '\t', '=', ',', ';', '(', ')', '[', ']', '{', '}')
-
   def parseTriggerPrefix(
       request: AutocompleteRequest,
       sources: Vector[TriggerCompletionSource]
@@ -341,11 +346,11 @@ object CompletionPrefixParser:
 
   private def lastTokenStart(text: String): Int =
     var i = text.length - 1
-    while i >= 0 && !TokenDelimiters.contains(text.charAt(i)) do i -= 1
+    while i >= 0 && !AutocompleteTokenCharacters.isDelimiter(text.charAt(i)) do i -= 1
     i + 1
 
   private def isTokenStart(text: String, index: Int): Boolean =
-    index === 0 || TokenDelimiters.contains(text.charAt(index - 1))
+    index === 0 || AutocompleteTokenCharacters.isDelimiter(text.charAt(index - 1))
 
   private def shouldUseToken(token: String, fullText: String, force: Boolean): Boolean =
     if force then true
@@ -356,7 +361,7 @@ object CompletionPrefixParser:
       token.startsWith("../") ||
       token.startsWith("~/") ||
       token.contains("/") ||
-      (token.isEmpty && fullText.nonEmpty && TokenDelimiters.contains(fullText.last))
+      (token.isEmpty && fullText.nonEmpty && AutocompleteTokenCharacters.isDelimiter(fullText.last))
 
   private def prefixFromToken(token: String): PathCompletionPrefix =
     if token.startsWith("@\"") then
@@ -406,8 +411,11 @@ final class CombinedAutocompleteProvider(
       callback: AutocompleteCallback
   ): AutocompleteRequestHandle =
     try
-      val base       = slashSuggestions(request).orElse(triggerSuggestions(request))
-      val pathPrefix = CompletionPrefixParser.parsePathPrefix(request)
+      val triggerPrefix = CompletionPrefixParser.parseTriggerPrefix(request, triggerSources)
+      val trigger       = triggerPrefix.flatMap(triggerSuggestions)
+      val base          = slashSuggestions(request).orElse(trigger)
+      val pathPrefix    =
+        Option.when(triggerPrefix.isEmpty)(CompletionPrefixParser.parsePathPrefix(request)).flatten
       pathPrefix match
         case Some(prefix) if pathProvider.nonEmpty =>
           pathProvider.get.requestPathSuggestions(
@@ -445,16 +453,15 @@ final class CombinedAutocompleteProvider(
     )
     result
 
-  private def triggerSuggestions(request: AutocompleteRequest): Option[AutocompleteSuggestions] =
-    CompletionPrefixParser.parseTriggerPrefix(request, triggerSources).flatMap { trigger =>
-      trigger.source.completions(trigger.query).map(fuzzyRanking.rankItems(
-        trigger.query,
-        _
-      )).filter(
-        _.nonEmpty
-      ).map { items =>
-        AutocompleteSuggestions(items, trigger.replacementPrefix)
-      }
+  private def triggerSuggestions(trigger: TriggerCompletionPrefix)
+      : Option[AutocompleteSuggestions] =
+    trigger.source.completions(trigger.query).map(fuzzyRanking.rankItems(
+      trigger.query,
+      _
+    )).filter(
+      _.nonEmpty
+    ).map { items =>
+      AutocompleteSuggestions(items, trigger.replacementPrefix)
     }
 
   private def combine(
