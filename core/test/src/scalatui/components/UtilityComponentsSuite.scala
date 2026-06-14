@@ -155,6 +155,123 @@ class UtilityComponentsSuite extends munit.FunSuite:
     list.handleInput(TerminalInput.Key(TerminalKey.Backspace))
     assertEquals(list.query, "c")
 
+  test("settings list fuzzy filtering ranks rows width-safely"):
+    val list = SettingsList(
+      Vector(
+        SettingItem("fuzzy-boilerplate", "Fuzzy Boilerplate", "off"),
+        SettingItem("fast-boat", "Fast Boat", "off"),
+        SettingItem("foo-bar", "Foo Bar", "on")
+      ),
+      SettingsListOptions(
+        filtering = SettingsListFiltering.Fuzzy,
+        showHints = false,
+        showScrollIndicators = false
+      )
+    )
+
+    list.handleInput(TerminalInput.Key(TerminalKey.Character("f")))
+    list.handleInput(TerminalInput.Key(TerminalKey.Character("b")))
+
+    assertEquals(list.selected.map(_.id), Some("foo-bar"))
+    val lines                 = list.render(24)
+    val rendered              = lines.map(Ansi.strip).mkString("\n")
+    val fooBarIndex           = rendered.indexOf("Foo Bar")
+    val fastBoatIndex         = rendered.indexOf("Fast Boat")
+    val fuzzyBoilerplateIndex = rendered.indexOf("Fuzzy Boilerplate")
+    assert(fooBarIndex >= 0, rendered)
+    assert(fastBoatIndex >= 0, rendered)
+    assert(fuzzyBoilerplateIndex >= 0, rendered)
+    assert(fooBarIndex < fastBoatIndex, rendered)
+    assert(fastBoatIndex < fuzzyBoilerplateIndex, rendered)
+    assert(lines.forall(Ansi.visibleWidth(_) <= 24), lines.toString)
+
+  test("settings list fuzzy filtering searches id label current value and description"):
+    def renderedFor(query: String): String =
+      val list = SettingsList(
+        Vector(
+          SettingItem("id-only-token", "Alpha", "one"),
+          SettingItem("beta", "label-only-token", "two"),
+          SettingItem("gamma", "Gamma", "value-only-token"),
+          SettingItem("delta", "Delta", "four", Some("description-only-token"))
+        ),
+        SettingsListOptions(filtering = SettingsListFiltering.Fuzzy, showHints = false)
+      )
+      query.foreach(ch => list.handleInput(TerminalInput.Key(TerminalKey.Character(ch.toString))))
+      Ansi.strip(list.render(80).mkString("\n"))
+
+    assert(renderedFor("iot").contains("Alpha"))
+    assert(renderedFor("lot").contains("label-only-token"))
+    assert(renderedFor("vot").contains("value-only-token"))
+    assert(renderedFor("dot").contains("Delta"))
+
+  test("settings list containment filtering remains available without fuzzy ranking"):
+    val list = SettingsList(
+      Vector(SettingItem("foo", "fooBar", "on"), SettingItem("fast", "fast-boat", "off")),
+      SettingsListOptions(filteringEnabled = true, showHints = false)
+    )
+
+    list.handleInput(TerminalInput.Key(TerminalKey.Character("f")))
+    list.handleInput(TerminalInput.Key(TerminalKey.Character("b")))
+
+    val rendered = Ansi.strip(list.render(40).mkString("\n"))
+    assert(rendered.contains("No matching settings"), rendered)
+    assert(!rendered.contains("fooBar"), rendered)
+    assertEquals(list.selected, None)
+
+  test("settings list explicit containment filtering does not fuzzy-rank"):
+    val list = SettingsList(
+      Vector(SettingItem("foo", "fooBar", "on"), SettingItem("fast", "fast-boat", "off")),
+      SettingsListOptions(filtering = SettingsListFiltering.Containment, showHints = false)
+    )
+
+    list.handleInput(TerminalInput.Key(TerminalKey.Character("f")))
+    list.handleInput(TerminalInput.Key(TerminalKey.Character("b")))
+
+    val rendered = Ansi.strip(list.render(40).mkString("\n"))
+    assert(rendered.contains("No matching settings"), rendered)
+    assert(!rendered.contains("fooBar"), rendered)
+    assertEquals(list.selected, None)
+
+  test("settings list explicit fuzzy filtering takes precedence over legacy containment flag"):
+    val list = SettingsList(
+      Vector(
+        SettingItem("fuzzy-boilerplate", "Fuzzy Boilerplate", "off"),
+        SettingItem("fast-boat", "Fast Boat", "off"),
+        SettingItem("foo-bar", "Foo Bar", "on")
+      ),
+      SettingsListOptions(
+        filteringEnabled = true,
+        filtering = SettingsListFiltering.Fuzzy,
+        showHints = false,
+        showScrollIndicators = false
+      )
+    )
+
+    list.handleInput(TerminalInput.Key(TerminalKey.Character("f")))
+    list.handleInput(TerminalInput.Key(TerminalKey.Character("b")))
+
+    val rendered = Ansi.strip(list.render(40).mkString("\n"))
+    assert(rendered.contains("Foo Bar"), rendered)
+    assertEquals(list.selected.map(_.id), Some("foo-bar"))
+
+  test("settings list fuzzy filtering renders no-match text for empty matches"):
+    val list = SettingsList(
+      Vector(SettingItem("alpha", "Alpha", "one")),
+      SettingsListOptions(
+        filtering = SettingsListFiltering.Fuzzy,
+        noMatchesText = "No fuzzy settings",
+        showHints = false
+      )
+    )
+
+    list.handleInput(TerminalInput.Key(TerminalKey.Character("z")))
+
+    val lines    = list.render(18)
+    val rendered = Ansi.strip(lines.mkString("\n"))
+    assert(rendered.contains("No fuzzy settings"), rendered)
+    assert(!rendered.contains("Alpha"), rendered)
+    assert(lines.forall(Ansi.visibleWidth(_) <= 18), lines.toString)
+
   test("loader renders default message and indicator width-safely"):
     val loader = Loader()
     val lines  = loader.render(20)

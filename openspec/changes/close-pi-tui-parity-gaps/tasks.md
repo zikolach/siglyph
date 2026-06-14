@@ -11,7 +11,7 @@
 
 - [x] 2.1 Extend `SelectList` with options/theme hooks for prefixes, selected text, descriptions, no-match text, scroll info, and label truncation.
 - [x] 2.2 Add `SelectList` filtering, optional fuzzy ranking, and selection-change callback behavior with width-safety tests.
-- [ ] 2.3 Extend `SettingsList` with optional fuzzy ranking alongside existing containment filtering.
+- [x] 2.3 Extend `SettingsList` with optional fuzzy ranking alongside existing containment filtering.
 - [ ] 2.4 Add settings submenu support using existing component/overlay contracts and tests for open, selection update, cancel, and focus restoration.
 - [ ] 2.5 Update demos and docs to exercise richer selector/settings behavior.
 

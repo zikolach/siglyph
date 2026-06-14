@@ -55,7 +55,7 @@ Status: [x]
 Use the shared fuzzy utility as an optional SelectList filtering/ranking mode while preserving containment or unfiltered behavior when selected. Include tests for fuzzy rank ordering, stable equal-score ordering, and disabled-fuzzy behavior.
 
 ## Task: Add SettingsList optional fuzzy ranking
-Status: [ ]
+Status: [x]
 
 Extend SettingsList filtering to optionally fuzzy-rank rows across id, label, current value, and description while keeping existing case-insensitive containment filtering available. Include tests for ranking, width-safe rendering, disabled-fuzzy containment, and empty matches.
 
