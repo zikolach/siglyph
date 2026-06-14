@@ -40,7 +40,7 @@ Status: [x]
 Update editor/demo documentation and examples to show built-in filesystem completion, attachment completion, fuzzy ranking, debounce/cancellation expectations, and # trigger usage. Include example coverage that can be exercised without external shell tools.
 
 ## Task: Add SelectList rich options and theme hooks
-Status: [ ]
+Status: [x]
 
 Extend SelectList with options/theme hooks for selected and unselected prefixes, selected text, descriptions, no-match text, scroll info, and label truncation. Include width-safety tests for styled selected rows, descriptions, truncation, and narrow render widths.
 
