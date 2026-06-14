@@ -15,7 +15,7 @@ Status: [x]
 Add configurable fuzzy ranking to slash, path, and trigger autocomplete flows without changing default deterministic ordering unless enabled. Include tests for equal-score stability and preservation of existing provider output when fuzzy mode is disabled.
 
 ## Task: Add bounded filesystem path completion helper
-Status: [ ]
+Status: [x]
 
 Implement an optional PathCompletionProvider helper that enumerates filesystem entries deterministically, enforces max-results, and filters hidden/git entries according to configuration. Include fake-temp-directory tests for result bounds, sort order, directory/file handling, and unreadable or missing paths.
 
