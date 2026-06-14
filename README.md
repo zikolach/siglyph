@@ -78,29 +78,47 @@ import scalatui.terminal.jvm.SttyTerminal
   tui.run()
 ```
 
-A multiline editor with slash-command autocomplete:
+A multiline editor with slash, filesystem, attachment, fuzzy, and `#` trigger autocomplete:
 
 ```scala
+import java.io.File
 import scalatui.autocomplete.*
 import scalatui.components.*
 import scalatui.core.TUI
 import scalatui.terminal.jvm.SttyTerminal
 
 @main def editorTui(): Unit =
-  val tui = TUI(SttyTerminal())
-  val output = Text("Submitted: (none)")
-  val editor = Editor(options = EditorOptions(
-    autocompleteProvider = Some(SlashCommandAutocompleteProvider(Vector(
-      SlashCommand("help", Some("Show help")),
-      SlashCommand("quit", Some("Exit"))
-    ))),
-    onSubmit = text => output.text = s"Submitted: $text"
-  ))
+  val tags = Vector("#bug", "#docs", "#demo")
+  TriggerCompletionSource.fromPrefix(
+    "#",
+    query => Some(tags.filter(_.drop(1).startsWith(query)).map(tag =>
+      AutocompleteItem(tag.drop(1), tag, Some("application-owned tag"))
+    ))
+  ) match
+    case Left(error) =>
+      System.err.println(s"Invalid autocomplete trigger: ${error.message}")
+    case Right(tagSource) =>
+      val tui = TUI(SttyTerminal())
+      val provider = CombinedAutocompleteProvider(
+        commands = Vector(SlashCommand("help"), SlashCommand("quit")),
+        pathProvider = Some(FileSystemPathCompletionProvider(FileSystemPathCompletionOptions(
+          baseDirectory = File("."), // Java/NIO only; no fd/find/shell dependency
+          maxResults = 20
+        ))),
+        triggerSources = Vector(tagSource),
+        fuzzyRanking = AutocompleteFuzzyRanking.Enabled
+      )
+      val editor = Editor(options = EditorOptions(
+        autocompleteProvider = Some(provider),
+        // Debounce is explicit/injectable; pending requests are cancelled and late results ignored.
+        autocompleteDebouncer = EditorAutocompleteDebouncer.Immediate,
+        onSubmit = text => println(s"Submitted: $text")
+      ))
 
-  tui.addChild(output)
-  tui.addChild(editor)
-  tui.setFocus(editor)
-  tui.run()
+      tui.addChild(Text("Try /he, ./, @\"README, or #do then Tab"))
+      tui.addChild(editor)
+      tui.setFocus(editor)
+      tui.run()
 ```
 
 ## Demos
@@ -122,7 +140,7 @@ Interactive demo controls are also summarized in [`docs/interactive-smoke.md`](d
 - **Components:** `Text`, `Box`, `Spacer`, `Input`, `Editor`, `SelectList`, `SettingsList`, `Loader`, `CancellableLoader`.
 - **Editing:** Unicode/grapheme-aware movement and deletion, large-paste compaction, prompt history, undo, kill-ring, yank/yank-pop, page movement, jump-to-character.
 - **Keybindings:** shared `KeybindingManager` with configurable editor/input/select command bindings.
-- **Autocomplete:** slash commands and dependency-free path/attachment completion contracts.
+- **Autocomplete:** slash commands, dependency-free filesystem path and `@` attachment completions, application-owned natural triggers such as `#`, optional fuzzy ranking, cancellable async providers, and injectable debounce scheduling.
 - **Terminals:** JVM `stty` backend, Scala Native POSIX backend, stream and virtual test backends.
 - **Optional modules:** dependency-free Markdown rendering and terminal image protocol helpers.
 

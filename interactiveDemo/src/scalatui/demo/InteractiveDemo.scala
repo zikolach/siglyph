@@ -2,10 +2,13 @@ package scalatui.demo
 
 import scalatui.ansi.Ansi
 import scalatui.autocomplete.{
+  AutocompleteFuzzyRanking,
+  AutocompleteItem,
   CombinedAutocompleteProvider,
-  PathCompletion,
-  PathCompletionProvider,
-  SlashCommand
+  FileSystemPathCompletionOptions,
+  FileSystemPathCompletionProvider,
+  SlashCommand,
+  TriggerCompletionSource
 }
 import scalatui.components.{
   CancellableLoader,
@@ -31,11 +34,15 @@ object InteractiveDemo:
   def install(tui: TUI): Unit =
     tui.exitsOnEscape = true
     tui.handlesControlC = true
-    val root = DemoRoot(tui)
-    tui.addChild(root)
-    tui.setFocus(root)
+    DemoRoot.tagTriggerSource match
+      case Left(error)      =>
+        tui.addChild(Text(s"Invalid autocomplete trigger configuration: ${error.message}"))
+      case Right(tagSource) =>
+        val root = DemoRoot(tui, tagSource)
+        tui.addChild(root)
+        tui.setFocus(root)
 
-private final class DemoRoot(tui: TUI) extends Component:
+private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource) extends Component:
   private enum DemoMode derives CanEqual:
     case EditorMode, FileManagerMode
 
@@ -55,11 +62,11 @@ private final class DemoRoot(tui: TUI) extends Component:
   private enum FileModeAction derives CanEqual:
     case Preview, OpenInEditor
 
-  private var mode = DemoMode.EditorMode
+  private var mode  = DemoMode.EditorMode
   private var focus = Focus.EditorPane
 
   // ---------- Shared editor showcase ----------
-  private var messages = Vector.empty[String]
+  private var messages     = Vector.empty[String]
   private val messagesText = Text("Submitted: (none)", paddingX = 0)
   private val editor       = Editor(options =
     EditorOptions(
@@ -70,24 +77,27 @@ private final class DemoRoot(tui: TUI) extends Component:
           SlashCommand("clear", Some("Clear submitted messages")),
           SlashCommand("quit", Some("Exit the demo"))
         ),
-        pathProvider = Some(PathCompletionProvider.sync(request =>
-          val prefix = request.prefix.rawPrefix
-          DemoRoot.PathSuggestions.filter(item => prefix.isEmpty || item.path.startsWith(prefix))
-        ))
+        pathProvider = Some(FileSystemPathCompletionProvider(FileSystemPathCompletionOptions(
+          baseDirectory = File("."),
+          maxResults = 20,
+          includeHidden = false
+        ))),
+        triggerSources = Vector(tagTriggerSource),
+        fuzzyRanking = AutocompleteFuzzyRanking.Enabled
       ))
     )
   )
-  private val loader = Loader(LoaderOptions(
+  private val loader       = Loader(LoaderOptions(
     message = "Tick me from Actions",
     indicator = LoaderIndicatorOptions(frames = Vector("◐", "◓", "◑", "◒")),
     leadingBlankLine = false
   ))
-  private val cancellable = CancellableLoader(LoaderOptions(
+  private val cancellable  = CancellableLoader(LoaderOptions(
     message = "Cancel me from Actions",
     indicator = LoaderIndicatorOptions(frames = Vector("!")),
     leadingBlankLine = false
   ))
-  private val actions = SelectList(
+  private val actions      = SelectList(
     Vector(
       SelectItem("submit", "Submit editor text"),
       SelectItem("clear", "Clear submitted messages"),
@@ -101,20 +111,21 @@ private final class DemoRoot(tui: TUI) extends Component:
   )
 
   // ---------- File manager / viewer showcase ----------
-  private var fileDirectory = File(System.getProperty("user.dir")).getAbsoluteFile
-  private val fileManagerPathInput = Input(fileDirectory.getAbsolutePath)
-  private var fileManagerItems = Vector.empty[FileManagerItem]
-  private var fileManagerSelection = 0
+  private var fileDirectory           = File(System.getProperty("user.dir")).getAbsoluteFile
+  private val fileManagerPathInput    = Input(fileDirectory.getAbsolutePath)
+  private var fileManagerItems        = Vector.empty[FileManagerItem]
+  private var fileManagerSelection    = 0
   private var fileManagerScrollOffset = 0
-  private var fileManagerFileFocus = FileManagerFocus.PathInput
-  private val fileManagerPreview = Text("No file selected", paddingX = 0)
-  private val fileManagerStatus = Text("Tip: Ctrl+P to edit path, Enter opens entries", paddingX = 0)
-  private val fileManagerLoader = Loader(LoaderOptions(
+  private var fileManagerFileFocus    = FileManagerFocus.PathInput
+  private val fileManagerPreview      = Text("No file selected", paddingX = 0)
+  private val fileManagerStatus       =
+    Text("Tip: Ctrl+P to edit path, Enter opens entries", paddingX = 0)
+  private val fileManagerLoader       = Loader(LoaderOptions(
     message = "Reading directory",
     indicator = LoaderIndicatorOptions(frames = Vector("◐", "◓", "◑", "◒")),
     leadingBlankLine = false
   ))
-  private var fileManagerBusy = false
+  private var fileManagerBusy         = false
 
   private val fileManagerMaxVisible = 12
   private val filePreviewMaxLines   = 18
@@ -136,23 +147,23 @@ private final class DemoRoot(tui: TUI) extends Component:
 
   private def handleAction(item: SelectItem): Unit =
     item.value match
-      case "submit" => addMessage(editor.text)
-      case "clear"  =>
+      case "submit"        => addMessage(editor.text)
+      case "clear"         =>
         messages = Vector.empty
         updateMessages()
-      case "large-paste" =>
+      case "large-paste"   =>
         editor.handleInput(
           TerminalInput.Paste((1 to 12).map(i => s"pasted line $i").mkString("\n"))
         )
         focus = Focus.EditorPane
         updateEditorFocus()
-      case "expand-paste" =>
+      case "expand-paste"  =>
         editor.expandPasteMarkers()
         focus = Focus.EditorPane
         updateEditorFocus()
-      case "tick-loader"  => loader.tick()
+      case "tick-loader"   => loader.tick()
       case "cancel-loader" => cancellable.cancel()
-      case "quit"         => tui.requestExit()
+      case "quit"          => tui.requestExit()
       case _               => ()
 
   override def handleInput(event: TerminalInput): Unit =
@@ -168,28 +179,32 @@ private final class DemoRoot(tui: TUI) extends Component:
           updateFocusStates()
           fileManagerStatus.text = "Press Ctrl+P for quick path jump, Enter to open"
         fileManagerStatus.text = statusLine
-      case TerminalInput.Key(TerminalKey.Character("t"), modifiers) if modifiers.ctrl && mode === DemoMode.EditorMode =>
+      case TerminalInput.Key(TerminalKey.Character("t"), modifiers)
+          if modifiers.ctrl && mode === DemoMode.EditorMode =>
         focus = if focus === Focus.EditorPane then Focus.Actions else Focus.EditorPane
         updateEditorFocus()
-      case TerminalInput.Key(TerminalKey.Character("l"), modifiers) if modifiers.ctrl && mode === DemoMode.EditorMode =>
+      case TerminalInput.Key(TerminalKey.Character("l"), modifiers)
+          if modifiers.ctrl && mode === DemoMode.EditorMode =>
         messages = Vector.empty
         updateMessages()
-      case _ if mode === DemoMode.FileManagerMode =>
+      case _ if mode === DemoMode.FileManagerMode                                     =>
         handleFileManagerInput(event)
-      case _                                                                      =>
+      case _                                                                          =>
         focus match
           case Focus.Actions    => actions.handleInput(event)
           case Focus.EditorPane => editor.handleInput(event)
 
   private def handleFileManagerInput(event: TerminalInput): Unit =
     event match
-      case TerminalInput.Key(TerminalKey.Character("p"), modifiers) if modifiers.ctrl && fileManagerFocusMode === FileManagerFocus.FileList =>
+      case TerminalInput.Key(TerminalKey.Character("p"), modifiers)
+          if modifiers.ctrl && fileManagerFocusMode === FileManagerFocus.FileList =>
         fileManagerFocusMode = FileManagerFocus.PathInput
         updateFileManagerFocus()
-      case TerminalInput.Key(TerminalKey.Escape, _) if fileManagerFocusMode === FileManagerFocus.PathInput =>
+      case TerminalInput.Key(TerminalKey.Escape, _)
+          if fileManagerFocusMode === FileManagerFocus.PathInput =>
         fileManagerFocusMode = FileManagerFocus.FileList
         updateFileManagerFocus()
-      case TerminalInput.Key(TerminalKey.Escape, _) =>
+      case TerminalInput.Key(TerminalKey.Escape, _)                                   =>
         fileManagerFocusMode = FileManagerFocus.PathInput
         updateFileManagerFocus()
       case TerminalInput.Key(TerminalKey.Character("t"), modifiers) if modifiers.ctrl =>
@@ -201,29 +216,36 @@ private final class DemoRoot(tui: TUI) extends Component:
         refreshFileManagerDirectory()
       case TerminalInput.Key(TerminalKey.Character("o"), modifiers) if modifiers.ctrl =>
         openSelection(FileModeAction.OpenInEditor)
-      case TerminalInput.Key(TerminalKey.Backspace, _) =>
-        if fileManagerFocusMode === FileManagerFocus.PathInput then fileManagerPathInput.handleInput(event)
+      case TerminalInput.Key(TerminalKey.Backspace, _)                                =>
+        if fileManagerFocusMode === FileManagerFocus.PathInput then
+          fileManagerPathInput.handleInput(event)
         else navigateToParent()
-      case TerminalInput.Key(TerminalKey.Enter, _) if fileManagerFocusMode === FileManagerFocus.PathInput =>
+      case TerminalInput.Key(TerminalKey.Enter, _)
+          if fileManagerFocusMode === FileManagerFocus.PathInput =>
         fileManagerPathInput.handleInput(event)
-      case TerminalInput.Key(TerminalKey.Up, _) if fileManagerFocusMode === FileManagerFocus.FileList =>
+      case TerminalInput.Key(TerminalKey.Up, _)
+          if fileManagerFocusMode === FileManagerFocus.FileList =>
         moveFileSelection(-1)
-      case TerminalInput.Key(TerminalKey.Down, _) if fileManagerFocusMode === FileManagerFocus.FileList =>
+      case TerminalInput.Key(TerminalKey.Down, _)
+          if fileManagerFocusMode === FileManagerFocus.FileList =>
         moveFileSelection(1)
-      case TerminalInput.Key(TerminalKey.PageUp, _) if fileManagerFocusMode === FileManagerFocus.FileList =>
+      case TerminalInput.Key(TerminalKey.PageUp, _)
+          if fileManagerFocusMode === FileManagerFocus.FileList =>
         moveFileSelectionByPage(-1)
-      case TerminalInput.Key(TerminalKey.PageDown, _) if fileManagerFocusMode === FileManagerFocus.FileList =>
+      case TerminalInput.Key(TerminalKey.PageDown, _)
+          if fileManagerFocusMode === FileManagerFocus.FileList =>
         moveFileSelectionByPage(1)
-      case TerminalInput.Key(TerminalKey.Enter, _) if fileManagerFocusMode === FileManagerFocus.FileList =>
+      case TerminalInput.Key(TerminalKey.Enter, _)
+          if fileManagerFocusMode === FileManagerFocus.FileList =>
         openSelection(FileModeAction.Preview)
-      case _ if fileManagerFocusMode === FileManagerFocus.PathInput =>
+      case _ if fileManagerFocusMode === FileManagerFocus.PathInput                   =>
         fileManagerPathInput.handleInput(event)
         fileManagerPathInputOnChange(fileManagerPathInput.value)
-      case _                                                                         => ()
+      case _                                                                          => ()
 
   override def render(width: Int): Vector[String] =
     val renderWidth = math.max(1, width)
-    val frame = ComponentFrameBuilder(renderWidth)
+    val frame       = ComponentFrameBuilder(renderWidth)
     frame.addLines(Vector(fit("siglyph showcase demo", renderWidth)))
     frame.addLines(Ansi.wrapTextWithAnsi(
       "Ctrl+T focus • Ctrl+M switch editor/file-manager modes • Esc/Ctrl+C quit",
@@ -238,7 +260,7 @@ private final class DemoRoot(tui: TUI) extends Component:
 
   private def renderEditorMode(width: Int, frame: ComponentFrameBuilder): Unit =
     frame.addLines(Ansi.wrapTextWithAnsi(
-      "Editor mode: Ctrl+T focus • ↑↓ actions • Enter submit/select • Shift+Enter newline • Tab autocompletes in editor (type /, ./, or @ first) • Ctrl+- undo • Ctrl+W kill word • Ctrl+Y yank • Alt+Y yank-pop • large-paste actions demo markers • Ctrl+L clear",
+      "Editor mode: Ctrl+T focus • ↑↓ actions • Enter submit/select • Shift+Enter newline • Tab autocomplete: / commands, ./ paths, @ attachments, # tags • fuzzy ranking on • Ctrl+- undo • Ctrl+W kill word • Ctrl+Y yank • Alt+Y yank-pop • Ctrl+L clear",
       width
     ))
     frame.addLines(Vector(
@@ -269,7 +291,8 @@ private final class DemoRoot(tui: TUI) extends Component:
         if fileManagerFocusMode === FileManagerFocus.PathInput then
           "Path input (focused):"
         else
-          "Path input:",
+          "Path input:"
+        ,
         width
       )
     ))
@@ -285,7 +308,10 @@ private final class DemoRoot(tui: TUI) extends Component:
     ))
     fileManagerListLines(width).foreach(frame.addLine)
     frame.addLine("")
-    frame.addLines(Ansi.wrapTextWithAnsi(s"Loader: ${plainLoaderLine(fileManagerLoader, width)}", width))
+    frame.addLines(Ansi.wrapTextWithAnsi(
+      s"Loader: ${plainLoaderLine(fileManagerLoader, width)}",
+      width
+    ))
     frame.addComponent(fileManagerStatus)
     frame.addLines(Vector(
       "",
@@ -298,14 +324,14 @@ private final class DemoRoot(tui: TUI) extends Component:
     if fileManagerItems.isEmpty then Vector(fit("(empty directory)", width))
     else
       ensureFileSelectionVisible()
-      val max = fileManagerMaxVisible
+      val max     = fileManagerMaxVisible
       val visible = fileManagerItems.slice(fileManagerScrollOffset, fileManagerScrollOffset + max)
       visible.zipWithIndex.map { case (item, visibleIndex) =>
-        val index       = fileManagerScrollOffset + visibleIndex
-        val marker      = if index === fileManagerSelection then "> " else fileListRowPrefix
-        val prefix      = if item.isDirectory then "📁 " else "📄 "
-        val detail      = s"${item.detail}"
-        val text        = s"${marker}${prefix}${item.displayName}   ${detail}"
+        val index  = fileManagerScrollOffset + visibleIndex
+        val marker = if index === fileManagerSelection then "> " else fileListRowPrefix
+        val prefix = if item.isDirectory then "📁 " else "📄 "
+        val detail = s"${item.detail}"
+        val text   = s"${marker}${prefix}${item.displayName}   ${detail}"
         fit(text, width)
       }
 
@@ -330,7 +356,7 @@ private final class DemoRoot(tui: TUI) extends Component:
 
   private def statusLine: String =
     if mode === DemoMode.EditorMode then
-      "Mode: Editor + slash/path autocomplete"
+      "Mode: Editor + slash/path/attachment/# autocomplete"
     else
       "Mode: File manager + live preview"
 
@@ -347,9 +373,10 @@ private final class DemoRoot(tui: TUI) extends Component:
       try
         Option(fileDirectory.listFiles()) match
           case Some(entries) =>
-            val parent = Option(fileDirectory.getParentFile)
-            val sorted = entries.sortBy(file => (if file.isDirectory then 0 else 1, file.getName.toLowerCase))
-            val converted = sorted.map(file =>
+            val parent     = Option(fileDirectory.getParentFile)
+            val sorted     =
+              entries.sortBy(file => (if file.isDirectory then 0 else 1, file.getName.toLowerCase))
+            val converted  = sorted.map(file =>
               FileManagerItem(
                 file,
                 file.isDirectory,
@@ -370,10 +397,13 @@ private final class DemoRoot(tui: TUI) extends Component:
                   )
                 )
             (withParent ++ converted, None)
-          case None =>
+          case None          =>
             (Vector.empty, Some(s"Cannot read directory: ${fileDirectory.getAbsolutePath}"))
       catch
-        case e: SecurityException => (Vector.empty, Some(s"Cannot read directory: ${fileManagerPathFor(fileDirectory)} (${e.getMessage})"))
+        case e: SecurityException => (
+            Vector.empty,
+            Some(s"Cannot read directory: ${fileManagerPathFor(fileDirectory)} (${e.getMessage})")
+          )
 
     fileManagerItems = items
     fileManagerSelection = if fileManagerItems.nonEmpty then 0 else -1
@@ -392,7 +422,7 @@ private final class DemoRoot(tui: TUI) extends Component:
 
   private def navigateToPathFromInput(raw: String): Unit =
     val trimmed = raw.trim
-    val target =
+    val target  =
       if trimmed.isEmpty then fileDirectory
       else
         val candidate = File(trimmed)
@@ -429,7 +459,7 @@ private final class DemoRoot(tui: TUI) extends Component:
             fileManagerStatus.text = "Cannot open a directory in editor"
         else
           action match
-            case FileModeAction.Preview => fileManagerPreview.text = readFilePreview(item.path)
+            case FileModeAction.Preview      => fileManagerPreview.text = readFilePreview(item.path)
             case FileModeAction.OpenInEditor =>
               fileDirectory = Option(item.path.getParentFile).getOrElse(fileDirectory)
               editor.setText(readFileContent(item.path))
@@ -444,9 +474,11 @@ private final class DemoRoot(tui: TUI) extends Component:
       fileManagerSelection = -1
       fileManagerScrollOffset = 0
     else
-      fileManagerSelection = math.max(0, math.min(fileManagerItems.length - 1, fileManagerSelection))
-      val visible = math.max(1, fileManagerMaxVisible)
-      if fileManagerSelection < fileManagerScrollOffset then fileManagerScrollOffset = fileManagerSelection
+      fileManagerSelection =
+        math.max(0, math.min(fileManagerItems.length - 1, fileManagerSelection))
+      val visible   = math.max(1, fileManagerMaxVisible)
+      if fileManagerSelection < fileManagerScrollOffset then
+        fileManagerScrollOffset = fileManagerSelection
       if fileManagerSelection >= fileManagerScrollOffset + visible then
         fileManagerScrollOffset = fileManagerSelection - visible + 1
       val maxOffset = math.max(0, fileManagerItems.length - visible)
@@ -454,7 +486,8 @@ private final class DemoRoot(tui: TUI) extends Component:
 
   private def moveFileSelection(delta: Int): Unit =
     if fileManagerItems.nonEmpty then
-      fileManagerSelection = math.max(0, math.min(fileManagerItems.length - 1, fileManagerSelection + delta))
+      fileManagerSelection =
+        math.max(0, math.min(fileManagerItems.length - 1, fileManagerSelection + delta))
       ensureFileSelectionVisible()
       previewCurrentSelection()
 
@@ -463,7 +496,10 @@ private final class DemoRoot(tui: TUI) extends Component:
       fileManagerSelection =
         math.max(
           0,
-          math.min(fileManagerItems.length - 1, fileManagerSelection + fileManagerMaxVisible * direction)
+          math.min(
+            fileManagerItems.length - 1,
+            fileManagerSelection + fileManagerMaxVisible * direction
+          )
         )
       ensureFileSelectionVisible()
       previewCurrentSelection()
@@ -473,9 +509,9 @@ private final class DemoRoot(tui: TUI) extends Component:
       case Some(item) if item.isDirectory =>
         val itemCount = fileDirectoryCount(item.path)
         fileManagerPreview.text = s"[dir] ${item.displayName}\nContains ${itemCount} entries"
-      case Some(item) =>
+      case Some(item)                     =>
         fileManagerPreview.text = readFilePreview(item.path)
-      case None =>
+      case None                           =>
         fileManagerPreview.text = "(no selection)"
 
   private def fileDirectoryCount(directory: File): Int =
@@ -487,11 +523,13 @@ private final class DemoRoot(tui: TUI) extends Component:
     else
       try
         Using.resource(Source.fromFile(file)) { source =>
-          val lines      = source.getLines().toVector
-          val shown      = lines.take(filePreviewMaxLines)
-          val hidden     = lines.length - filePreviewMaxLines
-          val tail       = if hidden > 0 then s"\n... (+${hidden} lines hidden)" else ""
-          val snippet    = shown.zipWithIndex.map((line, idx) => s"${idx + 1.toString.padTo(2, '0')}: $line").mkString("\n")
+          val lines   = source.getLines().toVector
+          val shown   = lines.take(filePreviewMaxLines)
+          val hidden  = lines.length - filePreviewMaxLines
+          val tail    = if hidden > 0 then s"\n... (+${hidden} lines hidden)" else ""
+          val snippet = shown.zipWithIndex.map((line, idx) =>
+            s"${idx + 1.toString.padTo(2, '0')}: $line"
+          ).mkString("\n")
           s"$snippet$tail"
         }
       catch
@@ -522,7 +560,7 @@ private final class DemoRoot(tui: TUI) extends Component:
         updateMessages()
       else if trimmed === "/quit" then tui.requestExit()
       else if trimmed === "/help" then
-        messages :+= "Slash commands: /help, /clear, /quit"
+        messages :+= "Autocomplete examples: /help, ./ filesystem paths, @ attachments, #bug/#docs/#demo/#release-notes tags"
         editor.setText("")
         updateMessages()
       else
@@ -549,9 +587,13 @@ private final class DemoRoot(tui: TUI) extends Component:
     Ansi.truncateToWidth(value, width, "")
 
 private object DemoRoot:
-  val PathSuggestions: Vector[PathCompletion] = Vector(
-    PathCompletion("./README.md", "README.md"),
-    PathCompletion("./docs/interactive-smoke.md", "interactive-smoke.md"),
-    PathCompletion("./core/src/scalatui/components/Editor.scala", "Editor.scala"),
-    PathCompletion("screenshots/demo image.png", "demo image.png")
-  )
+  private val Tags = Vector("#bug", "#docs", "#demo", "#release-notes")
+
+  def tagTriggerSource: Either[scalatui.autocomplete.TriggerPrefixError, TriggerCompletionSource] =
+    TriggerCompletionSource.fromPrefix(
+      "#",
+      _ =>
+        Some(Tags.map(tag =>
+          AutocompleteItem(tag.drop(1), tag, Some("application-owned demo tag"))
+        ))
+    )

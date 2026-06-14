@@ -35,7 +35,7 @@ Status: [x]
 Support application-owned natural trigger prefixes including # through the combined autocomplete provider, with completion insertion only and no command execution semantics. Include tests for active-token detection, configured source dispatch, accepted replacement text, and non-trigger text fallback.
 
 ## Task: Document and demo richer autocomplete
-Status: [ ]
+Status: [x]
 
 Update editor/demo documentation and examples to show built-in filesystem completion, attachment completion, fuzzy ranking, debounce/cancellation expectations, and # trigger usage. Include example coverage that can be exercised without external shell tools.
 

@@ -19,7 +19,9 @@ Expected behavior:
 - `Ctrl+T` switches focus between the action list and multiline editor, leaving `Tab` available to the focused editor for autocomplete.
 - `Enter` submits editor text, selects an action, ticks/cancels loader components through the action list, or accepts a visible autocomplete suggestion.
 - `Shift+Enter` inserts a newline in the editor when the terminal reports a normalized modified Enter event.
-- Type `/`, `./`, or `@` in editor input and press `Tab` to show slash/path autocomplete suggestions adjacent to the editor area.
+- Type `/he`, `./`, `../`, `@"README`, or `#do` in editor input and press `Tab` to show slash-command, dependency-free filesystem path, attachment, or application-owned `#` trigger suggestions adjacent to the editor area. Completion uses Java/NIO filesystem enumeration only; no external shell tools are required.
+- Verify autocomplete fuzzy ranking by typing partial command/path/tag text (for example `/hp` or `#dc`) and checking likely matches are ranked before looser matches when enabled in the demo.
+- In `examples/scala-cli/editor-autocomplete.scala`, which injects `EditorAutocompleteDebouncer.Delayed`, type additional characters quickly while autocomplete is visible and confirm stale work is cancelled/ignored: old suggestions remain visible while a refresh is pending, then are replaced or closed by the latest request.
 - With suggestions visible, `↑` / `↓` navigates, `Enter` or `Tab` accepts, and `Esc` cancels without changing editor text.
 - `PageUp` / `PageDown` pages the cursor in wrapped multiline editor content.
 - `Ctrl+]` and `Ctrl+Alt+]` jump forward/backward to the next typed target character.
