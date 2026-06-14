@@ -16,7 +16,7 @@ siglyph is pre-1.0. The current focus is a small, testable TUI core with `pi-tui
 
 ## Install
 
-Published artifacts are currently on GitHub Packages. If the repository/package is private, consumers need GitHub Packages credentials with `read:packages`.
+Published artifacts are currently on GitHub Packages. If the repository/package is private, consumers need GitHub Packages credentials with `read:packages`. Publishing details live in [`docs/publishing.md`](docs/publishing.md).
 
 ### SBT
 

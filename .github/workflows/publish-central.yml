@@ -1,0 +1,89 @@
+name: Publish Maven Central
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish, for example 0.1.1 or 0.1.1-SNAPSHOT'
+        required: true
+        type: string
+      should_release:
+        description: 'Automatically release a non-SNAPSHOT deployment after validation'
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  publish-maven-central:
+    name: Publish to Maven Central
+    runs-on: ubuntu-latest
+
+    env:
+      MILL_SONATYPE_USERNAME: ${{ secrets.MILL_SONATYPE_USERNAME }}
+      MILL_SONATYPE_PASSWORD: ${{ secrets.MILL_SONATYPE_PASSWORD }}
+      MILL_PGP_SECRET_BASE64: ${{ secrets.MILL_PGP_SECRET_BASE64 }}
+      MILL_PGP_PASSPHRASE: ${{ secrets.MILL_PGP_PASSPHRASE }}
+      SIGLYPH_VERSION: ${{ inputs.version }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Cache Scala and Mill dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/coursier
+            ~/.cache/mill
+            ~/.ivy2/cache
+            ~/.sbt
+          key: ${{ runner.os }}-scala-${{ hashFiles('build.mill', '.scalafix.conf', '.scalafmt.conf') }}
+          restore-keys: |
+            ${{ runner.os }}-scala-
+
+      - name: Install Mill
+        run: |
+          curl -fLo mill https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/1.1.6/mill-dist-1.1.6-mill.sh
+          chmod +x mill
+          echo "$PWD" >> "$GITHUB_PATH"
+          ./mill --version
+
+      - name: Compile all modules
+        run: mill __.compile
+
+      - name: Run tests
+        run: mill __.test
+
+      - name: Publish packages to Maven Central
+        run: |
+          set -euo pipefail
+          version="${SIGLYPH_VERSION:-${GITHUB_REF_NAME#v}}"
+          should_release="${{ inputs.should_release }}"
+          if [ -z "$should_release" ]; then
+            should_release=true
+          fi
+
+          args=(
+            mill mill.javalib.SonatypeCentralPublishModule/publishAll
+            --shouldRelease "$should_release"
+            --awaitTimeout 600000
+          )
+
+          if [[ "$version" != *-SNAPSHOT ]]; then
+            args+=(--bundleName "siglyph-${version}")
+          fi
+
+          echo "Publishing siglyph ${version} to Maven Central (shouldRelease=${should_release})"
+          "${args[@]}"
