@@ -2,9 +2,9 @@
 
 Small single-file demos intended for `scala-cli` and GitHub Gist.
 
-These examples use jar assets from the `v0.1.1` GitHub Release instead of
-GitHub Packages, so once the repository/release is public they can run without
-Maven credentials or cloning this repository.
+These examples use Maven Central dependencies, so they can run without Maven
+credentials or cloning this repository once the Central sync for the release has
+completed.
 
 Run from this repository:
 

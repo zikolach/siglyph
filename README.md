@@ -54,7 +54,7 @@ Single-file demos live in [`examples/scala-cli/`](examples/scala-cli/) and are i
 ./examples/scala-cli/markdown.scala
 ```
 
-They reference release jars directly, so they can run without cloning once the repository/release assets are public.
+They reference Maven Central dependencies, so they can run without cloning or GitHub Packages credentials.
 
 ## Quick example
 

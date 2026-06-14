@@ -1,7 +1,7 @@
 #!/usr/bin/env -S scala-cli shebang
 //> using scala 3.7.4
-//> using jar https://github.com/zikolach/siglyph/releases/download/v0.1.1/siglyph-core_3-0.1.1.jar
-//> using jar https://github.com/zikolach/siglyph/releases/download/v0.1.1/siglyph-markdown_3-0.1.1.jar
+//> using dep io.github.zikolach::siglyph-core:0.1.1
+//> using dep io.github.zikolach::siglyph-markdown:0.1.1
 
 import scalatui.components.*
 import scalatui.core.TUI

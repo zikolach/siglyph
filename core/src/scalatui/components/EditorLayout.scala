@@ -17,7 +17,7 @@ final case class EditorVisualLine(
 /** Visual cursor position in rendered editor rows and display columns. */
 final case class EditorVisualCursor(row: Int, column: Int) derives CanEqual
 
-/** Pure width-aware layout for an [[EditorBuffer]]. */
+/** Pure width-aware layout for a [[scalatui.editing.EditorBuffer]]. */
 final case class EditorLayout(
     lines: Vector[EditorVisualLine],
     cursor: EditorVisualCursor

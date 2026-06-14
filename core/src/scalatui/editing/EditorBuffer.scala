@@ -4,7 +4,7 @@ import scalatui.syntax.Equality.*
 import scalatui.unicode.Unicode
 
 /**
- * Logical cursor position inside an [[EditorBuffer]].
+ * Logical cursor position inside an [[scalatui.editing.EditorBuffer]].
  *
  * @param line
  *   zero-based logical line index

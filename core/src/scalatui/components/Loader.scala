@@ -51,7 +51,8 @@ object Loader:
  * background thread. Applications or future scheduler APIs drive animation by calling [[tick()]].
  * `start()` and `stop()` only update running state; `tick()` advances frames only while running.
  *
- * When attached to a [[scalatui.core.TUI]], state changes request renders through [[TUIContext]].
+ * When attached to a [[scalatui.core.TUI]], state changes request renders through
+ * [[scalatui.core.TUIContext TUIContext]].
  * Without a context, state changes are safe and affect subsequent direct renders. The component has
  * no third-party runtime dependencies and intentionally does not promise wall-clock timing.
  */

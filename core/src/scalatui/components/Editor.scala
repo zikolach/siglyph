@@ -10,7 +10,7 @@ import scalatui.terminal.{KeybindingCommand, KeybindingManager, KeyModifiers, Te
 import scalatui.unicode.Unicode
 
 /**
- * Multiline text editor component backed by an [[EditorBuffer]].
+ * Multiline text editor component backed by a [[scalatui.editing.EditorBuffer]].
  *
  * The editor owns focus state, delegates logical text mutations to `EditorBuffer`, wraps text to
  * the requested component width, renders a fake inverse-video cursor with a zero-width cursor
