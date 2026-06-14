@@ -45,7 +45,7 @@ Status: [x]
 Extend SelectList with options/theme hooks for selected and unselected prefixes, selected text, descriptions, no-match text, scroll info, and label truncation. Include width-safety tests for styled selected rows, descriptions, truncation, and narrow render widths.
 
 ## Task: Add SelectList filtering and selection-change callbacks
-Status: [ ]
+Status: [x]
 
 Implement SelectList filtering with configurable no-match rendering and invoke a selection-change callback when keyboard navigation changes the highlighted item. Include tests for filter results, empty results, callback payloads, and selection stability after filtering.
 

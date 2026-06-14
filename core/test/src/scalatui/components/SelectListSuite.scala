@@ -1,6 +1,7 @@
 package scalatui.components
 
 import scalatui.ansi.Ansi
+import scalatui.terminal.{KeyModifiers, TerminalInput, TerminalKey}
 
 class SelectListSuite extends munit.FunSuite:
   test("select list preserves public constructor compatibility"):
@@ -127,7 +128,193 @@ class SelectListSuite extends munit.FunSuite:
     assert(narrow.forall(Ansi.visibleWidth(_) <= 1), narrow.toString)
     assertEquals(list.render(0), Vector(""))
 
-  test("select list renders configurable no-match text width-safely"):
+  test("select list filters results by value label or description"):
+    val list = SelectList(
+      Vector(
+        SelectItem("a", "Alpha", Some("first")),
+        SelectItem("b", "Beta", Some("second")),
+        SelectItem("g", "Gamma", Some("third"))
+      ),
+      options = SelectListOptions(filteringEnabled = true)
+    )
+
+    list.handleInput(
+      TerminalInput.Key(TerminalKey.Character("g"))
+    )
+
+    assertEquals(list.query, "g")
+    assertEquals(list.selected.map(_.label), Some("Gamma"))
+    val rendered = Ansi.strip(list.render(40).mkString("\n"))
+    assert(rendered.contains("Gamma"), rendered)
+    assert(!rendered.contains("Alpha"), rendered)
+
+  test("select list filters unique value label and description fields"):
+    def renderedFor(query: String): String =
+      val list = SelectList(
+        Vector(
+          SelectItem("value-only-token", "Alpha", Some("first")),
+          SelectItem("b", "label-only-token", Some("second")),
+          SelectItem("g", "Gamma", Some("description-only-token"))
+        ),
+        options = SelectListOptions(filteringEnabled = true)
+      )
+      query.foreach(ch => list.handleInput(TerminalInput.Key(TerminalKey.Character(ch.toString))))
+      Ansi.strip(list.render(80).mkString("\n"))
+
+    assert(renderedFor("value-only").contains("Alpha"))
+    assert(renderedFor("label-only").contains("label-only-token"))
+    assert(renderedFor("description-only").contains("description-only-token"))
+
+  test("select list ignores printable filter input when filtering disabled"):
+    val list = SelectList(Vector(SelectItem("a", "Alpha")))
+
+    list.handleInput(TerminalInput.Key(TerminalKey.Character("z")))
+
+    assertEquals(list.query, "")
+    assert(Ansi.strip(list.render(40).mkString("\n")).contains("Alpha"))
+
+  test("select list filtering accepts shift-modified printable input"):
+    val list = SelectList(
+      Vector(SelectItem("ab", "Alpha Beta"), SelectItem("xy", "Other")),
+      options = SelectListOptions(filteringEnabled = true)
+    )
+
+    list.handleInput(TerminalInput.Key(TerminalKey.Character("A"), KeyModifiers(shift = true)))
+
+    assertEquals(list.query, "A")
+    val rendered = Ansi.strip(list.render(40).mkString("\n"))
+    assert(rendered.contains("Alpha Beta"), rendered)
+    assert(!rendered.contains("Other"), rendered)
+
+  test("select list filtering paste normalizes newlines"):
+    val list = SelectList(
+      Vector(SelectItem("ac", "Alpha Cat"), SelectItem("xy", "Other")),
+      options = SelectListOptions(filteringEnabled = true)
+    )
+
+    list.handleInput(TerminalInput.Paste("Alpha\nCat"))
+
+    assertEquals(list.query, "Alpha Cat")
+    assert(Ansi.strip(list.render(40).mkString("\n")).contains("Alpha Cat"))
+
+  test("select list filtering rejects shortcut-modified printable input"):
+    val list = SelectList(
+      Vector(SelectItem("alpha", "Alpha"), SelectItem("zeta", "Zeta")),
+      options = SelectListOptions(filteringEnabled = true)
+    )
+
+    list.handleInput(TerminalInput.Key(TerminalKey.Character("z"), KeyModifiers(ctrl = true)))
+    list.handleInput(TerminalInput.Key(TerminalKey.Character("z"), KeyModifiers(alt = true)))
+    list.handleInput(TerminalInput.Key(TerminalKey.Character("z"), KeyModifiers(superKey = true)))
+
+    assertEquals(list.query, "")
+    assertEquals(list.selected.map(_.value), Some("alpha"))
+    val rendered = Ansi.strip(list.render(40).mkString("\n"))
+    assert(rendered.contains("Alpha"), rendered)
+    assert(rendered.contains("Zeta"), rendered)
+
+  test("select list backspace removes a non-BMP grapheme"):
+    val list = SelectList(
+      Vector(SelectItem("alpha", "Alpha"), SelectItem("smile", "a🙂 match")),
+      options = SelectListOptions(filteringEnabled = true)
+    )
+
+    list.handleInput(TerminalInput.Key(TerminalKey.Character("a")))
+    list.handleInput(TerminalInput.Key(TerminalKey.Character("🙂")))
+    assertEquals(list.query, "a🙂")
+    list.handleInput(TerminalInput.Key(TerminalKey.Backspace))
+    assertEquals(list.query, "a")
+    val rendered = Ansi.strip(list.render(40).mkString("\n"))
+    assert(rendered.contains("Alpha"), rendered)
+    assert(rendered.contains("a🙂 match"), rendered)
+
+  test("select list selection-change callback covers filter transitions"):
+    var changes = Vector.empty[Option[SelectItem]]
+    val list    = SelectList(
+      Vector(
+        SelectItem("alpha", "Alpha"),
+        SelectItem("beta", "Beta"),
+        SelectItem("gamma", "Gamma")
+      ),
+      options = SelectListOptions(filteringEnabled = true)
+    )
+    list.onSelectionChange = item => changes :+= item
+
+    list.handleInput(TerminalInput.Key(TerminalKey.Down))
+    list.handleInput(TerminalInput.Key(TerminalKey.Character("g")))
+    list.handleInput(TerminalInput.Key(TerminalKey.Character("z")))
+
+    assertEquals(changes.map(_.map(_.value)), Vector(Some("beta"), Some("gamma"), None))
+
+  test("select list filtering does not notify when selection is preserved"):
+    var changes = Vector.empty[Option[SelectItem]]
+    val list    = SelectList(
+      Vector(SelectItem("alpha", "Alpha"), SelectItem("beta", "Beta")),
+      options = SelectListOptions(filteringEnabled = true)
+    )
+    list.onSelectionChange = item => changes :+= item
+
+    list.handleInput(TerminalInput.Key(TerminalKey.Character("a")))
+
+    assertEquals(list.selected.map(_.value), Some("alpha"))
+    assertEquals(changes, Vector.empty)
+
+  test("select list renders configurable no-match text for empty filter results"):
+    val list = SelectList(
+      Vector(SelectItem("a", "Alpha")),
+      options = SelectListOptions(
+        filteringEnabled = true,
+        noMatchText = "No matching entries",
+        theme = SelectListTheme(noMatchText = text => s"\u001b[31m$text\u001b[0m")
+      )
+    )
+
+    list.handleInput(
+      TerminalInput.Key(TerminalKey.Character("z"))
+    )
+
+    val line = list.render(20).head
+    assert(line.contains("\u001b[31m"), line)
+    assert(Ansi.strip(line).contains("No matching"), line)
+    assert(Ansi.visibleWidth(line) <= 20, line)
+
+  test("select list invokes selection-change callback with keyboard navigation payloads"):
+    var changes = Vector.empty[Option[SelectItem]]
+    val list    = SelectList(
+      Vector(
+        SelectItem("a", "Alpha"),
+        SelectItem("b", "Beta"),
+        SelectItem("g", "Gamma")
+      )
+    )
+    list.onSelectionChange = item => changes :+= item
+
+    list.handleInput(TerminalInput.Key(TerminalKey.Down))
+    list.handleInput(TerminalInput.Key(TerminalKey.Down))
+    list.handleInput(TerminalInput.Key(TerminalKey.Up))
+
+    assertEquals(changes.map(_.map(_.value)), Vector(Some("b"), Some("g"), Some("b")))
+
+  test("select list keeps selected item stable when filtering preserves it"):
+    val list = SelectList(
+      Vector(
+        SelectItem("alpha", "Alpha"),
+        SelectItem("beta", "Beta"),
+        SelectItem("delta", "Delta")
+      ),
+      options = SelectListOptions(filteringEnabled = true)
+    )
+    list.handleInput(TerminalInput.Key(TerminalKey.Down))
+    assertEquals(list.selected.map(_.value), Some("beta"))
+
+    list.handleInput(
+      TerminalInput.Key(TerminalKey.Character("e"))
+    )
+
+    assertEquals(list.query, "e")
+    assertEquals(list.selected.map(_.value), Some("beta"))
+
+  test("select list renders configurable no-match text for empty items width-safely"):
     val list = SelectList(
       Vector.empty,
       options = SelectListOptions(
