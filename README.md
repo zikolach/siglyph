@@ -57,7 +57,7 @@ Most applications start with `siglyph-core` plus one backend, usually `siglyph-t
 Single-file demos live in [`examples/scala-cli/`](examples/scala-cli/) and are intended for copy/paste or GitHub Gist use. For example:
 
 ```bash
-scala-cli run examples/scala-cli/markdown.scala
+./examples/scala-cli/markdown.scala
 ```
 
 They reference release jars directly, so they can run without cloning once the repository/release assets are public.

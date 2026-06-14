@@ -9,15 +9,17 @@ Maven credentials or cloning this repository.
 Run from this repository:
 
 ```bash
-scala-cli run examples/scala-cli/markdown.scala
-scala-cli run examples/scala-cli/hello.scala
-scala-cli run examples/scala-cli/editor-autocomplete.scala
+./examples/scala-cli/markdown.scala
+./examples/scala-cli/hello.scala
+./examples/scala-cli/editor-autocomplete.scala
 ```
 
 Run from a raw Gist URL:
 
 ```bash
-scala-cli run https://gist.githubusercontent.com/zikolach/<gist-id>/raw/hello.scala
+curl -L -o hello.scala https://gist.githubusercontent.com/zikolach/<gist-id>/raw/hello.scala
+chmod +x hello.scala
+./hello.scala
 ```
 
 `hello.scala` and `editor-autocomplete.scala` require a real macOS/Linux TTY.
