@@ -1,5 +1,9 @@
 # siglyph
 
+<p align="center">
+  <img src="docs/assets/siglyph-logo.png" alt="siglyph logo" width="640">
+</p>
+
 [![CI](https://github.com/zikolach/siglyph/actions/workflows/ci.yml/badge.svg)](https://github.com/zikolach/siglyph/actions/workflows/ci.yml)
 
 **siglyph** is a Scala 3 terminal UI library inspired by [`pi-tui`](https://github.com/earendil-works/pi/tree/main/packages/tui). It provides dependency-light components, typed terminal input, Unicode-aware text editing, differential rendering, overlays, and JVM/Scala Native terminal backends.
