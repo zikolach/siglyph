@@ -1,0 +1,34 @@
+//> using scala 3.7.4
+//> using jar https://github.com/zikolach/siglyph/releases/download/v0.1.0/siglyph-core_3-0.1.0.jar
+//> using jar https://github.com/zikolach/siglyph/releases/download/v0.1.0/siglyph-markdown_3-0.1.0.jar
+
+import scalatui.components.*
+import scalatui.core.TUI
+import scalatui.markdown.Markdown
+import scalatui.terminal.StreamTerminal
+
+@main def markdownDemo(): Unit =
+  val tui = TUI(StreamTerminal(output = System.out, initialColumns = 72, initialRows = 24))
+  tui.addChild(Markdown(
+    """
+      |# siglyph Markdown demo
+      |
+      |siglyph includes a dependency-free baseline Markdown renderer.
+      |
+      |- headings
+      |- paragraphs and lists
+      |- `inline code`
+      |- links like [siglyph](https://github.com/zikolach/siglyph)
+      |
+      |> Components render within the requested terminal width.
+      |
+      || Module | Purpose |
+      || --- | --- |
+      || core | components and terminal abstractions |
+      || markdown | Markdown component |
+      |""".stripMargin.trim,
+    paddingX = 1,
+    paddingY = 1
+  ))
+  tui.start()
+  tui.stop()
