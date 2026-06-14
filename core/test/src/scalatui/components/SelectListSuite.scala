@@ -4,6 +4,10 @@ import scalatui.ansi.Ansi
 import scalatui.terminal.{KeyModifiers, TerminalInput, TerminalKey}
 
 class SelectListSuite extends munit.FunSuite:
+  private def renderedLabel(line: String): String =
+    val stripped = Ansi.strip(line).trim
+    if stripped.startsWith("> ") then stripped.drop(2) else stripped
+
   test("select list preserves public constructor compatibility"):
     val default = new SelectList(Vector(SelectItem("a", "A")))
     val limited = new SelectList(
@@ -11,8 +15,17 @@ class SelectListSuite extends munit.FunSuite:
       1
     )
 
+    val legacyFiltered = SelectList(
+      Vector(SelectItem("foo", "fooBar"), SelectItem("fast", "fast-boat")),
+      options = SelectListOptions(10, true)
+    )
+    "fb".foreach(ch =>
+      legacyFiltered.handleInput(TerminalInput.Key(TerminalKey.Character(ch.toString)))
+    )
+
     assertEquals(default.render(20).map(Ansi.strip), Vector("> A"))
     assertEquals(limited.render(20).length, 1)
+    assertEquals(legacyFiltered.selected, None)
 
   test("select list applies theme hooks to selected rows width-safely"):
     val list = SelectList(
@@ -135,7 +148,7 @@ class SelectListSuite extends munit.FunSuite:
         SelectItem("b", "Beta", Some("second")),
         SelectItem("g", "Gamma", Some("third"))
       ),
-      options = SelectListOptions(filteringEnabled = true)
+      options = SelectListOptions(filtering = SelectListFiltering.Containment)
     )
 
     list.handleInput(
@@ -156,7 +169,7 @@ class SelectListSuite extends munit.FunSuite:
           SelectItem("b", "label-only-token", Some("second")),
           SelectItem("g", "Gamma", Some("description-only-token"))
         ),
-        options = SelectListOptions(filteringEnabled = true)
+        options = SelectListOptions(filtering = SelectListFiltering.Containment)
       )
       query.foreach(ch => list.handleInput(TerminalInput.Key(TerminalKey.Character(ch.toString))))
       Ansi.strip(list.render(80).mkString("\n"))
@@ -164,6 +177,97 @@ class SelectListSuite extends munit.FunSuite:
     assert(renderedFor("value-only").contains("Alpha"))
     assert(renderedFor("label-only").contains("label-only-token"))
     assert(renderedFor("description-only").contains("description-only-token"))
+
+  test("select list fuzzy filtering matches value label and description fields"):
+    def renderedFor(query: String): String =
+      val list = SelectList(
+        Vector(
+          SelectItem("vto", "Alpha", Some("first")),
+          SelectItem("b", "label-only-token", Some("second")),
+          SelectItem("g", "Gamma", Some("description-only-token"))
+        ),
+        options = SelectListOptions(filtering = SelectListFiltering.Fuzzy)
+      )
+      query.foreach(ch => list.handleInput(TerminalInput.Key(TerminalKey.Character(ch.toString))))
+      Ansi.strip(list.render(80).mkString("\n"))
+
+    assert(renderedFor("vto").contains("Alpha"))
+    assert(renderedFor("lot").contains("label-only-token"))
+    assert(renderedFor("dot").contains("description-only-token"))
+
+  test("select list fuzzy filtering omits nonmatching candidates"):
+    val list = SelectList(
+      Vector(SelectItem("foo", "fooBar"), SelectItem("zeta", "Zeta")),
+      options = SelectListOptions(
+        filtering = SelectListFiltering.Fuzzy,
+        noMatchText = "No fuzzy matches"
+      )
+    )
+
+    "fb".foreach(ch => list.handleInput(TerminalInput.Key(TerminalKey.Character(ch.toString))))
+
+    val rendered = Ansi.strip(list.render(40).mkString("\n"))
+    assert(rendered.contains("fooBar"), rendered)
+    assert(!rendered.contains("Zeta"), rendered)
+
+    list.handleInput(TerminalInput.Key(TerminalKey.Character("x")))
+    val noMatch = Ansi.strip(list.render(40).mkString("\n"))
+    assert(noMatch.contains("No fuzzy matches"), noMatch)
+    assert(!noMatch.contains("fooBar"), noMatch)
+
+  test("select list filteringEnabled remains containment-compatible"):
+    val list = SelectList(
+      Vector(SelectItem("foo", "fooBar"), SelectItem("fast", "fast-boat")),
+      options = SelectListOptions(filteringEnabled = true)
+    )
+
+    "fb".foreach(ch => list.handleInput(TerminalInput.Key(TerminalKey.Character(ch.toString))))
+
+    assertEquals(list.selected, None)
+    assert(Ansi.strip(list.render(40).mkString("\n")).contains("No items"))
+
+  test("select list fuzzy filtering ranks matches by score"):
+    val list = SelectList(
+      Vector(
+        SelectItem("fuzzy boilerplate", "fuzzy boilerplate"),
+        SelectItem("fast-boat", "fast-boat"),
+        SelectItem("fooBar", "fooBar")
+      ),
+      options = SelectListOptions(filtering = SelectListFiltering.Fuzzy)
+    )
+
+    "fb".foreach(ch => list.handleInput(TerminalInput.Key(TerminalKey.Character(ch.toString))))
+
+    val labels = list.render(80).map(renderedLabel)
+    assertEquals(labels, Vector("fooBar", "fast-boat", "fuzzy boilerplate"))
+
+  test("select list fuzzy filtering preserves stable ordering for equal scores"):
+    val list = SelectList(
+      Vector(
+        SelectItem("same", "One"),
+        SelectItem("same", "Two"),
+        SelectItem("same", "Three")
+      ),
+      options = SelectListOptions(filtering = SelectListFiltering.Fuzzy)
+    )
+
+    "same".foreach(ch => list.handleInput(TerminalInput.Key(TerminalKey.Character(ch.toString))))
+
+    val rendered = list.render(80).map(line => Ansi.strip(line).trim)
+    assertEquals(rendered, Vector("> One", "Two", "Three"))
+
+  test("select list containment filtering does not apply fuzzy-only matches"):
+    val list = SelectList(
+      Vector(SelectItem("foo", "fooBar"), SelectItem("fast", "fast-boat")),
+      options = SelectListOptions(filtering = SelectListFiltering.Containment)
+    )
+
+    "fb".foreach(ch => list.handleInput(TerminalInput.Key(TerminalKey.Character(ch.toString))))
+
+    assertEquals(list.selected, None)
+    val rendered = Ansi.strip(list.render(40).mkString("\n"))
+    assert(rendered.contains("No items"), rendered)
+    assert(!rendered.contains("fooBar"), rendered)
 
   test("select list ignores printable filter input when filtering disabled"):
     val list = SelectList(Vector(SelectItem("a", "Alpha")))
@@ -176,7 +280,7 @@ class SelectListSuite extends munit.FunSuite:
   test("select list filtering accepts shift-modified printable input"):
     val list = SelectList(
       Vector(SelectItem("ab", "Alpha Beta"), SelectItem("xy", "Other")),
-      options = SelectListOptions(filteringEnabled = true)
+      options = SelectListOptions(filtering = SelectListFiltering.Containment)
     )
 
     list.handleInput(TerminalInput.Key(TerminalKey.Character("A"), KeyModifiers(shift = true)))
@@ -189,7 +293,7 @@ class SelectListSuite extends munit.FunSuite:
   test("select list filtering paste normalizes newlines"):
     val list = SelectList(
       Vector(SelectItem("ac", "Alpha Cat"), SelectItem("xy", "Other")),
-      options = SelectListOptions(filteringEnabled = true)
+      options = SelectListOptions(filtering = SelectListFiltering.Containment)
     )
 
     list.handleInput(TerminalInput.Paste("Alpha\nCat"))
@@ -200,7 +304,7 @@ class SelectListSuite extends munit.FunSuite:
   test("select list filtering rejects shortcut-modified printable input"):
     val list = SelectList(
       Vector(SelectItem("alpha", "Alpha"), SelectItem("zeta", "Zeta")),
-      options = SelectListOptions(filteringEnabled = true)
+      options = SelectListOptions(filtering = SelectListFiltering.Containment)
     )
 
     list.handleInput(TerminalInput.Key(TerminalKey.Character("z"), KeyModifiers(ctrl = true)))
@@ -216,7 +320,7 @@ class SelectListSuite extends munit.FunSuite:
   test("select list backspace removes a non-BMP grapheme"):
     val list = SelectList(
       Vector(SelectItem("alpha", "Alpha"), SelectItem("smile", "a🙂 match")),
-      options = SelectListOptions(filteringEnabled = true)
+      options = SelectListOptions(filtering = SelectListFiltering.Containment)
     )
 
     list.handleInput(TerminalInput.Key(TerminalKey.Character("a")))
@@ -236,7 +340,7 @@ class SelectListSuite extends munit.FunSuite:
         SelectItem("beta", "Beta"),
         SelectItem("gamma", "Gamma")
       ),
-      options = SelectListOptions(filteringEnabled = true)
+      options = SelectListOptions(filtering = SelectListFiltering.Containment)
     )
     list.onSelectionChange = item => changes :+= item
 
@@ -250,7 +354,7 @@ class SelectListSuite extends munit.FunSuite:
     var changes = Vector.empty[Option[SelectItem]]
     val list    = SelectList(
       Vector(SelectItem("alpha", "Alpha"), SelectItem("beta", "Beta")),
-      options = SelectListOptions(filteringEnabled = true)
+      options = SelectListOptions(filtering = SelectListFiltering.Containment)
     )
     list.onSelectionChange = item => changes :+= item
 
@@ -263,7 +367,7 @@ class SelectListSuite extends munit.FunSuite:
     val list = SelectList(
       Vector(SelectItem("a", "Alpha")),
       options = SelectListOptions(
-        filteringEnabled = true,
+        filtering = SelectListFiltering.Containment,
         noMatchText = "No matching entries",
         theme = SelectListTheme(noMatchText = text => s"\u001b[31m$text\u001b[0m")
       )
@@ -302,7 +406,7 @@ class SelectListSuite extends munit.FunSuite:
         SelectItem("beta", "Beta"),
         SelectItem("delta", "Delta")
       ),
-      options = SelectListOptions(filteringEnabled = true)
+      options = SelectListOptions(filtering = SelectListFiltering.Containment)
     )
     list.handleInput(TerminalInput.Key(TerminalKey.Down))
     assertEquals(list.selected.map(_.value), Some("beta"))

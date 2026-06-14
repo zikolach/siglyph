@@ -50,7 +50,7 @@ Status: [x]
 Implement SelectList filtering with configurable no-match rendering and invoke a selection-change callback when keyboard navigation changes the highlighted item. Include tests for filter results, empty results, callback payloads, and selection stability after filtering.
 
 ## Task: Add optional SelectList fuzzy filtering
-Status: [ ]
+Status: [x]
 
 Use the shared fuzzy utility as an optional SelectList filtering/ranking mode while preserving containment or unfiltered behavior when selected. Include tests for fuzzy rank ordering, stable equal-score ordering, and disabled-fuzzy behavior.
 

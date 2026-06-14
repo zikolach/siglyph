@@ -4,6 +4,7 @@ import java.util.Locale
 
 import scalatui.ansi.Ansi
 import scalatui.core.Component
+import scalatui.matching.FuzzyMatcher
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{TerminalInput, TerminalKey}
 import scalatui.unicode.Unicode
@@ -32,19 +33,19 @@ final class SelectList private (
   def query: String = filterQuery
 
   override def handleInput(input: TerminalInput): Unit = input match
-    case TerminalInput.Key(TerminalKey.Up, _)                                   => moveSelection(-1)
-    case TerminalInput.Key(TerminalKey.Down, _)                                 => moveSelection(1)
-    case TerminalInput.Key(TerminalKey.Enter, _)                                => selected.foreach(onSelect)
-    case TerminalInput.Key(TerminalKey.Escape, _)                               => onCancel()
+    case TerminalInput.Key(TerminalKey.Up, _)                                             => moveSelection(-1)
+    case TerminalInput.Key(TerminalKey.Down, _)                                           => moveSelection(1)
+    case TerminalInput.Key(TerminalKey.Enter, _)                                          => selected.foreach(onSelect)
+    case TerminalInput.Key(TerminalKey.Escape, _)                                         => onCancel()
     case TerminalInput.Key(TerminalKey.Backspace, _)
-        if options.filteringEnabled && filterQuery.nonEmpty =>
+        if options.effectiveFiltering.enabled && filterQuery.nonEmpty =>
       updateFilter(dropLastGrapheme(filterQuery))
     case TerminalInput.Key(TerminalKey.Character(text), modifiers)
-        if options.filteringEnabled && !modifiers.ctrl && !modifiers.alt && !modifiers.superKey && text.nonEmpty =>
+        if options.effectiveFiltering.enabled && !modifiers.ctrl && !modifiers.alt && !modifiers.superKey && text.nonEmpty =>
       updateFilter(filterQuery + text)
-    case TerminalInput.Paste(text) if options.filteringEnabled && text.nonEmpty =>
+    case TerminalInput.Paste(text) if options.effectiveFiltering.enabled && text.nonEmpty =>
       updateFilter(filterQuery + text.replace('\n', ' ').replace('\r', ' '))
-    case _                                                                      => ()
+    case _                                                                                => ()
 
   /** Move selection up/down by logical items. */
   def moveSelectionBy(delta: Int): Unit = moveSelection(delta)
@@ -93,10 +94,10 @@ final class SelectList private (
   private def moveSelection(delta: Int): Unit =
     val currentItems = filteredItems
     if currentItems.nonEmpty then
-      val before = selected
+      val before = currentItems.lift(selectedIndex)
       selectedIndex = math.max(0, math.min(currentItems.length - 1, selectedIndex + delta))
       ensureVisible(currentItems.length)
-      notifySelectionChange(before)
+      notifySelectionChange(before, currentItems.lift(selectedIndex))
 
   private def ensureVisible(length: Int): Unit =
     scrollOffset = normalizedScrollOffset(length)
@@ -114,7 +115,8 @@ final class SelectList private (
     math.max(0, math.min(offset, maxOffset))
 
   private def updateFilter(value: String): Unit =
-    val selectedBeforeFilter = selected
+    val previousItems        = filteredItems
+    val selectedBeforeFilter = previousItems.lift(selectedIndex)
     filterQuery = value
     val candidates           = filteredItems
     selectedIndex = selectedBeforeFilter.flatMap(item =>
@@ -123,22 +125,23 @@ final class SelectList private (
         case index => Some(index)
     ).getOrElse(0)
     ensureVisible(candidates.length)
-    notifySelectionChange(selectedBeforeFilter)
+    notifySelectionChange(selectedBeforeFilter, candidates.lift(selectedIndex))
 
-  private def notifySelectionChange(before: Option[SelectItem]): Unit =
-    val after = selected
+  private def notifySelectionChange(before: Option[SelectItem], after: Option[SelectItem]): Unit =
     if before !== after then onSelectionChange(after)
 
   private def filteredItems: Vector[SelectItem] =
-    if !options.filteringEnabled || filterQuery.isEmpty then items
-    else
-      val needle = filterQuery.toLowerCase(Locale.ROOT)
-      items.filter { item =>
-        val haystack =
-          (item.value + "\n" + item.label + "\n" + item.description.getOrElse(""))
-            .toLowerCase(Locale.ROOT)
-        haystack.indexOf(needle) >= 0
-      }
+    options.effectiveFiltering match
+      case SelectListFiltering.Disabled    => items
+      case _ if filterQuery.isEmpty        => items
+      case SelectListFiltering.Containment =>
+        val needle = filterQuery.toLowerCase(Locale.ROOT)
+        items.filter(item => searchableText(item).toLowerCase(Locale.ROOT).indexOf(needle) >= 0)
+      case SelectListFiltering.Fuzzy       =>
+        FuzzyMatcher.filter(filterQuery, items)(searchableText).map(_.item)
+
+  private def searchableText(item: SelectItem): String =
+    item.value + "\n" + item.label + "\n" + item.description.getOrElse("")
 
   private def dropLastGrapheme(value: String): String =
     Unicode.graphemeClusters(value).dropRight(1).mkString
