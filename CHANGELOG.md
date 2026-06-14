@@ -7,8 +7,12 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-06-14
+
 ### Added
 
+- Maven Central publishing workflow and publishing documentation.
+- Scala CLI executable demos for quick local or Gist-based experiments.
 - Open-source project metadata: license, contribution guide, security policy,
   code of conduct, and upstream attribution notice.
 
@@ -29,5 +33,6 @@ and this project uses semantic versioning while it remains pre-1.0.
 - GitHub Actions CI, jar packaging, GitHub Packages publishing, and GitHub
   release artifacts.
 
-[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/zikolach/siglyph/releases/tag/v0.1.1
 [0.1.0]: https://github.com/zikolach/siglyph/releases/tag/v0.1.0

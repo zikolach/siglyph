@@ -16,18 +16,16 @@ siglyph is pre-1.0. The current focus is a small, testable TUI core with `pi-tui
 
 ## Install
 
-Published artifacts are currently on GitHub Packages. If the repository/package is private, consumers need GitHub Packages credentials with `read:packages`. Publishing details live in [`docs/publishing.md`](docs/publishing.md).
+Published artifacts are available on Maven Central. GitHub Packages and GitHub Release jars are also published for releases; details live in [`docs/publishing.md`](docs/publishing.md).
 
 ### SBT
 
 ```scala
-resolvers += "GitHub Packages: siglyph" at "https://maven.pkg.github.com/zikolach/siglyph"
-
 libraryDependencies ++= Seq(
-  "io.github.zikolach" %% "siglyph-core" % "0.1.0",
-  "io.github.zikolach" %% "siglyph-terminal-jvm" % "0.1.0",
-  "io.github.zikolach" %% "siglyph-markdown" % "0.1.0",
-  "io.github.zikolach" %% "siglyph-image" % "0.1.0"
+  "io.github.zikolach" %% "siglyph-core" % "0.1.1",
+  "io.github.zikolach" %% "siglyph-terminal-jvm" % "0.1.1",
+  "io.github.zikolach" %% "siglyph-markdown" % "0.1.1",
+  "io.github.zikolach" %% "siglyph-image" % "0.1.1"
 )
 ```
 
@@ -37,15 +35,11 @@ libraryDependencies ++= Seq(
 object app extends ScalaModule {
   def scalaVersion = "3.7.4"
 
-  def repositories = Task {
-    super.repositories() ++ Seq("https://maven.pkg.github.com/zikolach/siglyph")
-  }
-
   def mvnDeps = Seq(
-    mvn"io.github.zikolach::siglyph-core::0.1.0",
-    mvn"io.github.zikolach::siglyph-terminal-jvm::0.1.0",
-    mvn"io.github.zikolach::siglyph-markdown::0.1.0",
-    mvn"io.github.zikolach::siglyph-image::0.1.0"
+    mvn"io.github.zikolach::siglyph-core::0.1.1",
+    mvn"io.github.zikolach::siglyph-terminal-jvm::0.1.1",
+    mvn"io.github.zikolach::siglyph-markdown::0.1.1",
+    mvn"io.github.zikolach::siglyph-image::0.1.1"
   )
 }
 ```
