@@ -10,7 +10,7 @@ Status: [x]
 Implement a dependency-free fuzzy matching/filtering utility with ordered-character, boundary, consecutive, exact, swapped alphanumeric, and tokenized multi-word scoring. Include tests for ranking quality, all-token matching, stable ordering for equal scores, and no-match behavior.
 
 ## Task: Wire optional fuzzy ranking into autocomplete providers
-Status: [ ]
+Status: [x]
 
 Add configurable fuzzy ranking to slash, path, and trigger autocomplete flows without changing default deterministic ordering unless enabled. Include tests for equal-score stability and preservation of existing provider output when fuzzy mode is disabled.
 

@@ -83,6 +83,174 @@ class AutocompleteSuite extends munit.FunSuite:
     ))
     assertEquals(result.lines, Vector("attach @\"docs/read me.md\" tail"))
 
+  test("slash fuzzy ranking is disabled by default"):
+    val provider = SlashCommandAutocompleteProvider(Vector(
+      SlashCommand("markdown"),
+      SlashCommand("my-model"),
+      SlashCommand("model")
+    ))
+
+    assertEquals(
+      requestSync(provider, AutocompleteRequest(Vector("/m"), EditorCursor(0, 2)))
+        .map(_.items.map(_.label)),
+      Some(Vector("markdown", "my-model", "model"))
+    )
+
+  test("path fuzzy ranking is disabled by default"):
+    val provider = CombinedAutocompleteProvider(
+      pathProvider = Some(PathCompletionProvider.sync(_ =>
+        Vector(
+          PathCompletion("/my-model", "my-model"),
+          PathCompletion("/model", "model")
+        )
+      ))
+    )
+
+    assertEquals(
+      requestSync(provider, AutocompleteRequest(Vector("open /model"), EditorCursor(0, 11)))
+        .map(_.items.map(_.label)),
+      Some(Vector("my-model", "model"))
+    )
+
+  test("trigger fuzzy ranking is disabled by default"):
+    val provider = CombinedAutocompleteProvider(
+      triggerSources = Vector(triggerSource(
+        "#",
+        _ =>
+          Some(Vector(
+            AutocompleteItem("my-model", "my-model"),
+            AutocompleteItem("model", "model")
+          ))
+      ))
+    )
+
+    assertEquals(
+      requestSync(provider, AutocompleteRequest(Vector("#model"), EditorCursor(0, 6)))
+        .map(_.items.map(_.label)),
+      Some(Vector("my-model", "model"))
+    )
+
+  test("slash fuzzy ranking can be enabled"):
+    val provider = SlashCommandAutocompleteProvider(
+      Vector(SlashCommand("my-model"), SlashCommand("model"), SlashCommand("markdown")),
+      fuzzyRanking = AutocompleteFuzzyRanking.Enabled
+    )
+
+    assertEquals(
+      requestSync(provider, AutocompleteRequest(Vector("/model"), EditorCursor(0, 6)))
+        .map(_.items.map(_.label)),
+      Some(Vector("model", "my-model"))
+    )
+
+  test("path fuzzy ranking can be enabled"):
+    val provider = CombinedAutocompleteProvider(
+      pathProvider = Some(PathCompletionProvider.sync(_ =>
+        Vector(
+          PathCompletion("/my-model", "my-model"),
+          PathCompletion("/model", "model"),
+          PathCompletion("/markdown", "markdown")
+        )
+      )),
+      fuzzyRanking = AutocompleteFuzzyRanking.Enabled
+    )
+
+    assertEquals(
+      requestSync(provider, AutocompleteRequest(Vector("open /model"), EditorCursor(0, 11)))
+        .map(_.items.map(_.label)),
+      Some(Vector("model", "my-model"))
+    )
+
+  test("trigger fuzzy ranking can be enabled"):
+    val provider = CombinedAutocompleteProvider(
+      triggerSources = Vector(triggerSource(
+        "#",
+        _ =>
+          Some(Vector(
+            AutocompleteItem("my-model", "my-model"),
+            AutocompleteItem("model", "model"),
+            AutocompleteItem("markdown", "markdown")
+          ))
+      )),
+      fuzzyRanking = AutocompleteFuzzyRanking.Enabled
+    )
+
+    assertEquals(
+      requestSync(provider, AutocompleteRequest(Vector("#model"), EditorCursor(0, 6)))
+        .map(_.items.map(_.label)),
+      Some(Vector("model", "my-model"))
+    )
+
+  test("slash argument fuzzy ranking can be enabled"):
+    val provider = SlashCommandAutocompleteProvider(
+      Vector(SlashCommand(
+        "cmd",
+        argumentCompletions = _ =>
+          Some(Vector(
+            AutocompleteItem("my-model", "my-model"),
+            AutocompleteItem("model", "model"),
+            AutocompleteItem("markdown", "markdown")
+          ))
+      )),
+      fuzzyRanking = AutocompleteFuzzyRanking.Enabled
+    )
+
+    assertEquals(
+      requestSync(provider, AutocompleteRequest(Vector("/cmd model"), EditorCursor(0, 10)))
+        .map(_.items.map(_.label)),
+      Some(Vector("model", "my-model"))
+    )
+
+  test("slash fuzzy ranking preserves equal-score provider order"):
+    val provider = SlashCommandAutocompleteProvider(
+      Vector(
+        SlashCommand("same", Some("first")),
+        SlashCommand("same", Some("second"))
+      ),
+      fuzzyRanking = AutocompleteFuzzyRanking.Enabled
+    )
+
+    assertEquals(
+      requestSync(provider, AutocompleteRequest(Vector("/same"), EditorCursor(0, 5)))
+        .map(_.items.flatMap(_.description)),
+      Some(Vector("first", "second"))
+    )
+
+  test("path fuzzy ranking preserves equal-score provider order"):
+    val provider = CombinedAutocompleteProvider(
+      pathProvider = Some(PathCompletionProvider.sync(_ =>
+        Vector(
+          PathCompletion("/first", "same"),
+          PathCompletion("/second", "same")
+        )
+      )),
+      fuzzyRanking = AutocompleteFuzzyRanking.Enabled
+    )
+
+    assertEquals(
+      requestSync(provider, AutocompleteRequest(Vector("open /same"), EditorCursor(0, 10)))
+        .map(_.items.map(_.value)),
+      Some(Vector("/first", "/second"))
+    )
+
+  test("trigger fuzzy ranking preserves equal-score provider order"):
+    val provider = CombinedAutocompleteProvider(
+      triggerSources = Vector(triggerSource(
+        "#",
+        _ =>
+          Some(Vector(
+            AutocompleteItem("first", "same"),
+            AutocompleteItem("second", "same")
+          ))
+      )),
+      fuzzyRanking = AutocompleteFuzzyRanking.Enabled
+    )
+
+    assertEquals(
+      requestSync(provider, AutocompleteRequest(Vector("#same"), EditorCursor(0, 5)))
+        .map(_.items.map(_.value)),
+      Some(Vector("first", "second"))
+    )
+
   test("editor cancels stale combined path requests and ignores old responses"):
     final class ManualPathProvider extends PathCompletionProvider:
       var callback  = Option.empty[PathCompletionProvider.Callback]
@@ -113,6 +281,15 @@ class AutocompleteSuite extends munit.FunSuite:
 
     assertEquals(path.cancelled, 1)
     assertEquals(editor.text, "./x")
+
+  private def triggerSource(
+      prefix: String,
+      completions: String => Option[Vector[AutocompleteItem]]
+  ): TriggerCompletionSource =
+    TriggerCompletionSource.fromPrefix(
+      prefix,
+      completions
+    ).fold(error => sys.error(error.message), identity)
 
   private def requestSync(
       provider: AutocompleteProvider,
