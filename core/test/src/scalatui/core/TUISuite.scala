@@ -312,6 +312,48 @@ class TUISuite extends munit.FunSuite:
 
     assert(terminal.output.contains("x" + TUI.LineReset), terminal.output)
 
+  test("key release is ignored by default"):
+    val terminal  = VirtualTerminal(20, 5)
+    var delivered = 0
+    val component = new Component:
+      override def handleInputResult(input: TerminalInput): InputResult =
+        delivered += 1
+        InputResult.NoRender
+      override def render(width: Int): Vector[String]                   = Vector("stable")
+    val tui       = TUI(terminal)
+    tui.addChild(component)
+    tui.setFocus(component)
+    tui.start()
+
+    terminal.sendInput(TerminalInput.KeyEvent(
+      TerminalKey.Character("x"),
+      eventType = scalatui.terminal.KeyEventType.Release
+    ))
+
+    assertEquals(delivered, 0)
+
+  test("key release is delivered to components that opt in"):
+    val terminal  = VirtualTerminal(20, 5)
+    var delivered = Option.empty[TerminalInput]
+    val component = new Component:
+      override def wantsKeyRelease: Boolean                             = true
+      override def handleInputResult(input: TerminalInput): InputResult =
+        delivered = Some(input)
+        InputResult.NoRender
+      override def render(width: Int): Vector[String]                   = Vector("stable")
+    val tui       = TUI(terminal)
+    tui.addChild(component)
+    tui.setFocus(component)
+    tui.start()
+
+    val release = TerminalInput.KeyEvent(
+      TerminalKey.Character("x"),
+      eventType = scalatui.terminal.KeyEventType.Release
+    )
+    terminal.sendInput(release)
+
+    assertEquals(delivered, Some(release))
+
   test("editor submit callback mutations rerender immediately"):
     val terminal = VirtualTerminal(40, 8)
     val output   = Text("Submitted: (none)")

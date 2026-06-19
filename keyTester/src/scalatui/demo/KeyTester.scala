@@ -23,7 +23,8 @@ import java.util.concurrent.atomic.AtomicBoolean
   finally terminal.stop()
 
 private def describe(input: TerminalInput): String = input match
-  case TerminalInput.Key(key, modifiers) => s"key=$key modifiers=$modifiers"
-  case TerminalInput.Paste(text)         => s"paste ${text.length} chars: ${text.take(80)}"
-  case TerminalInput.Raw(data)           =>
+  case TerminalInput.KeyEvent(key, modifiers, eventType) =>
+    s"key=$key modifiers=$modifiers event=$eventType"
+  case TerminalInput.Paste(text)                         => s"paste ${text.length} chars: ${text.take(80)}"
+  case TerminalInput.Raw(data)                           =>
     s"raw ${data.toCharArray.map(ch => f"U+${ch.toInt}%04X").mkString(" ")}"

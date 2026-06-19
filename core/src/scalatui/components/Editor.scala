@@ -575,13 +575,15 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     else
       var offset  = 0
       var emitted = 0
-      while offset < clusters.length && emitted < visualColumn do
+      var found   = Option.empty[Int]
+      while offset < clusters.length && emitted < visualColumn && found.isEmpty do
         val cluster = clusters(offset)
         val width   = Unicode.graphemeWidth(cluster)
-        if emitted + width > visualColumn then return offset
-        emitted += width
-        offset += 1
-      offset
+        if emitted + width > visualColumn then found = Some(offset)
+        else
+          emitted += width
+          offset += 1
+      found.getOrElse(offset)
 
   private def maybeTriggerAutocompleteAfterText(inserted: String): Unit =
     if provider.nonEmpty && autocompleteTrigger.triggerSlash && (inserted === "/") && currentLineBeforeCursor === "/"

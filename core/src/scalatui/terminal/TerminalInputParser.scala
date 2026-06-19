@@ -72,16 +72,17 @@ object TerminalInputParser:
     else None
 
   private def parseModified(data: String): Option[TerminalInput] = data match
-    case ModifiedArrow(modText, code)                   =>
+    case ModifiedArrow(modText, code)                         =>
       Some(key(arrowKey(code), decodeModifiers(modText.toInt - 1)))
-    case ModifiedFunc(numText, modText)                 =>
+    case ModifiedFunc(numText, modText)                       =>
       functionKey(numText.toInt).map(key(_, decodeModifiers(modText.toInt - 1)))
-    case ModifyOtherKeys(modText, cpText)               =>
+    case ModifyOtherKeys(modText, cpText)                     =>
       Some(key(codePointKey(cpText.toInt), decodeModifiers(modText.toInt - 1)))
-    case CsiU(cpText, _shifted, _base, modText, _event) =>
+    case CsiU(cpText, _shifted, baseText, modText, eventText) =>
       val modifiers = Option(modText).fold(KeyModifiers.empty)(m => decodeModifiers(m.toInt - 1))
-      Some(key(codePointKey(cpText.toInt), modifiers))
-    case _                                              => None
+      val eventType = Option(eventText).flatMap(decodeEventType).getOrElse(KeyEventType.Press)
+      Some(key(codePointKey(csiUCodePoint(cpText.toInt, Option(baseText))), modifiers, eventType))
+    case _                                                    => None
 
   private def parsePrintable(data: String): Option[TerminalInput] =
     if data.startsWith("\u001b") && data.length > 1 then
@@ -95,9 +96,10 @@ object TerminalInputParser:
 
   private def key(
       key: TerminalKey,
-      modifiers: KeyModifiers = KeyModifiers.empty
-  ): TerminalInput.Key =
-    TerminalInput.Key(key, modifiers)
+      modifiers: KeyModifiers = KeyModifiers.empty,
+      eventType: KeyEventType = KeyEventType.Press
+  ): TerminalInput.KeyEvent =
+    TerminalInput.KeyEvent(key, modifiers, eventType)
 
   private def arrowKey(code: String): TerminalKey = code match
     case "A"   => TerminalKey.Up
@@ -122,6 +124,15 @@ object TerminalInputParser:
     case 127            => TerminalKey.Backspace
     case cp if cp >= 32 => TerminalKey.Character(new String(Character.toChars(cp)))
     case cp             => TerminalKey.Unknown(s"U+$cp")
+
+  private def csiUCodePoint(codePoint: Int, base: Option[String]): Int =
+    base.flatMap(value => scala.util.Try(value.toInt).toOption).filter(_ > 0).getOrElse(codePoint)
+
+  private def decodeEventType(value: String): Option[KeyEventType] = value match
+    case "1" => Some(KeyEventType.Press)
+    case "2" => Some(KeyEventType.Repeat)
+    case "3" => Some(KeyEventType.Release)
+    case _   => None
 
   private def decodeModifiers(mask: Int): KeyModifiers =
     KeyModifiers(

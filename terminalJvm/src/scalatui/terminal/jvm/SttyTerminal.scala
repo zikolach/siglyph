@@ -1,7 +1,13 @@
 package scalatui.terminal.jvm
 
 import scalatui.syntax.Equality.*
-import scalatui.terminal.StreamTerminal
+import scalatui.terminal.{
+  KittyKeyboardProtocol,
+  KittyKeyboardProtocolNegotiator,
+  KittyKeyboardProtocolState,
+  KittyKeyboardProtocolTerminal,
+  StreamTerminal
+}
 
 import java.io.{InputStream, OutputStream}
 import scala.sys.process.*
@@ -18,7 +24,8 @@ final class SttyTerminal(
       output = output,
       initialColumns = columnsOverride.orElse(StreamTerminal.envInt("COLUMNS")).getOrElse(80),
       initialRows = rowsOverride.orElse(StreamTerminal.envInt("LINES")).getOrElse(24)
-    ):
+    ),
+      KittyKeyboardProtocolTerminal:
   @volatile private var savedState: Option[String] = None
   @volatile private var resizePolling              = false
   @volatile private var currentColumns             = columnsOverride
@@ -28,6 +35,7 @@ final class SttyTerminal(
     rowsOverride.orElse(StreamTerminal.envInt("LINES")).getOrElse(24)
   private var resizeHandler: () => Unit            = () => ()
   private var resizeThread: Thread | Null          = null
+  private val keyboardProtocolNegotiator           = KittyKeyboardProtocolNegotiator()
 
   override def start(onInput: scalatui.terminal.TerminalInput => Unit, onResize: () => Unit): Unit =
     if savedState.isEmpty then
@@ -55,6 +63,7 @@ final class SttyTerminal(
     stopResizePolling()
     if savedState.isEmpty then super.stop()
     else
+      disableKittyKeyboardProtocol()
       write("\u001b[?2004l")
       super.stop()
       savedState.foreach(state => scala.util.Try(runStty(state)))
@@ -62,6 +71,24 @@ final class SttyTerminal(
 
   override def columns: Int = currentColumns
   override def rows: Int    = currentRows
+
+  override def keyboardProtocolState: KittyKeyboardProtocolState =
+    keyboardProtocolNegotiator.state
+
+  override def requestKittyKeyboardProtocol(timeoutMillis: Long): Unit =
+    keyboardProtocolNegotiator.begin(System.currentTimeMillis(), timeoutMillis)
+    write(KittyKeyboardProtocol.QuerySequence)
+
+  override def acceptKittyKeyboardProtocolResponse(
+      response: String,
+      nowMillis: Long
+  ): Boolean =
+    keyboardProtocolNegotiator.receiveResponse(response, nowMillis)
+
+  override def disableKittyKeyboardProtocol(): Unit =
+    if keyboardProtocolState !== KittyKeyboardProtocolState.Inactive then
+      write(KittyKeyboardProtocol.DisableSequence)
+    keyboardProtocolNegotiator.disable()
 
   private[jvm] def refreshSizeForTesting(): Boolean = refreshSize(notify = true)
 

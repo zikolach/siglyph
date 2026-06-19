@@ -4,10 +4,25 @@ package scalatui.terminal
 sealed trait TerminalInput derives CanEqual
 
 object TerminalInput:
-  final case class Key(key: TerminalKey, modifiers: KeyModifiers = KeyModifiers.empty)
-      extends TerminalInput
+  final case class KeyEvent(
+      key: TerminalKey,
+      modifiers: KeyModifiers = KeyModifiers.empty,
+      eventType: KeyEventType = KeyEventType.Press
+  ) extends TerminalInput
+  object Key:
+    def apply(key: TerminalKey, modifiers: KeyModifiers = KeyModifiers.empty): KeyEvent =
+      KeyEvent(key, modifiers, KeyEventType.Press)
+
+    def unapply(input: TerminalInput): Option[(TerminalKey, KeyModifiers)] = input match
+      case event: KeyEvent => Some(event.key -> event.modifiers)
+      case _               => None
+
   final case class Paste(text: String) extends TerminalInput
   final case class Raw(data: String)   extends TerminalInput
+
+/** Key event kind reported by advanced keyboard protocols. */
+enum KeyEventType derives CanEqual:
+  case Press, Repeat, Release
 
 /** Terminal key identities independent from backend escape sequences. */
 sealed trait TerminalKey derives CanEqual

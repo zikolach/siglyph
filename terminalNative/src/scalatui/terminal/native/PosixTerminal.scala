@@ -1,7 +1,15 @@
 package scalatui.terminal.native
 
 import scalatui.syntax.Equality.*
-import scalatui.terminal.{Terminal, TerminalInput, TerminalInputBuffer}
+import scalatui.terminal.{
+  KittyKeyboardProtocol,
+  KittyKeyboardProtocolNegotiator,
+  KittyKeyboardProtocolState,
+  KittyKeyboardProtocolTerminal,
+  Terminal,
+  TerminalInput,
+  TerminalInputBuffer
+}
 
 import scala.scalanative.unsafe.*
 import scala.scalanative.unsigned.*
@@ -22,7 +30,8 @@ import scala.scalanative.libc.stdlib
 final class PosixTerminal(
     initialColumns: Int = PosixTerminal.envInt("COLUMNS").getOrElse(80),
     initialRows: Int = PosixTerminal.envInt("LINES").getOrElse(24)
-) extends Terminal:
+) extends Terminal,
+      KittyKeyboardProtocolTerminal:
   private type Winsize = CStruct4[CUnsignedShort, CUnsignedShort, CUnsignedShort, CUnsignedShort]
   @volatile private var running                             = false
   @volatile private var resizePolling                       = false
@@ -36,6 +45,7 @@ final class PosixTerminal(
   private var savedState: Ptr[termios.termios]              = null
   private val inputBuffer                                   = TerminalInputBuffer()
   private val inputLock                                     = Object()
+  private val keyboardProtocolNegotiator                    = KittyKeyboardProtocolNegotiator()
 
   override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
     if !running then
@@ -68,6 +78,7 @@ final class PosixTerminal(
 
   override def stop(): Unit =
     if running || savedState != null then
+      disableKittyKeyboardProtocol()
       write("\u001b[?2004l")
       running = false
       stopResizePolling()
@@ -99,6 +110,24 @@ final class PosixTerminal(
   override def clearLine(): Unit       = write("\u001b[K")
   override def clearFromCursor(): Unit = write("\u001b[J")
   override def clearScreen(): Unit     = write("\u001b[2J\u001b[H")
+
+  override def keyboardProtocolState: KittyKeyboardProtocolState =
+    keyboardProtocolNegotiator.state
+
+  override def requestKittyKeyboardProtocol(timeoutMillis: Long): Unit =
+    keyboardProtocolNegotiator.begin(System.currentTimeMillis(), timeoutMillis)
+    write(KittyKeyboardProtocol.QuerySequence)
+
+  override def acceptKittyKeyboardProtocolResponse(
+      response: String,
+      nowMillis: Long
+  ): Boolean =
+    keyboardProtocolNegotiator.receiveResponse(response, nowMillis)
+
+  override def disableKittyKeyboardProtocol(): Unit =
+    if keyboardProtocolState !== KittyKeyboardProtocolState.Inactive then
+      write(KittyKeyboardProtocol.DisableSequence)
+    keyboardProtocolNegotiator.disable()
 
   private def enableRawMode(): Unit =
     if savedState == null then

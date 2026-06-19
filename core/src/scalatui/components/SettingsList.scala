@@ -3,10 +3,35 @@ package scalatui.components
 import java.util.Locale
 
 import scalatui.ansi.Ansi
-import scalatui.core.{Component, InputResult}
+import scalatui.core.{
+  Component,
+  ContextualComponent,
+  InputResult,
+  OverlayHandle,
+  OverlayUnfocusOptions,
+  OverlayOptions,
+  TUIContext
+}
 import scalatui.matching.FuzzyMatcher
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{TerminalInput, TerminalKey}
+
+/** Controller passed to application-provided settings submenu components. */
+trait SettingsSubmenuController:
+  def commitValue(value: String): Unit
+  def cancel(): Unit
+
+/**
+ * Application-provided submenu descriptor for a settings row.
+ *
+ * The component is shown through the existing overlay host. `onOpen` receives a controller that the
+ * application submenu can call when a value is selected or the submenu is cancelled.
+ */
+final case class SettingsSubmenu(
+    component: Component,
+    options: OverlayOptions = OverlayOptions(),
+    onOpen: SettingsSubmenuController => Unit = _ => ()
+)
 
 /**
  * A setting row rendered and edited by [[SettingsList]].
@@ -21,13 +46,16 @@ import scalatui.terminal.{TerminalInput, TerminalKey}
  *   optional help text rendered for the selected row
  * @param values
  *   optional cycle values used by Enter and Space; empty means the row is read-only
+ * @param submenu
+ *   optional application-provided submenu opened instead of scalar value cycling
  */
 final case class SettingItem(
     id: String,
     label: String,
     currentValue: String,
     description: Option[String] = None,
-    values: Vector[String] = Vector.empty
+    values: Vector[String] = Vector.empty,
+    submenu: Option[SettingsSubmenu] = None
 ) derives CanEqual
 
 /**
@@ -51,8 +79,8 @@ final case class SettingsListTheme(
  * Legacy `filteringEnabled = true` and [[SettingsListFiltering.Containment]] keep the existing
  * case-insensitive containment behavior across id, label, current value, and description.
  * [[SettingsListFiltering.Fuzzy]] uses the shared fuzzy matcher to rank matching rows across the
- * same fields. Space is reserved for cycling the selected value, matching the settings-list
- * activation controls.
+ * same fields. Space is reserved for activating the selected setting, cycling scalar values or
+ * opening submenus.
  */
 final case class SettingsListOptions(
     maxVisible: Int = 10,
@@ -83,10 +111,9 @@ final case class SettingsListOptions(
  *
  * `SettingsList` renders labels, current values, optional descriptions, scroll indicators, hints,
  * and an optional dependency-free filter query. It handles typed terminal input only: Up/Down move
- * selection, Enter and Space cycle configured values, Backspace edits the filter query when
- * filtering is enabled, printable characters append to the filter query, and Escape invokes the
- * cancel callback. Complex submenus and animated loader behavior are intentionally out of scope for
- * this component batch.
+ * selection, Enter and Space cycle configured values or open application-provided submenu overlays,
+ * Backspace edits the filter query when filtering is enabled, printable characters append to the
+ * filter query, and Escape invokes the cancel callback.
  *
  * The component is shared-core only and has no JVM-only, Scala Native-only, Node.js, or third-party
  * runtime dependencies. Implementations and styles are expected to preserve the component width
@@ -95,7 +122,8 @@ final case class SettingsListOptions(
 final class SettingsList(
     initialItems: Vector[SettingItem],
     options: SettingsListOptions = SettingsListOptions()
-) extends Component:
+) extends Component,
+      ContextualComponent:
   var onChange: (String, String) => Unit = (_, _) => ()
   var onCancel: () => Unit               = () => ()
 
@@ -103,6 +131,17 @@ final class SettingsList(
   private var selectedIndex = 0
   private var scrollOffset  = 0
   private var filterQuery   = ""
+  private var context       = Option.empty[TUIContext]
+  private var activeSubmenu = Option.empty[OverlayHandle]
+
+  override def tuiContext_=(value: Option[TUIContext]): Unit =
+    if value.isEmpty then
+      activeSubmenu.foreach { handle =>
+        handle.unfocus(Some(OverlayUnfocusOptions(target = null)))
+        handle.hide()
+      }
+      activeSubmenu = None
+    context = value
 
   def items: Vector[SettingItem] = currentItems
 
@@ -123,8 +162,8 @@ final class SettingsList(
   override def handleInputResult(input: TerminalInput): InputResult = input match
     case TerminalInput.Key(TerminalKey.Up, _)                                             => moveSelection(-1)
     case TerminalInput.Key(TerminalKey.Down, _)                                           => moveSelection(1)
-    case TerminalInput.Key(TerminalKey.Enter, _)                                          => cycleSelected()
-    case TerminalInput.Key(TerminalKey.Character(" "), _)                                 => cycleSelected()
+    case TerminalInput.Key(TerminalKey.Enter, _)                                          => activateSelected()
+    case TerminalInput.Key(TerminalKey.Character(" "), _)                                 => activateSelected()
     case TerminalInput.Key(TerminalKey.Escape, _)                                         =>
       onCancel()
       InputResult.Render
@@ -203,6 +242,47 @@ final class SettingsList(
       selectedIndex = math.max(0, math.min(entries.length - 1, selectedIndex + delta))
       ensureVisible(entries.length)
       InputResult.Render
+
+  private def activateSelected(): InputResult =
+    selectedEntry match
+      case Some(entry) =>
+        entry.item.submenu match
+          case Some(submenu) => openSubmenu(entry, submenu)
+          case None          => cycleSelected()
+      case None        => InputResult.Ignored
+
+  private def openSubmenu(entry: IndexedSetting, submenu: SettingsSubmenu): InputResult =
+    activeSubmenu.foreach(_.hide())
+    context match
+      case Some(contextValue) =>
+        val handle = contextValue.overlays.showOverlay(submenu.component, submenu.options)
+        activeSubmenu = Some(handle)
+        handle.focus()
+        submenu.onOpen(new SettingsSubmenuController:
+          override def commitValue(value: String): Unit =
+            completeSubmenu(entry.item.id, handle, value)
+          override def cancel(): Unit                   = cancelSubmenu(handle))
+        InputResult.Render
+      case None               => InputResult.Ignored
+
+  private def completeSubmenu(rowId: String, handle: OverlayHandle, value: String): Unit =
+    if activeSubmenu.exists(_.id === handle.id) then
+      currentItems.indexWhere(_.id === rowId) match
+        case -1    => ()
+        case index =>
+          val item = currentItems(index)
+          currentItems = currentItems.updated(index, item.copy(currentValue = value))
+          onChange(rowId, value)
+      closeSubmenu()
+
+  private def cancelSubmenu(handle: OverlayHandle): Unit =
+    if activeSubmenu.exists(_.id === handle.id) then
+      closeSubmenu()
+
+  private def closeSubmenu(): Unit =
+    activeSubmenu.foreach(_.hide())
+    activeSubmenu = None
+    context.foreach(_.setFocus(this))
 
   private def cycleSelected(): InputResult =
     selectedEntry match

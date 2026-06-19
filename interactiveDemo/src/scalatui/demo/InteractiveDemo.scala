@@ -18,8 +18,15 @@ import scalatui.components.{
   Loader,
   LoaderIndicatorOptions,
   LoaderOptions,
+  SettingItem,
+  SettingsList,
+  SettingsListFiltering,
+  SettingsListOptions,
   SelectItem,
   SelectList,
+  SelectListFiltering,
+  SelectListOptions,
+  SelectListTheme,
   Text
 }
 import scalatui.core.{Component, ComponentFrameBuilder, TUI}
@@ -47,7 +54,7 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
     case EditorMode, FileManagerMode
 
   private enum Focus derives CanEqual:
-    case Actions, EditorPane
+    case Actions, EditorPane, SettingsPane
 
   private enum FileManagerFocus derives CanEqual:
     case PathInput, FileList
@@ -66,9 +73,10 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
   private var focus = Focus.EditorPane
 
   // ---------- Shared editor showcase ----------
-  private var messages     = Vector.empty[String]
-  private val messagesText = Text("Submitted: (none)", paddingX = 0)
-  private val editor       = Editor(options =
+  private val workspaceRoot = DemoRoot.findWorkspaceRoot(File(System.getProperty("user.dir")))
+  private var messages      = Vector.empty[String]
+  private val messagesText  = Text("Submitted: (none)", paddingX = 0)
+  private val editor        = Editor(options =
     EditorOptions(
       onSubmit = addMessage,
       autocompleteProvider = Some(CombinedAutocompleteProvider(
@@ -78,26 +86,27 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
           SlashCommand("quit", Some("Exit the demo"))
         ),
         pathProvider = Some(FileSystemPathCompletionProvider(FileSystemPathCompletionOptions(
-          baseDirectory = File("."),
-          maxResults = 20,
-          includeHidden = false
+          baseDirectory = workspaceRoot,
+          maxResults = 40,
+          includeHidden = false,
+          directoriesFirst = false
         ))),
         triggerSources = Vector(tagTriggerSource),
         fuzzyRanking = AutocompleteFuzzyRanking.Enabled
       ))
     )
   )
-  private val loader       = Loader(LoaderOptions(
+  private val loader        = Loader(LoaderOptions(
     message = "Tick me from Actions",
     indicator = LoaderIndicatorOptions(frames = Vector("◐", "◓", "◑", "◒")),
     leadingBlankLine = false
   ))
-  private val cancellable  = CancellableLoader(LoaderOptions(
+  private val cancellable   = CancellableLoader(LoaderOptions(
     message = "Cancel me from Actions",
     indicator = LoaderIndicatorOptions(frames = Vector("!")),
     leadingBlankLine = false
   ))
-  private val actions      = SelectList(
+  private val actions       = SelectList(
     Vector(
       SelectItem("submit", "Submit editor text"),
       SelectItem("clear", "Clear submitted messages"),
@@ -107,7 +116,45 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
       SelectItem("cancel-loader", "Cancel loader"),
       SelectItem("quit", "Quit")
     ),
-    maxVisible = 5
+    SelectListOptions(
+      maxVisible = 5,
+      filtering = SelectListFiltering.Fuzzy,
+      labelMaxWidth = Some(28),
+      selectedPrefix = "▶ ",
+      normalPrefix = "  ",
+      theme = SelectListTheme(selectedText = text => s"\u001b[1m$text${Ansi.Reset}")
+    )
+  )
+  private val settings      = SettingsList(
+    Vector(
+      SettingItem(
+        "theme",
+        "Theme",
+        "dark",
+        Some("Cycles the demo palette label"),
+        Vector("dark", "light")
+      ),
+      SettingItem(
+        "ranking",
+        "Autocomplete ranking",
+        "fuzzy",
+        Some("Shows SettingsList fuzzy filtering"),
+        Vector("fuzzy", "stable")
+      ),
+      SettingItem(
+        "images",
+        "Image fallback",
+        "text",
+        Some("Documents image helper fallback behavior"),
+        Vector("text", "protocol")
+      )
+    ),
+    SettingsListOptions(
+      maxVisible = 3,
+      filtering = SettingsListFiltering.Fuzzy,
+      searchPrompt = "Settings filter: ",
+      hintText = "Type to filter • Enter/Space cycle setting"
+    )
   )
 
   // ---------- File manager / viewer showcase ----------
@@ -135,6 +182,9 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
 
   // Shared behavior wiring
   actions.onSelect = handleAction
+  settings.onChange = (id, value) =>
+    messages :+= s"Setting changed: $id = $value"
+    updateMessages()
   fileManagerPathInput.onSubmit = text => navigateToPathFromInput(text)
 
   cancellable.onCancel = () => cancellable.setMessage("Cancelled")
@@ -181,7 +231,10 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
         fileManagerStatus.text = statusLine
       case TerminalInput.Key(TerminalKey.Character("t"), modifiers)
           if modifiers.ctrl && mode === DemoMode.EditorMode =>
-        focus = if focus === Focus.EditorPane then Focus.Actions else Focus.EditorPane
+        focus = focus match
+          case Focus.EditorPane   => Focus.Actions
+          case Focus.Actions      => Focus.SettingsPane
+          case Focus.SettingsPane => Focus.EditorPane
         updateEditorFocus()
       case TerminalInput.Key(TerminalKey.Character("l"), modifiers)
           if modifiers.ctrl && mode === DemoMode.EditorMode =>
@@ -191,8 +244,9 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
         handleFileManagerInput(event)
       case _                                                                          =>
         focus match
-          case Focus.Actions    => actions.handleInput(event)
-          case Focus.EditorPane => editor.handleInput(event)
+          case Focus.Actions      => actions.handleInput(event)
+          case Focus.EditorPane   => editor.handleInput(event)
+          case Focus.SettingsPane => settings.handleInput(event)
 
   private def handleFileManagerInput(event: TerminalInput): Unit =
     event match
@@ -260,9 +314,16 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
 
   private def renderEditorMode(width: Int, frame: ComponentFrameBuilder): Unit =
     frame.addLines(Ansi.wrapTextWithAnsi(
-      "Editor mode: Ctrl+T focus • ↑↓ actions • Enter submit/select • Shift+Enter newline • Tab autocomplete: / commands, ./ paths, @ attachments, # tags • fuzzy ranking on • Ctrl+- undo • Ctrl+W kill word • Ctrl+Y yank • Alt+Y yank-pop • Ctrl+L clear",
+      "Editor mode: Ctrl+T cycles editor/actions/settings • type in lists to fuzzy-filter • Enter submit/select/cycle • Tab autocomplete: /, ./, @, # • Ctrl+L clear",
       width
     ))
+    frame.addLines(Vector(
+      "",
+      fit(if focus === Focus.EditorPane then "Editor (focused):" else "Editor:", width)
+    ))
+    frame.addComponent(editor)
+    frame.addLine("")
+    frame.addComponent(messagesText)
     frame.addLines(Vector(
       "",
       fit(if focus === Focus.Actions then "Actions (focused):" else "Actions:", width)
@@ -272,13 +333,11 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
       s"Loader: ${plainLoaderLine(loader, width)} | ${plainLoaderLine(cancellable, width)}",
       width
     ))
-    frame.addLine("")
-    frame.addComponent(messagesText)
     frame.addLines(Vector(
       "",
-      fit(if focus === Focus.EditorPane then "Editor (focused):" else "Editor:", width)
+      fit(if focus === Focus.SettingsPane then "Settings (focused):" else "Settings:", width)
     ))
-    frame.addComponent(editor)
+    frame.addComponent(settings)
 
   private def renderFileManagerMode(width: Int, frame: ComponentFrameBuilder): Unit =
     frame.addLines(Ansi.wrapTextWithAnsi(
@@ -588,6 +647,15 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
 
 private object DemoRoot:
   private val Tags = Vector("#bug", "#docs", "#demo", "#release-notes")
+
+  def findWorkspaceRoot(start: File): File =
+    var current = Option(start.getAbsoluteFile)
+    var result  = Option.empty[File]
+    while current.nonEmpty && result.isEmpty do
+      val directory = current.get
+      if File(directory, "README.md").isFile then result = Some(directory)
+      else current = Option(directory.getParentFile)
+    result.getOrElse(start.getAbsoluteFile)
 
   def tagTriggerSource: Either[scalatui.autocomplete.TriggerPrefixError, TriggerCompletionSource] =
     TriggerCompletionSource.fromPrefix(

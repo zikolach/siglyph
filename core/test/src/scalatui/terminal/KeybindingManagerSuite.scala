@@ -23,18 +23,30 @@ class KeybindingManagerSuite extends munit.FunSuite:
     )
 
     assert(!manager.matches(TerminalInput.Key(TerminalKey.Enter), KeybindingCommand.InputSubmit))
-    assert(manager.matches(TerminalInput.Key(TerminalKey.Character("s"), KeyModifiers(ctrl = true)), KeybindingCommand.InputSubmit))
+    assert(manager.matches(
+      TerminalInput.Key(TerminalKey.Character("s"), KeyModifiers(ctrl = true)),
+      KeybindingCommand.InputSubmit
+    ))
   }
 
   test("ignores unknown command ids in raw binding configuration") {
     val manager = KeybindingManager.fromRawBindings(
       Map(
-        "tui.unknown.command" -> Vector(KeyDescriptor(TerminalKey.Character("x"), KeyModifiers(ctrl = true))),
-        KeybindingCommand.EditorUndo.id -> Vector(KeyDescriptor(TerminalKey.Character("z"), KeyModifiers(ctrl = true)))
+        "tui.unknown.command"           -> Vector(KeyDescriptor(
+          TerminalKey.Character("x"),
+          KeyModifiers(ctrl = true)
+        )),
+        KeybindingCommand.EditorUndo.id -> Vector(KeyDescriptor(
+          TerminalKey.Character("z"),
+          KeyModifiers(ctrl = true)
+        ))
       )
     )
 
-    assert(manager.matches(TerminalInput.Key(TerminalKey.Character("z"), KeyModifiers(ctrl = true)), KeybindingCommand.EditorUndo))
+    assert(manager.matches(
+      TerminalInput.Key(TerminalKey.Character("z"), KeyModifiers(ctrl = true)),
+      KeybindingCommand.EditorUndo
+    ))
     assertEquals(manager.getResolvedKeys("tui.unknown.command"), None)
   }
 
@@ -45,7 +57,7 @@ class KeybindingManagerSuite extends munit.FunSuite:
           KeyDescriptor(TerminalKey.Character("x"), KeyModifiers(ctrl = true)),
           KeyDescriptor(TerminalKey.PageUp)
         ),
-        KeybindingCommand.EditorPageUp.id -> Vector(
+        KeybindingCommand.EditorPageUp.id   -> Vector(
           KeyDescriptor(TerminalKey.PageUp),
           KeyDescriptor(TerminalKey.Character("p"), KeyModifiers(ctrl = true))
         )
@@ -61,7 +73,10 @@ class KeybindingManagerSuite extends munit.FunSuite:
     val manager = KeybindingManager().withRawBindings(
       Map("tui.editor.undo" -> Vector.empty)
     )
-    assert(!manager.matches(TerminalInput.Key(TerminalKey.Character("-"), KeyModifiers(ctrl = true)), KeybindingCommand.EditorUndo))
+    assert(!manager.matches(
+      TerminalInput.Key(TerminalKey.Character("-"), KeyModifiers(ctrl = true)),
+      KeybindingCommand.EditorUndo
+    ))
   }
 
   test("keeps defaults for unspecified commands") {
@@ -73,7 +88,16 @@ class KeybindingManagerSuite extends munit.FunSuite:
       )
     )
 
-    assert(manager.matches(TerminalInput.Key(TerminalKey.Character("a"), KeyModifiers(ctrl = true)), KeybindingCommand.EditorCursorLineStart))
-    assert(!manager.matches(TerminalInput.Key(TerminalKey.Character("u"), KeyModifiers(ctrl = true)), KeybindingCommand.EditorDeleteToLineStart))
-    assert(manager.matches(TerminalInput.Key(TerminalKey.Character("z"), KeyModifiers(ctrl = true)), KeybindingCommand.EditorDeleteToLineStart))
+    assert(manager.matches(
+      TerminalInput.Key(TerminalKey.Character("a"), KeyModifiers(ctrl = true)),
+      KeybindingCommand.EditorCursorLineStart
+    ))
+    assert(!manager.matches(
+      TerminalInput.Key(TerminalKey.Character("u"), KeyModifiers(ctrl = true)),
+      KeybindingCommand.EditorDeleteToLineStart
+    ))
+    assert(manager.matches(
+      TerminalInput.Key(TerminalKey.Character("z"), KeyModifiers(ctrl = true)),
+      KeybindingCommand.EditorDeleteToLineStart
+    ))
   }

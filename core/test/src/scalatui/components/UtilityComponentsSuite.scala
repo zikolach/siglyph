@@ -1,10 +1,79 @@
 package scalatui.components
 
 import scalatui.ansi.Ansi
-import scalatui.core.InputResult
+import scalatui.core.{
+  Component,
+  InputResult,
+  OverlayHandle,
+  OverlayHost,
+  OverlayId,
+  OverlayOptions,
+  OverlayUnfocusOptions,
+  TUIContext
+}
 import scalatui.terminal.{TerminalInput, TerminalKey}
 
 class UtilityComponentsSuite extends munit.FunSuite:
+  private final class TestOverlayHandle(
+      override val id: OverlayId,
+      var component: Component,
+      var options: OverlayOptions
+  ) extends OverlayHandle:
+    var hidden         = false
+    var focused        = false
+    var unfocusOptions = Option.empty[OverlayUnfocusOptions]
+    var calls          = Vector.empty[String]
+
+    override def hide(): Unit                                          =
+      calls :+= "hide"
+      hidden = true
+    override def setHidden(value: Boolean): Unit                       = hidden = value
+    override def isHidden: Boolean                                     = hidden
+    override def focus(): Unit                                         = focused = options.focusCapturing
+    override def unfocus(options: Option[OverlayUnfocusOptions]): Unit =
+      calls :+= "unfocus"
+      focused = false
+      unfocusOptions = options
+    override def isFocused: Boolean                                    = focused
+    override def update(
+        component: Component,
+        options: Option[OverlayOptions],
+        requestRender: Boolean
+    ): Unit =
+      this.component = component
+      options.foreach(value => this.options = value)
+
+  private final class TestOverlayHost extends OverlayHost:
+    var shown                                                                              = Vector.empty[TestOverlayHandle]
+    override def showOverlay(component: Component, options: OverlayOptions): OverlayHandle =
+      val handle = TestOverlayHandle(OverlayId(shown.length.toLong + 1), component, options)
+      shown :+= handle
+      handle
+    override def hideOverlay(): Unit                                                       = shown.lastOption.foreach(_.hide())
+    override def hasOverlay: Boolean                                                       = shown.exists(!_.hidden)
+
+  private final class TestContext extends TUIContext:
+    val overlayHost               = TestOverlayHost()
+    var focused: Component | Null = null
+    var renderRequests            = 0
+    var flushes                   = 0
+    var exits                     = 0
+
+    override def requestRender(force: Boolean): Unit         = renderRequests += 1
+    override def flushRender(): Unit                         = flushes += 1
+    override def requestExit(): Unit                         = exits += 1
+    override def setFocus(component: Component | Null): Unit = focused = component
+    override def overlays: OverlayHost                       = overlayHost
+
+  private final class TestSubmenu extends Component:
+    var controller                                                    = Option.empty[SettingsSubmenuController]
+    override def render(width: Int): Vector[String]                   = Vector("submenu")
+    override def handleInputResult(input: TerminalInput): InputResult = input match
+      case TerminalInput.Key(TerminalKey.Escape, _) =>
+        controller.foreach(_.cancel())
+        InputResult.Render
+      case _                                        => InputResult.Ignored
+
   test("truncated text uses first line and pads to width"):
     val text  = TruncatedText("hello\nworld", paddingX = 1, paddingY = 1)
     val lines = text.render(8)
@@ -131,6 +200,124 @@ class UtilityComponentsSuite extends munit.FunSuite:
     assertEquals(list.handleInputResult(TerminalInput.Key(TerminalKey.Tab)), InputResult.Ignored)
     assertEquals(list.handleInputResult(TerminalInput.Key(TerminalKey.Escape)), InputResult.Render)
     assertEquals(cancelled, true)
+
+  test("settings list enter opens submenu through overlay host"):
+    val context        = TestContext()
+    val submenu        = TestSubmenu()
+    val overlayOptions = OverlayOptions(offsetX = 2, offsetY = 3, focusCapturing = false)
+    val list           = SettingsList(Vector(SettingItem(
+      "theme",
+      "Theme",
+      "dark",
+      submenu = Some(SettingsSubmenu(
+        submenu,
+        options = overlayOptions,
+        onOpen = controller => submenu.controller = Some(controller)
+      ))
+    )))
+    list.tuiContext_=(Some(context))
+
+    assertEquals(list.handleInputResult(TerminalInput.Key(TerminalKey.Enter)), InputResult.Render)
+
+    assertEquals(context.overlayHost.shown.map(_.component), Vector(submenu))
+    assertEquals(context.overlayHost.shown.head.options.offsetX, 2)
+    assertEquals(context.overlayHost.shown.head.options.offsetY, 3)
+    assertEquals(context.overlayHost.shown.head.options.focusCapturing, false)
+    assertEquals(context.overlayHost.shown.head.isFocused, false)
+    assertEquals(context.focused, null)
+    assert(submenu.controller.nonEmpty)
+
+  test("settings list detaching context closes active submenu without restoring focus"):
+    val context = TestContext()
+    val submenu = TestSubmenu()
+    val list    = SettingsList(Vector(SettingItem(
+      "theme",
+      "Theme",
+      "dark",
+      submenu =
+        Some(SettingsSubmenu(submenu, onOpen = controller => submenu.controller = Some(controller)))
+    )))
+    list.tuiContext_=(Some(context))
+
+    list.handleInput(TerminalInput.Key(TerminalKey.Enter))
+    list.tuiContext_=(None)
+
+    assertEquals(context.overlayHost.shown.head.calls, Vector("unfocus", "hide"))
+    assertEquals(context.overlayHost.shown.head.unfocusOptions.map(_.target), Some(null))
+    assertEquals(context.overlayHost.shown.head.isHidden, true)
+    assertEquals(context.focused, null)
+
+  test("settings list submenu commit changes value invokes callback and restores focus"):
+    val context = TestContext()
+    val submenu = TestSubmenu()
+    val list    = SettingsList(Vector(SettingItem(
+      "theme",
+      "Theme",
+      "dark",
+      submenu =
+        Some(SettingsSubmenu(submenu, onOpen = controller => submenu.controller = Some(controller)))
+    )))
+    var changes = Vector.empty[(String, String)]
+    list.onChange = (id, value) => changes :+= (id, value)
+    list.tuiContext_=(Some(context))
+
+    list.handleInput(TerminalInput.Key(TerminalKey.Enter))
+    submenu.controller.foreach(_.commitValue("light"))
+
+    assertEquals(list.items.head.currentValue, "light")
+    assertEquals(changes, Vector(("theme", "light")))
+    assertEquals(context.overlayHost.shown.head.isHidden, true)
+    assertEquals(context.focused, list)
+
+  test("settings list submenu escape cancels and restores focus"):
+    val context = TestContext()
+    val submenu = TestSubmenu()
+    val list    = SettingsList(Vector(SettingItem(
+      "theme",
+      "Theme",
+      "dark",
+      submenu =
+        Some(SettingsSubmenu(submenu, onOpen = controller => submenu.controller = Some(controller)))
+    )))
+    var changes = Vector.empty[(String, String)]
+    list.onChange = (id, value) => changes :+= (id, value)
+    list.tuiContext_=(Some(context))
+
+    list.handleInput(TerminalInput.Key(TerminalKey.Enter))
+    assertEquals(
+      submenu.handleInputResult(TerminalInput.Key(TerminalKey.Escape)),
+      InputResult.Render
+    )
+    submenu.controller.foreach(_.commitValue("light"))
+
+    assertEquals(list.items.head.currentValue, "dark")
+    assertEquals(changes, Vector.empty)
+    assertEquals(context.overlayHost.shown.head.isHidden, true)
+    assertEquals(context.focused, list)
+
+  test("settings list submenu rows do not cycle scalar values"):
+    val context = TestContext()
+    val submenu = TestSubmenu()
+    val list    = SettingsList(Vector(SettingItem(
+      "mode",
+      "Mode",
+      "safe",
+      values = Vector("safe", "fast"),
+      submenu =
+        Some(SettingsSubmenu(submenu, onOpen = controller => submenu.controller = Some(controller)))
+    )))
+    var changes = Vector.empty[(String, String)]
+    list.onChange = (id, value) => changes :+= (id, value)
+    list.tuiContext_=(Some(context))
+
+    assertEquals(
+      list.handleInputResult(TerminalInput.Key(TerminalKey.Character(" "))),
+      InputResult.Render
+    )
+
+    assertEquals(list.items.head.currentValue, "safe")
+    assertEquals(changes, Vector.empty)
+    assertEquals(context.overlayHost.shown.map(_.component), Vector(submenu))
 
   test("settings list filters with dependency-free containment search"):
     val list = SettingsList(
