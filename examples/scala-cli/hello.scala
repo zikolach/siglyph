@@ -8,9 +8,9 @@ import scalatui.core.TUI
 import scalatui.terminal.jvm.SttyTerminal
 
 @main def helloSiglyph(): Unit =
-  val tui = TUI(SttyTerminal())
+  val tui    = TUI(SttyTerminal())
   val status = Text("Type text and press Enter. Esc or Ctrl+C exits.")
-  val input = Input()
+  val input  = Input()
   input.onSubmit = value =>
     status.text = s"Last submission: ${if value.trim.isEmpty then "(empty)" else value}"
     input.setValue("")

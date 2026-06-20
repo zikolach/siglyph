@@ -1,6 +1,7 @@
 package scalatui.markdown
 
 import scalatui.ansi.Ansi
+import scalatui.terminal.TerminalCapabilities
 
 class MarkdownRendererSuite extends munit.FunSuite:
   test("basic renderer supports documented markdown subset width-safely"):
@@ -47,6 +48,73 @@ class MarkdownRendererSuite extends munit.FunSuite:
 
     val lines = renderer.render("# still visible", 20)
     assertEquals(lines, Vector("# still visible"))
+
+  test("theme hooks style headings and code blocks width-safely"):
+    val renderer = BasicMarkdownRenderer(options =
+      MarkdownRenderOptions(theme =
+        MarkdownTheme(
+          heading = (_, text) => s"\u001b[1m$text\u001b[0m",
+          codeBlockLine = line => s"\u001b[36m$line"
+        )
+      )
+    )
+
+    val lines = renderer.render("# Heading\n\n```\ncode\n```", 12)
+
+    assert(lines.exists(_.contains("\u001b[1m# Heading\u001b[0m")), lines.mkString("\n"))
+    assert(lines.exists(_.contains("\u001b[36mcode\u001b[0m")), lines.mkString("\n"))
+    assert(lines.forall(line => Ansi.visibleWidth(line) <= 12), lines.mkString("\n"))
+
+  test("hyperlink-capable rendering emits OSC 8 links"):
+    val renderer = BasicMarkdownRenderer(options =
+      MarkdownRenderOptions(
+        capabilities = TerminalCapabilities(trueColor = true, hyperlinks = true, images = None)
+      )
+    )
+
+    val lines = renderer.render("[label](https://example.test)", 80)
+
+    assert(lines.exists(_.contains("\u001b]8;;https://example.test\u0007label\u001b]8;;\u0007")))
+    assert(lines.forall(line => Ansi.visibleWidth(line) <= 80), lines.mkString("\n"))
+
+  test("hyperlink-capable rendering falls back for unsafe link URLs"):
+    val renderer = BasicMarkdownRenderer(options =
+      MarkdownRenderOptions(
+        capabilities = TerminalCapabilities(trueColor = true, hyperlinks = true, images = None)
+      )
+    )
+
+    val lines = renderer.render("[label](https://example.test\u0007\u001b[31mbad)", 80)
+    val raw   = lines.mkString("\n")
+
+    assert(!raw.contains("\u001b]8;;"), raw)
+    assert(!raw.exists(Character.isISOControl), raw)
+    assert(raw.contains("label (https://example.test[31mbad)"), raw)
+
+  test("non-hyperlink rendering keeps readable link fallback"):
+    val lines = BasicMarkdownRenderer.default.render("[label](https://example.test)", 80)
+
+    assert(lines.exists(_.contains("label (https://example.test)")), lines.mkString("\n"))
+
+  test("highlighter hook can replace fenced code block lines"):
+    val renderer = BasicMarkdownRenderer(options =
+      MarkdownRenderOptions(
+        highlighter = Some(new MarkdownCodeHighlighter:
+          override def highlight(language: Option[String], code: String): Option[Vector[String]] =
+            Option.when(language.contains("scala"))(Vector(s"highlighted: $code")))
+      )
+    )
+
+    val lines = renderer.render("```scala\nval x = 1\n```", 80)
+
+    assert(lines.exists(_.contains("highlighted: val x = 1")), lines.mkString("\n"))
+
+  test("parser adapter can provide blocks through the renderer contract"):
+    val renderer = BasicMarkdownRenderer(new MarkdownParser:
+      override def parse(markdown: String): Either[String, Vector[MarkdownBlock]] =
+        Right(Vector(MarkdownBlock.Paragraph(s"adapter: $markdown"))))
+
+    assertEquals(renderer.render("content", 80), Vector("adapter: content"))
 
   test("Markdown component renders with padding within component width"):
     val component = Markdown("# Hi", paddingX = 1, paddingY = 1)

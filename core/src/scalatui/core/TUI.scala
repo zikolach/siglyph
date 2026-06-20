@@ -2,7 +2,7 @@ package scalatui.core
 
 import scalatui.ansi.Ansi
 import scalatui.syntax.Equality.*
-import scalatui.terminal.{Terminal, TerminalInput, TerminalKey}
+import scalatui.terminal.{KeyEventType, Terminal, TerminalInput, TerminalKey}
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -188,7 +188,8 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   }
 
   private def handleInput(input: TerminalInput): Unit = lifecycleLock.synchronized {
-    if handlesControlC && isCtrl(input, "c") then requestExit()
+    if isIgnoredKeyRelease(input) then ()
+    else if handlesControlC && isCtrl(input, "c") then requestExit()
     else if exitsOnEscape && (input === TerminalInput.Key(TerminalKey.Escape)) then requestExit()
     else
       inputTarget.map(_.handleInputResult(input)).foreach {
@@ -203,6 +204,11 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
 
   private def inputTarget: Option[Component] =
     topCapturingOverlay.map(_.component).orElse(focusedComponent)
+
+  private def isIgnoredKeyRelease(input: TerminalInput): Boolean = input match
+    case TerminalInput.KeyEvent(_, _, KeyEventType.Release) =>
+      !inputTarget.exists(_.wantsKeyRelease)
+    case _                                                  => false
 
   private def renderOverlays(baseLines: Vector[String], width: Int, height: Int): Vector[String] =
     val rendered = overlayStack.toVector
@@ -326,9 +332,9 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     stop()
 
   private def isCtrl(input: TerminalInput, char: String): Boolean = input match
-    case TerminalInput.Key(TerminalKey.Character(value), modifiers) =>
-      (value === char) && modifiers.ctrl
-    case _                                                          => false
+    case TerminalInput.KeyEvent(TerminalKey.Character(value), modifiers, eventType) =>
+      (eventType !== KeyEventType.Release) && (value === char) && modifiers.ctrl
+    case _                                                                          => false
 
   private def renderNow(): Unit =
     val width        = positiveDimension(terminal.columns)

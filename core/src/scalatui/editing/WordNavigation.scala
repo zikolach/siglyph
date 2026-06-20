@@ -1,6 +1,7 @@
 package scalatui.editing
 
 import scalatui.unicode.Unicode
+import scalatui.syntax.Equality.*
 
 /** Unicode-aware word navigation helpers for cluster-indexed text components. */
 object WordNavigation:
@@ -21,7 +22,7 @@ object WordNavigation:
     var i = math.max(0, math.min(cursor, clusters.length))
     while i > 0 && !isAtomicSegment(clusters(i - 1)) && kindOf(
         clusters(i - 1)
-      ) == SegmentKind.Whitespace
+      ) === SegmentKind.Whitespace
     do
       i -= 1
     if i <= 0 then 0
@@ -31,7 +32,7 @@ object WordNavigation:
         case SegmentKind.Word        => SegmentKind.Word
         case SegmentKind.Whitespace  => SegmentKind.Whitespace
         case SegmentKind.Punctuation => SegmentKind.Punctuation
-      while i > 0 && !isAtomicSegment(clusters(i - 1)) && kindOf(clusters(i - 1)) == targetKind do
+      while i > 0 && !isAtomicSegment(clusters(i - 1)) && kindOf(clusters(i - 1)) === targetKind do
         i -= 1
       i
 
@@ -52,7 +53,7 @@ object WordNavigation:
     var i = math.max(0, math.min(cursor, clusters.length))
     while i < clusters.length && !isAtomicSegment(clusters(i)) && kindOf(
         clusters(i)
-      ) == SegmentKind.Whitespace
+      ) === SegmentKind.Whitespace
     do
       i += 1
     if i >= clusters.length then clusters.length
@@ -64,7 +65,7 @@ object WordNavigation:
         case SegmentKind.Punctuation => SegmentKind.Punctuation
       while i < clusters.length && !isAtomicSegment(clusters(i)) && kindOf(
           clusters(i)
-        ) == targetKind
+        ) === targetKind
       do
         i += 1
       i
@@ -79,4 +80,4 @@ object WordNavigation:
     else SegmentKind.Punctuation
 
   private def isWordCodePoint(codePoint: Int): Boolean =
-    Character.isLetterOrDigit(codePoint) || codePoint == '_'
+    Character.isLetterOrDigit(codePoint) || codePoint === '_'

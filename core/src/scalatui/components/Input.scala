@@ -4,7 +4,13 @@ import scalatui.ansi.Ansi
 import scalatui.core.{Component, CursorMarker, Focusable}
 import scalatui.editing.{KillRing, UndoStack, WordNavigation}
 import scalatui.syntax.Equality.*
-import scalatui.terminal.{KeyModifiers, KeybindingCommand, KeybindingManager, TerminalInput, TerminalKey}
+import scalatui.terminal.{
+  KeyModifiers,
+  KeybindingCommand,
+  KeybindingManager,
+  TerminalInput,
+  TerminalKey
+}
 import scalatui.unicode.Unicode
 
 /** Single-line text input with Unicode-aware editing and pi-tui-style undo/yank commands. */
@@ -106,12 +112,13 @@ final class Input(
       onSubmit(currentValue)
     else if keybindings.matches(input, KeybindingCommand.InputNewLine) then
       insert("\n")
-    else input match
-      case TerminalInput.Paste(text) => insert(text.replace('\n', ' ').replace('\r', ' '))
-      case TerminalInput.Key(TerminalKey.Character(text), modifiers)
-          if !modifiers.ctrl && !modifiers.alt && !modifiers.superKey =>
-        insert(text)
-      case _ => ()
+    else
+      input match
+        case TerminalInput.Paste(text) => insert(text.replace('\n', ' ').replace('\r', ' '))
+        case TerminalInput.Key(TerminalKey.Character(text), modifiers)
+            if !modifiers.ctrl && !modifiers.alt && !modifiers.superKey =>
+          insert(text)
+        case _                         => ()
 
   override def render(width: Int): Vector[String] =
     val cs     = clusters

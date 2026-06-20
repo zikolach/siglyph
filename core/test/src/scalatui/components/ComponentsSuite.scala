@@ -2,7 +2,13 @@ package scalatui.components
 
 import scalatui.ansi.Ansi
 import scalatui.core.CursorMarker
-import scalatui.terminal.{KeyDescriptor, KeybindingManager, KeyModifiers, TerminalInput, TerminalKey}
+import scalatui.terminal.{
+  KeyDescriptor,
+  KeybindingManager,
+  KeyModifiers,
+  TerminalInput,
+  TerminalKey
+}
 
 class ComponentsSuite extends munit.FunSuite:
   test("text wraps and pads within width"):
@@ -49,7 +55,7 @@ class ComponentsSuite extends munit.FunSuite:
     assertEquals(submitted, "x y🙂")
 
   test("input submit keybinding is configurable"):
-    val input = Input(
+    val input     = Input(
       keybindings = KeybindingManager.fromRawBindings(
         Map(
           "tui.input.submit" -> Vector(
@@ -70,13 +76,25 @@ class ComponentsSuite extends munit.FunSuite:
     assertEquals(submitted, "a")
 
   test("input supports custom movement, deletion, newline, and submit bindings"):
-    val input = Input(
+    val input     = Input(
       keybindings = KeybindingManager.fromRawBindings(
         Map(
-          "tui.editor.cursorLeft" -> Vector(KeyDescriptor(TerminalKey.Character("z"), KeyModifiers(alt = true))),
-          "tui.editor.deleteCharBackward" -> Vector(KeyDescriptor(TerminalKey.Character("x"), KeyModifiers(ctrl = true))),
-          "tui.input.newLine" -> Vector(KeyDescriptor(TerminalKey.Character("n"), KeyModifiers(ctrl = true))),
-          "tui.input.submit" -> Vector(KeyDescriptor(TerminalKey.Character("s"), KeyModifiers(ctrl = true)))
+          "tui.editor.cursorLeft"         -> Vector(KeyDescriptor(
+            TerminalKey.Character("z"),
+            KeyModifiers(alt = true)
+          )),
+          "tui.editor.deleteCharBackward" -> Vector(KeyDescriptor(
+            TerminalKey.Character("x"),
+            KeyModifiers(ctrl = true)
+          )),
+          "tui.input.newLine"             -> Vector(KeyDescriptor(
+            TerminalKey.Character("n"),
+            KeyModifiers(ctrl = true)
+          )),
+          "tui.input.submit"              -> Vector(KeyDescriptor(
+            TerminalKey.Character("s"),
+            KeyModifiers(ctrl = true)
+          ))
         )
       )
     )

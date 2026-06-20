@@ -1,8 +1,49 @@
 package scalatui.components
 
+import java.util.concurrent.{ScheduledExecutorService, TimeUnit}
+
 import scalatui.autocomplete.AutocompleteProvider
+import scalatui.autocomplete.AutocompleteRequestHandle
 import scalatui.core.{OverlayAnchor, OverlayOptions, OverlaySize}
 import scalatui.terminal.KeybindingManager
+
+/** Schedules refresh-triggered autocomplete work so rapid editor edits can be coalesced. */
+trait EditorAutocompleteDebouncer:
+  def schedule(action: () => Unit): EditorAutocompleteDebouncer.ScheduleResult
+
+object EditorAutocompleteDebouncer:
+  sealed trait ScheduleResult:
+    def handle: AutocompleteRequestHandle
+    def ranSynchronously: Boolean
+
+  final case class Pending(handle: AutocompleteRequestHandle) extends ScheduleResult:
+    override val ranSynchronously: Boolean = false
+
+  case object RanSynchronously extends ScheduleResult:
+    override val handle: AutocompleteRequestHandle = AutocompleteRequestHandle.Noop
+    override val ranSynchronously: Boolean         = true
+
+  /**
+   * Immediate scheduler useful for deterministic tests and applications that do their own debounce.
+   */
+  val Immediate: EditorAutocompleteDebouncer = action =>
+    action()
+    RanSynchronously
+
+  /** Executor-backed debounce scheduler for applications that choose to provide a scheduler. */
+  final case class Delayed(
+      executor: ScheduledExecutorService,
+      delayMillis: Long = 30L
+  ) extends EditorAutocompleteDebouncer:
+    override def schedule(action: () => Unit): ScheduleResult =
+      val future = executor.schedule(
+        new Runnable:
+          override def run(): Unit = action()
+        ,
+        math.max(0L, delayMillis),
+        TimeUnit.MILLISECONDS
+      )
+      Pending(() => future.cancel(false))
 
 /**
  * Public configuration for [[Editor]].
@@ -21,6 +62,10 @@ import scalatui.terminal.KeybindingManager
  *   automatic trigger policy for autocomplete requests
  * @param autocompletePlacement
  *   placement strategy used for autocomplete suggestions; defaults to editor-adjacent placement
+ * @param autocompleteDebouncer
+ *   scheduler used to coalesce refresh-triggered autocomplete after edits; explicit Tab requests
+ *   are immediate. The default is immediate; applications can inject
+ *   [[EditorAutocompleteDebouncer.Delayed]] with a scheduler they own.
  * @param keybindings
  *   command to input mapping resolved through the shared keybinding manager
  */
@@ -32,6 +77,7 @@ final case class EditorOptions(
     autocompleteMaxVisible: Int = 5,
     autocompleteTrigger: EditorAutocompleteTrigger = EditorAutocompleteTrigger.Default,
     autocompletePlacement: EditorAutocompletePlacement = EditorAutocompletePlacement.Default,
+    autocompleteDebouncer: EditorAutocompleteDebouncer = EditorAutocompleteDebouncer.Immediate,
     keybindings: KeybindingManager = KeybindingManager()
 )
 

@@ -36,6 +36,49 @@ class TerminalInputParserSuite extends munit.FunSuite:
       TerminalInput.Key(TerminalKey.Character("a"), KeyModifiers(ctrl = true))
     )
 
+  test("parses kitty csi-u event metadata and super modifier"):
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[97;9:2u"),
+      TerminalInput.KeyEvent(
+        TerminalKey.Character("a"),
+        KeyModifiers(superKey = true),
+        KeyEventType.Repeat
+      )
+    )
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[97;1:3u"),
+      TerminalInput.KeyEvent(TerminalKey.Character("a"), KeyModifiers.empty, KeyEventType.Release)
+    )
+
+  test("parses kitty csi-u shifted/base keypad-style edge case"):
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[65::97;2:1u"),
+      TerminalInput.KeyEvent(
+        TerminalKey.Character("a"),
+        KeyModifiers(shift = true),
+        KeyEventType.Press
+      )
+    )
+
+  test("kitty keyboard protocol negotiation ignores stale or mismatched responses"):
+    val negotiator = KittyKeyboardProtocolNegotiator()
+    val first      = negotiator.begin(nowMillis = 1000, timeoutMillis = 10)
+    negotiator.expire(nowMillis = 1011)
+
+    assertEquals(first.id, 1L)
+    assertEquals(negotiator.receiveResponse("\u001b[?1u", nowMillis = 1011), false)
+    assertEquals(negotiator.state, KittyKeyboardProtocolState.Inactive)
+
+    negotiator.begin(nowMillis = 2000, timeoutMillis = 10)
+    assertEquals(negotiator.receiveResponse("\u001b[?3u", nowMillis = 2011), false)
+    assertEquals(negotiator.state, KittyKeyboardProtocolState.Inactive)
+
+    negotiator.begin(nowMillis = 3000, timeoutMillis = 10)
+    assertEquals(negotiator.receiveResponse("\u001b[?not-a-response", nowMillis = 3001), false)
+    assertEquals(negotiator.state, KittyKeyboardProtocolState.Pending(3L, 3010L))
+    assertEquals(negotiator.receiveResponse("\u001b[?3u", nowMillis = 3002), true)
+    assertEquals(negotiator.state, KittyKeyboardProtocolState.Active(3))
+
   test("parses xterm modifyOtherKeys"):
     assertEquals(
       TerminalInputParser.parseOne("\u001b[27;3;120~"),

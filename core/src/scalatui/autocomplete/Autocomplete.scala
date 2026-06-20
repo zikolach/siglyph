@@ -1,6 +1,7 @@
 package scalatui.autocomplete
 
 import scalatui.editing.EditorCursor
+import scalatui.matching.FuzzyMatcher
 import scalatui.syntax.Equality.*
 import scalatui.unicode.Unicode
 
@@ -15,6 +16,26 @@ final case class AutocompleteItem(
 /** Origin/type metadata used by composed providers to apply completions correctly. */
 enum AutocompleteItemKind derives CanEqual:
   case Generic, SlashCommand, FilePath, Attachment
+
+/** Optional fuzzy-ranking configuration for built-in autocomplete helpers. */
+enum AutocompleteFuzzyRanking derives CanEqual:
+  case Disabled, Enabled
+
+  def rankItems(query: String, items: Vector[AutocompleteItem]): Vector[AutocompleteItem] =
+    this match
+      case AutocompleteFuzzyRanking.Disabled => items
+      case AutocompleteFuzzyRanking.Enabled  =>
+        if query.isEmpty then items
+        else FuzzyMatcher.filter(query, items)(item => rankText(item)).map(_.item)
+
+  def rankSlashCommands(query: String, commands: Vector[SlashCommand]): Vector[SlashCommand] =
+    this match
+      case AutocompleteFuzzyRanking.Disabled => commands.filter(_.name.startsWith(query))
+      case AutocompleteFuzzyRanking.Enabled  =>
+        FuzzyMatcher.filter(query, commands)(_.name).map(_.item)
+
+  private def rankText(item: AutocompleteItem): String =
+    if item.label.nonEmpty then item.label else item.value
 
 /** Snapshot of editor state used for an autocomplete lookup. */
 final case class AutocompleteRequest(
@@ -105,9 +126,63 @@ final case class SlashCommand(
     argumentCompletions: String => Option[Vector[AutocompleteItem]] = _ => None
 )
 
+/** Application-owned trigger autocomplete source such as `#` mentions or tags. */
+final class TriggerCompletionSource private (
+    val prefix: TriggerPrefix,
+    val completions: String => Option[Vector[AutocompleteItem]]
+)
+
+object TriggerCompletionSource:
+  def fromPrefix(
+      prefix: String,
+      completions: String => Option[Vector[AutocompleteItem]]
+  ): Either[TriggerPrefixError, TriggerCompletionSource] =
+    TriggerPrefix.from(prefix).map(validPrefix =>
+      new TriggerCompletionSource(validPrefix, completions)
+    )
+
+/** Validated natural autocomplete trigger prefix. */
+final class TriggerPrefix private (val value: String):
+  override def equals(other: Any): Boolean = other match
+    case that: TriggerPrefix => value === that.value
+    case _                   => false
+
+  override def hashCode(): Int  = value.hashCode
+  override def toString: String = value
+
+object TriggerPrefix:
+  def from(value: String): Either[TriggerPrefixError, TriggerPrefix] =
+    if value.isEmpty then Left(TriggerPrefixError.Empty)
+    else if value.exists(_.isWhitespace) then Left(TriggerPrefixError.ContainsWhitespace)
+    else if value.exists(AutocompleteTokenCharacters.isDelimiter) then
+      Left(TriggerPrefixError.ContainsDelimiter)
+    else Right(new TriggerPrefix(value))
+
+/** Reason a natural autocomplete trigger prefix was rejected. */
+enum TriggerPrefixError derives CanEqual:
+  case Empty, ContainsWhitespace, ContainsDelimiter
+
+  def message: String = this match
+    case Empty              => "Trigger prefix must be non-empty"
+    case ContainsWhitespace => "Trigger prefix must not contain whitespace"
+    case ContainsDelimiter  => "Trigger prefix must not contain token delimiters"
+
+/** Active trigger token parsed from the cursor context. */
+final case class TriggerCompletionPrefix(
+    replacementPrefix: String,
+    query: String,
+    source: TriggerCompletionSource
+)
+
 /** Dependency-free slash-command autocomplete provider helper. */
-final class SlashCommandAutocompleteProvider(commands: Vector[SlashCommand])
-    extends AutocompleteProvider:
+private[autocomplete] object AutocompleteTokenCharacters:
+  val TokenDelimiters: Set[Char]       = Set(' ', '\t', '=', ',', ';', '(', ')', '[', ']', '{', '}')
+  def isDelimiter(char: Char): Boolean = TokenDelimiters.contains(char)
+
+final class SlashCommandAutocompleteProvider(
+    commands: Vector[SlashCommand],
+    fuzzyRanking: AutocompleteFuzzyRanking = AutocompleteFuzzyRanking.Disabled
+) extends AutocompleteProvider:
   override def requestSuggestions(
       request: AutocompleteRequest,
       callback: AutocompleteCallback
@@ -130,8 +205,7 @@ final class SlashCommandAutocompleteProvider(commands: Vector[SlashCommand])
 
   private def commandSuggestions(prefixWithSlash: String): Option[AutocompleteSuggestions] =
     val prefix = prefixWithSlash.drop(1)
-    val items  = commands
-      .filter(command => command.name.startsWith(prefix))
+    val items  = fuzzyRanking.rankSlashCommands(prefix, commands)
       .map { command =>
         val hint        = command.argumentHint
         val description = (hint, command.description) match
@@ -150,7 +224,9 @@ final class SlashCommandAutocompleteProvider(commands: Vector[SlashCommand])
     val argument    = beforeCursor.drop(spaceIndex + 1)
     commands.find(
       _.name === commandName
-    ).flatMap(_.argumentCompletions(argument)).filter(_.nonEmpty).map { items =>
+    ).flatMap(_.argumentCompletions(argument)).map(fuzzyRanking.rankItems(argument, _)).filter(
+      _.nonEmpty
+    ).map { items =>
       AutocompleteSuggestions(items, argument)
     }
 
@@ -198,9 +274,36 @@ object PathCompletionProvider:
         catch case e: Throwable => callback.fail(e)
         AutocompleteRequestHandle.Noop
 
-/** Deterministic cursor-context parser for path and attachment completion prefixes. */
+/** Deterministic cursor-context parser for trigger, path, and attachment prefixes. */
 object CompletionPrefixParser:
-  private val TokenDelimiters = Set(' ', '\t', '=', ',', ';', '(', ')', '[', ']', '{', '}')
+  def parseTriggerPrefix(
+      request: AutocompleteRequest,
+      sources: Vector[TriggerCompletionSource]
+  ): Option[TriggerCompletionPrefix] =
+    val line         = request.lines.lift(request.cursor.line).getOrElse("")
+    val beforeCursor = Unicode.graphemeClusters(line).take(request.cursor.column).mkString
+    parseTriggerPrefix(beforeCursor, sources)
+
+  def parseTriggerPrefix(
+      beforeCursor: String,
+      sources: Vector[TriggerCompletionSource]
+  ): Option[TriggerCompletionPrefix] =
+    if sources.isEmpty then None
+    else
+      val start                 = lastTokenStart(beforeCursor)
+      val token                 = beforeCursor.substring(start)
+      var longestMatchingSource = Option.empty[TriggerCompletionSource]
+      sources.foreach { source =>
+        if token.startsWith(
+            source.prefix.value
+          ) && longestMatchingSource.forall(
+            _.prefix.value.length < source.prefix.value.length
+          )
+        then longestMatchingSource = Some(source)
+      }
+      longestMatchingSource.map(source =>
+        TriggerCompletionPrefix(token, token.drop(source.prefix.value.length), source)
+      )
 
   def parsePathPrefix(request: AutocompleteRequest): Option[PathCompletionPrefix] =
     val line         = request.lines.lift(request.cursor.line).getOrElse("")
@@ -227,19 +330,27 @@ object CompletionPrefixParser:
     var quote    = -1
     var i        = 0
     while i < text.length do
-      if text.charAt(i) === '"' then
+      if text.charAt(i) === '"' && !isEscaped(text, i) then
         inQuotes = !inQuotes
         if inQuotes then quote = i
       i += 1
     Option.when(inQuotes)(quote)
 
+  private def isEscaped(text: String, index: Int): Boolean =
+    var backslashes = 0
+    var i           = index - 1
+    while i >= 0 && text.charAt(i) === '\\' do
+      backslashes += 1
+      i -= 1
+    backslashes % 2 === 1
+
   private def lastTokenStart(text: String): Int =
     var i = text.length - 1
-    while i >= 0 && !TokenDelimiters.contains(text.charAt(i)) do i -= 1
+    while i >= 0 && !AutocompleteTokenCharacters.isDelimiter(text.charAt(i)) do i -= 1
     i + 1
 
   private def isTokenStart(text: String, index: Int): Boolean =
-    index === 0 || TokenDelimiters.contains(text.charAt(index - 1))
+    index === 0 || AutocompleteTokenCharacters.isDelimiter(text.charAt(index - 1))
 
   private def shouldUseToken(token: String, fullText: String, force: Boolean): Boolean =
     if force then true
@@ -250,43 +361,83 @@ object CompletionPrefixParser:
       token.startsWith("../") ||
       token.startsWith("~/") ||
       token.contains("/") ||
-      (token.isEmpty && fullText.nonEmpty && TokenDelimiters.contains(fullText.last))
+      (token.isEmpty && fullText.nonEmpty && AutocompleteTokenCharacters.isDelimiter(fullText.last))
 
   private def prefixFromToken(token: String): PathCompletionPrefix =
     if token.startsWith("@\"") then
-      PathCompletionPrefix(token, token.drop(2), isAttachment = true, isQuoted = true)
+      PathCompletionPrefix(
+        token,
+        unescapeQuotedPathPrefix(token.drop(2)),
+        isAttachment = true,
+        isQuoted = true
+      )
     else if token.startsWith("\"") then
-      PathCompletionPrefix(token, token.drop(1), isAttachment = false, isQuoted = true)
+      PathCompletionPrefix(
+        token,
+        unescapeQuotedPathPrefix(token.drop(1)),
+        isAttachment = false,
+        isQuoted = true
+      )
     else if token.startsWith("@") then
       PathCompletionPrefix(token, token.drop(1), isAttachment = true, isQuoted = false)
     else PathCompletionPrefix(token, token, isAttachment = false, isQuoted = false)
 
-/** Provider that composes slash-command and path/attachment completions. */
+  private def unescapeQuotedPathPrefix(prefix: String): String =
+    val builder = StringBuilder()
+    var i       = 0
+    while i < prefix.length do
+      val char = prefix.charAt(i)
+      if char === '\\' && i + 1 < prefix.length &&
+        (prefix.charAt(i + 1) === '"' || prefix.charAt(i + 1) === '\\')
+      then
+        builder.append(prefix.charAt(i + 1))
+        i += 2
+      else
+        builder.append(char)
+        i += 1
+    builder.result()
+
+/** Provider that composes slash-command, trigger, and path/attachment completions. */
 final class CombinedAutocompleteProvider(
     commands: Vector[SlashCommand] = Vector.empty,
-    pathProvider: Option[PathCompletionProvider] = None
+    pathProvider: Option[PathCompletionProvider] = None,
+    triggerSources: Vector[TriggerCompletionSource] = Vector.empty,
+    fuzzyRanking: AutocompleteFuzzyRanking = AutocompleteFuzzyRanking.Disabled
 ) extends AutocompleteProvider:
-  private val slashProvider = SlashCommandAutocompleteProvider(commands)
+  private val slashProvider = SlashCommandAutocompleteProvider(commands, fuzzyRanking)
 
   override def requestSuggestions(
       request: AutocompleteRequest,
       callback: AutocompleteCallback
   ): AutocompleteRequestHandle =
-    val slash      = slashSuggestions(request)
-    val pathPrefix = CompletionPrefixParser.parsePathPrefix(request)
-    pathPrefix match
-      case Some(prefix) if pathProvider.nonEmpty =>
-        pathProvider.get.requestPathSuggestions(
-          PathCompletionRequest(prefix, request.force),
-          new PathCompletionProvider.Callback:
-            override def complete(result: Vector[PathCompletion]): Unit =
-              val pathItems = result.map(pathItem(_, prefix))
-              callback.complete(combine(slash, pathItems, prefix.prefix))
+    try
+      val triggerPrefix = CompletionPrefixParser.parseTriggerPrefix(request, triggerSources)
+      val trigger       = triggerPrefix.flatMap(triggerSuggestions)
+      val base          = slashSuggestions(request).orElse(trigger)
+      val pathPrefix    =
+        Option.when(triggerPrefix.isEmpty)(CompletionPrefixParser.parsePathPrefix(request)).flatten
+      pathPrefix match
+        case Some(prefix) if pathProvider.nonEmpty =>
+          pathProvider.get.requestPathSuggestions(
+            PathCompletionRequest(prefix, request.force),
+            new PathCompletionProvider.Callback:
+              override def complete(result: Vector[PathCompletion]): Unit =
+                try
+                  val pathItems = fuzzyRanking.rankItems(
+                    pathFuzzyQuery(prefix),
+                    result.map(pathItem(_, prefix))
+                  )
+                  callback.complete(combine(base, pathItems, prefix.prefix))
+                catch case e: Throwable => callback.fail(e)
 
-            override def fail(error: Throwable): Unit = callback.fail(error)
-        )
-      case _                                     =>
-        callback.complete(slash)
+              override def fail(error: Throwable): Unit = callback.fail(error)
+          )
+        case _                                     =>
+          callback.complete(base)
+          AutocompleteRequestHandle.Noop
+    catch
+      case e: Throwable =>
+        callback.fail(e)
         AutocompleteRequestHandle.Noop
 
   override def applyCompletion(request: CompletionRequest): CompletionResult =
@@ -302,12 +453,23 @@ final class CombinedAutocompleteProvider(
     )
     result
 
+  private def triggerSuggestions(trigger: TriggerCompletionPrefix)
+      : Option[AutocompleteSuggestions] =
+    trigger.source.completions(trigger.query).map(fuzzyRanking.rankItems(
+      trigger.query,
+      _
+    )).filter(
+      _.nonEmpty
+    ).map { items =>
+      AutocompleteSuggestions(items, trigger.replacementPrefix)
+    }
+
   private def combine(
-      slash: Option[AutocompleteSuggestions],
+      base: Option[AutocompleteSuggestions],
       pathItems: Vector[AutocompleteItem],
       pathPrefix: String
   ): Option[AutocompleteSuggestions] =
-    (slash, pathItems.nonEmpty) match
+    (base, pathItems.nonEmpty) match
       case (Some(suggestions), true) if suggestions.prefix === pathPrefix =>
         Some(AutocompleteSuggestions(suggestions.items ++ pathItems, suggestions.prefix))
       case (Some(suggestions), _)                                         => Some(suggestions)
@@ -324,6 +486,21 @@ final class CombinedAutocompleteProvider(
     )
 
   private def completionValue(path: String, prefix: PathCompletionPrefix): String =
-    val needsQuotes = prefix.isQuoted || path.exists(_.isWhitespace)
+    val needsQuotes = prefix.isQuoted || path.exists(_.isWhitespace) || path.exists(needsEscaping)
     val marker      = if prefix.isAttachment then "@" else ""
-    if needsQuotes then s"$marker\"$path\"" else s"$marker$path"
+    if needsQuotes then s"$marker\"${escapeQuotedPath(path)}\"" else s"$marker$path"
+
+  private def needsEscaping(char: Char): Boolean =
+    char === '"' || char === '\\'
+
+  private def escapeQuotedPath(path: String): String =
+    path.flatMap {
+      case '"'  => "\\\""
+      case '\\' => "\\\\"
+      case char => char.toString
+    }
+
+  private def pathFuzzyQuery(prefix: PathCompletionPrefix): String =
+    val raw       = prefix.rawPrefix
+    val lastSlash = raw.lastIndexOf('/')
+    if lastSlash >= 0 then raw.drop(lastSlash + 1) else raw

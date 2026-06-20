@@ -47,15 +47,39 @@ object TerminalImageProtocol:
     val sourceWidth      = math.max(1, dimensions.widthPx)
     val sourceHeight     = math.max(1, dimensions.heightPx)
     val cell             = options.cellDimensions
-    val widthCells       = maxWidth
-    val heightFromAspect = math.max(
+    val maxHeight        = options.maxHeightCells.map(math.max(1, _))
+    val widthFromHeight  = maxHeight.map { heightCap =>
+      math.max(
+        1,
+        math.floor(
+          (heightCap.toDouble * cell.heightPx.toDouble * sourceWidth.toDouble) / (cell.widthPx.toDouble * sourceHeight.toDouble)
+        ).toInt
+      )
+    }
+    var widthCells       = math.min(maxWidth, widthFromHeight.getOrElse(maxWidth))
+    var heightFromAspect = heightForWidth(widthCells, sourceWidth, sourceHeight, cell)
+    maxHeight.foreach { heightCap =>
+      while heightFromAspect > heightCap && widthCells > 1 do
+        widthCells -= 1
+        heightFromAspect = heightForWidth(widthCells, sourceWidth, sourceHeight, cell)
+    }
+    ImageCellSize(
+      widthCells,
+      maxHeight.fold(heightFromAspect)(heightCap => math.min(heightFromAspect, heightCap))
+    )
+
+  private def heightForWidth(
+      widthCells: Int,
+      sourceWidth: Int,
+      sourceHeight: Int,
+      cell: ImageCellDimensions
+  ): Int =
+    math.max(
       1,
       math.ceil(
         (widthCells.toDouble * cell.widthPx.toDouble * sourceHeight.toDouble) / (cell.heightPx.toDouble * sourceWidth.toDouble)
       ).toInt
     )
-    val maxHeight        = options.maxHeightCells.getOrElse(heightFromAspect)
-    ImageCellSize(widthCells, math.max(1, math.min(heightFromAspect, maxHeight)))
 
   /** Render base64 image data according to terminal capabilities. */
   def renderBase64Image(

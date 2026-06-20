@@ -13,27 +13,38 @@ enum KeybindingScope derives CanEqual:
  */
 enum KeybindingCommand(val id: String, val scope: KeybindingScope) derives CanEqual:
   // Editor commands
-  case EditorCursorUp          extends KeybindingCommand("tui.editor.cursorUp", KeybindingScope.Editor)
-  case EditorCursorDown        extends KeybindingCommand("tui.editor.cursorDown", KeybindingScope.Editor)
-  case EditorCursorLeft        extends KeybindingCommand("tui.editor.cursorLeft", KeybindingScope.Editor)
-  case EditorCursorRight       extends KeybindingCommand("tui.editor.cursorRight", KeybindingScope.Editor)
-  case EditorCursorWordLeft    extends KeybindingCommand("tui.editor.cursorWordLeft", KeybindingScope.Editor)
-  case EditorCursorWordRight   extends KeybindingCommand("tui.editor.cursorWordRight", KeybindingScope.Editor)
-  case EditorCursorLineStart   extends KeybindingCommand("tui.editor.cursorLineStart", KeybindingScope.Editor)
-  case EditorCursorLineEnd     extends KeybindingCommand("tui.editor.cursorLineEnd", KeybindingScope.Editor)
-  case EditorJumpForward       extends KeybindingCommand("tui.editor.jumpForward", KeybindingScope.Editor)
-  case EditorJumpBackward      extends KeybindingCommand("tui.editor.jumpBackward", KeybindingScope.Editor)
-  case EditorPageUp            extends KeybindingCommand("tui.editor.pageUp", KeybindingScope.Editor)
-  case EditorPageDown          extends KeybindingCommand("tui.editor.pageDown", KeybindingScope.Editor)
-  case EditorDeleteCharBackward extends KeybindingCommand("tui.editor.deleteCharBackward", KeybindingScope.Editor)
-  case EditorDeleteCharForward  extends KeybindingCommand("tui.editor.deleteCharForward", KeybindingScope.Editor)
-  case EditorDeleteWordBackward extends KeybindingCommand("tui.editor.deleteWordBackward", KeybindingScope.Editor)
-  case EditorDeleteWordForward  extends KeybindingCommand("tui.editor.deleteWordForward", KeybindingScope.Editor)
-  case EditorDeleteToLineStart extends KeybindingCommand("tui.editor.deleteToLineStart", KeybindingScope.Editor)
-  case EditorDeleteToLineEnd   extends KeybindingCommand("tui.editor.deleteToLineEnd", KeybindingScope.Editor)
-  case EditorYank              extends KeybindingCommand("tui.editor.yank", KeybindingScope.Editor)
-  case EditorYankPop           extends KeybindingCommand("tui.editor.yankPop", KeybindingScope.Editor)
-  case EditorUndo              extends KeybindingCommand("tui.editor.undo", KeybindingScope.Editor)
+  case EditorCursorUp    extends KeybindingCommand("tui.editor.cursorUp", KeybindingScope.Editor)
+  case EditorCursorDown  extends KeybindingCommand("tui.editor.cursorDown", KeybindingScope.Editor)
+  case EditorCursorLeft  extends KeybindingCommand("tui.editor.cursorLeft", KeybindingScope.Editor)
+  case EditorCursorRight extends KeybindingCommand("tui.editor.cursorRight", KeybindingScope.Editor)
+  case EditorCursorWordLeft
+      extends KeybindingCommand("tui.editor.cursorWordLeft", KeybindingScope.Editor)
+  case EditorCursorWordRight
+      extends KeybindingCommand("tui.editor.cursorWordRight", KeybindingScope.Editor)
+  case EditorCursorLineStart
+      extends KeybindingCommand("tui.editor.cursorLineStart", KeybindingScope.Editor)
+  case EditorCursorLineEnd
+      extends KeybindingCommand("tui.editor.cursorLineEnd", KeybindingScope.Editor)
+  case EditorJumpForward extends KeybindingCommand("tui.editor.jumpForward", KeybindingScope.Editor)
+  case EditorJumpBackward
+      extends KeybindingCommand("tui.editor.jumpBackward", KeybindingScope.Editor)
+  case EditorPageUp      extends KeybindingCommand("tui.editor.pageUp", KeybindingScope.Editor)
+  case EditorPageDown    extends KeybindingCommand("tui.editor.pageDown", KeybindingScope.Editor)
+  case EditorDeleteCharBackward
+      extends KeybindingCommand("tui.editor.deleteCharBackward", KeybindingScope.Editor)
+  case EditorDeleteCharForward
+      extends KeybindingCommand("tui.editor.deleteCharForward", KeybindingScope.Editor)
+  case EditorDeleteWordBackward
+      extends KeybindingCommand("tui.editor.deleteWordBackward", KeybindingScope.Editor)
+  case EditorDeleteWordForward
+      extends KeybindingCommand("tui.editor.deleteWordForward", KeybindingScope.Editor)
+  case EditorDeleteToLineStart
+      extends KeybindingCommand("tui.editor.deleteToLineStart", KeybindingScope.Editor)
+  case EditorDeleteToLineEnd
+      extends KeybindingCommand("tui.editor.deleteToLineEnd", KeybindingScope.Editor)
+  case EditorYank        extends KeybindingCommand("tui.editor.yank", KeybindingScope.Editor)
+  case EditorYankPop     extends KeybindingCommand("tui.editor.yankPop", KeybindingScope.Editor)
+  case EditorUndo        extends KeybindingCommand("tui.editor.undo", KeybindingScope.Editor)
 
   // Input commands
   case InputNewLine extends KeybindingCommand("tui.input.newLine", KeybindingScope.Input)
@@ -55,8 +66,9 @@ enum KeybindingCommand(val id: String, val scope: KeybindingScope) derives CanEq
 final case class KeyDescriptor(key: TerminalKey, modifiers: KeyModifiers = KeyModifiers.empty)
     derives CanEqual:
   def matches(input: TerminalInput): Boolean = input match
-    case TerminalInput.Key(eventKey, eventModifiers) => eventKey === key && eventModifiers === modifiers
-    case _                                         => false
+    case TerminalInput.KeyEvent(eventKey, eventModifiers, eventType) =>
+      (eventType !== KeyEventType.Release) && eventKey === key && eventModifiers === modifiers
+    case _                                                           => false
 
 /**
  * Default command data.
@@ -154,17 +166,19 @@ object KeybindingManager:
   /** Build from raw command-id maps, ignoring unknown ids. */
   def fromRawBindings(bindings: Map[String, Vector[KeyDescriptor]]): KeybindingManager =
     val typed = bindings.toVector.collect {
-      case (id, keys) if KeybindingCommand.fromId(id).isDefined => KeybindingCommand.fromId(id).get -> keys.distinct
+      case (id, keys) if KeybindingCommand.fromId(id).isDefined =>
+        KeybindingCommand.fromId(id).get -> keys.distinct
     }.toMap
     new KeybindingManager(typed)
 
   private def findConflicts(
       bindings: Map[KeybindingCommand, Vector[KeyDescriptor]]
   ): Vector[KeybindingConflict] =
-    val claims = for
-      (command, keys) <- bindings.toVector
-      key            <- keys.distinct
-    yield key -> command
+    val claims =
+      for
+        (command, keys) <- bindings.toVector
+        key             <- keys.distinct
+      yield key -> command
 
     claims
       .groupBy(_._1)
@@ -177,20 +191,21 @@ object KeybindingManager:
       .sortBy(_.key.toString)
 
   /**
-   * Upstream-style defaults for commands that can be represented by this runtime's typed input model.
+   * Upstream-style defaults for commands that can be represented by this runtime's typed input
+   * model.
    */
   private val Defaults: Map[KeybindingCommand, KeybindingDefinition] = Map(
-    KeybindingCommand.EditorCursorUp ->
+    KeybindingCommand.EditorCursorUp           ->
       KeybindingDefinition(
         Vector(KeyDescriptor(TerminalKey.Up)),
         "Move cursor up"
       ),
-    KeybindingCommand.EditorCursorDown ->
+    KeybindingCommand.EditorCursorDown         ->
       KeybindingDefinition(
         Vector(KeyDescriptor(TerminalKey.Down)),
         "Move cursor down"
       ),
-    KeybindingCommand.EditorCursorLeft ->
+    KeybindingCommand.EditorCursorLeft         ->
       KeybindingDefinition(
         Vector(
           KeyDescriptor(TerminalKey.Left),
@@ -198,7 +213,7 @@ object KeybindingManager:
         ),
         "Move cursor left"
       ),
-    KeybindingCommand.EditorCursorRight ->
+    KeybindingCommand.EditorCursorRight        ->
       KeybindingDefinition(
         Vector(
           KeyDescriptor(TerminalKey.Right),
@@ -206,7 +221,7 @@ object KeybindingManager:
         ),
         "Move cursor right"
       ),
-    KeybindingCommand.EditorCursorWordLeft ->
+    KeybindingCommand.EditorCursorWordLeft     ->
       KeybindingDefinition(
         Vector(
           KeyDescriptor(TerminalKey.Left, KeyModifiers(alt = true)),
@@ -215,7 +230,7 @@ object KeybindingManager:
         ),
         "Move by word to the left"
       ),
-    KeybindingCommand.EditorCursorWordRight ->
+    KeybindingCommand.EditorCursorWordRight    ->
       KeybindingDefinition(
         Vector(
           KeyDescriptor(TerminalKey.Right, KeyModifiers(alt = true)),
@@ -224,7 +239,7 @@ object KeybindingManager:
         ),
         "Move by word to the right"
       ),
-    KeybindingCommand.EditorCursorLineStart ->
+    KeybindingCommand.EditorCursorLineStart    ->
       KeybindingDefinition(
         Vector(
           KeyDescriptor(TerminalKey.Home),
@@ -232,7 +247,7 @@ object KeybindingManager:
         ),
         "Move to line start"
       ),
-    KeybindingCommand.EditorCursorLineEnd ->
+    KeybindingCommand.EditorCursorLineEnd      ->
       KeybindingDefinition(
         Vector(
           KeyDescriptor(TerminalKey.End),
@@ -240,12 +255,12 @@ object KeybindingManager:
         ),
         "Move to line end"
       ),
-    KeybindingCommand.EditorJumpForward ->
+    KeybindingCommand.EditorJumpForward        ->
       KeybindingDefinition(
         Vector(KeyDescriptor(TerminalKey.Character("]"), KeyModifiers(ctrl = true))),
         "Jump forward to next character"
       ),
-    KeybindingCommand.EditorJumpBackward ->
+    KeybindingCommand.EditorJumpBackward       ->
       KeybindingDefinition(
         Vector(
           KeyDescriptor(
@@ -255,12 +270,12 @@ object KeybindingManager:
         ),
         "Jump backward to previous character"
       ),
-    KeybindingCommand.EditorPageUp ->
+    KeybindingCommand.EditorPageUp             ->
       KeybindingDefinition(
         Vector(KeyDescriptor(TerminalKey.PageUp)),
         "Move page up"
       ),
-    KeybindingCommand.EditorPageDown ->
+    KeybindingCommand.EditorPageDown           ->
       KeybindingDefinition(
         Vector(KeyDescriptor(TerminalKey.PageDown)),
         "Move page down"
@@ -270,7 +285,7 @@ object KeybindingManager:
         Vector(KeyDescriptor(TerminalKey.Backspace)),
         "Delete character before cursor"
       ),
-    KeybindingCommand.EditorDeleteCharForward ->
+    KeybindingCommand.EditorDeleteCharForward  ->
       KeybindingDefinition(
         Vector(
           KeyDescriptor(TerminalKey.Delete),
@@ -287,7 +302,7 @@ object KeybindingManager:
         ),
         "Delete previous word"
       ),
-    KeybindingCommand.EditorDeleteWordForward ->
+    KeybindingCommand.EditorDeleteWordForward  ->
       KeybindingDefinition(
         Vector(
           KeyDescriptor(TerminalKey.Character("d"), KeyModifiers(alt = true)),
@@ -295,77 +310,77 @@ object KeybindingManager:
         ),
         "Delete next word"
       ),
-    KeybindingCommand.EditorDeleteToLineStart ->
+    KeybindingCommand.EditorDeleteToLineStart  ->
       KeybindingDefinition(
         Vector(KeyDescriptor(TerminalKey.Character("u"), KeyModifiers(ctrl = true))),
         "Delete to line start"
       ),
-    KeybindingCommand.EditorDeleteToLineEnd ->
+    KeybindingCommand.EditorDeleteToLineEnd    ->
       KeybindingDefinition(
         Vector(KeyDescriptor(TerminalKey.Character("k"), KeyModifiers(ctrl = true))),
         "Delete to line end"
       ),
-    KeybindingCommand.EditorYank ->
+    KeybindingCommand.EditorYank               ->
       KeybindingDefinition(
         Vector(KeyDescriptor(TerminalKey.Character("y"), KeyModifiers(ctrl = true))),
         "Yank"
       ),
-    KeybindingCommand.EditorYankPop ->
+    KeybindingCommand.EditorYankPop            ->
       KeybindingDefinition(
         Vector(KeyDescriptor(TerminalKey.Character("y"), KeyModifiers(alt = true))),
         "Yank-pop"
       ),
-    KeybindingCommand.EditorUndo ->
+    KeybindingCommand.EditorUndo               ->
       KeybindingDefinition(
         Vector(KeyDescriptor(TerminalKey.Character("-"), KeyModifiers(ctrl = true))),
         "Undo"
       ),
-    KeybindingCommand.InputNewLine ->
+    KeybindingCommand.InputNewLine             ->
       KeybindingDefinition(
         Vector(KeyDescriptor(TerminalKey.Enter, KeyModifiers(shift = true))),
         "Insert newline"
       ),
-    KeybindingCommand.InputSubmit ->
+    KeybindingCommand.InputSubmit              ->
       KeybindingDefinition(
         Vector(KeyDescriptor(TerminalKey.Enter)),
         "Submit"
       ),
-    KeybindingCommand.InputTab ->
+    KeybindingCommand.InputTab                 ->
       KeybindingDefinition(
         Vector(KeyDescriptor(TerminalKey.Tab)),
         "Trigger autocomplete / tab completion"
       ),
-    KeybindingCommand.InputCopy ->
+    KeybindingCommand.InputCopy                ->
       KeybindingDefinition(
         Vector(KeyDescriptor(TerminalKey.Character("c"), KeyModifiers(ctrl = true))),
         "Copy/cancel action"
       ),
-    KeybindingCommand.SelectUp ->
+    KeybindingCommand.SelectUp                 ->
       KeybindingDefinition(
         Vector(KeyDescriptor(TerminalKey.Up)),
         "Select previous row"
       ),
-    KeybindingCommand.SelectDown ->
+    KeybindingCommand.SelectDown               ->
       KeybindingDefinition(
         Vector(KeyDescriptor(TerminalKey.Down)),
         "Select next row"
       ),
-    KeybindingCommand.SelectPageUp ->
+    KeybindingCommand.SelectPageUp             ->
       KeybindingDefinition(
         Vector(KeyDescriptor(TerminalKey.PageUp)),
         "Page-select up"
       ),
-    KeybindingCommand.SelectPageDown ->
+    KeybindingCommand.SelectPageDown           ->
       KeybindingDefinition(
         Vector(KeyDescriptor(TerminalKey.PageDown)),
         "Page-select down"
       ),
-    KeybindingCommand.SelectConfirm ->
+    KeybindingCommand.SelectConfirm            ->
       KeybindingDefinition(
         Vector(KeyDescriptor(TerminalKey.Enter)),
         "Select current row"
       ),
-    KeybindingCommand.SelectCancel ->
+    KeybindingCommand.SelectCancel             ->
       KeybindingDefinition(
         Vector(
           KeyDescriptor(TerminalKey.Escape),

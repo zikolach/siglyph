@@ -59,8 +59,8 @@ class InteractiveDemoSuite extends munit.FunSuite:
     tui.requestRender(force = true)
     tui.flushRender()
 
-    val postEnter      = Ansi.strip(terminal.output)
-    val lastFrame      = postEnter.split("siglyph showcase demo").last
+    val postEnter = Ansi.strip(terminal.output)
+    val lastFrame = postEnter.split("siglyph showcase demo").last
     assert(
       !lastFrame.contains("help — Show demo help"),
       postEnter
@@ -122,7 +122,7 @@ class InteractiveDemoSuite extends munit.FunSuite:
     tui.flushRender()
 
     val output = Ansi.strip(terminal.output)
-    assert(output.contains("README.md"), output)
+    assert(output.contains("AGENTS.md"), output)
     assert(output.contains("Editor (focused)"), output)
 
   test("interactive demo actions tick and cancel loader components"):
@@ -139,7 +139,10 @@ class InteractiveDemoSuite extends munit.FunSuite:
     terminal.sendInput(TerminalInput.Key(TerminalKey.Down))
     terminal.sendInput(TerminalInput.Key(TerminalKey.Enter))
 
-    assert(Ansi.strip(terminal.output).contains("◓ Tick me from Actions"), Ansi.strip(terminal.output))
+    assert(
+      Ansi.strip(terminal.output).contains("◓ Tick me from Actions"),
+      Ansi.strip(terminal.output)
+    )
 
     terminal.clearWrites()
     terminal.sendInput(TerminalInput.Key(TerminalKey.Down))

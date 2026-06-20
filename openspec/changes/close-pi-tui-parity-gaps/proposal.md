@@ -30,6 +30,6 @@ None. This change extends existing parity-related capabilities.
 ## Impact
 
 - Affected modules: `core`, `markdown`, `image`, JVM/Native terminal backends, demos, tests, README/docs.
-- Public API impact: additive APIs for fuzzy matching, autocomplete helpers, image helpers, component options/themes, and terminal input metadata. No breaking changes intended.
+- Public API impact: APIs should optimize for `pi-tui` parity and stable final contracts. Source compatibility with temporary pre-parity Scala APIs is not required when it conflicts with that goal.
 - Dependency impact: baseline `core`, `markdown`, and `image` remain dependency-light. Optional parser/image/helper dependencies require explicit documentation and approval before adoption.
 - Platform impact: JVM and Scala Native parity must remain explicit; platform-specific helpers should be optional or isolated behind existing abstractions.

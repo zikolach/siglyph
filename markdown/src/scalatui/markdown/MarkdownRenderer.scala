@@ -3,10 +3,44 @@ package scalatui.markdown
 import scalatui.ansi.Ansi
 import scalatui.core.Component
 import scalatui.syntax.Equality.*
+import scalatui.terminal.TerminalCapabilities
 
 /** Converts Markdown source to ANSI-aware, width-safe terminal lines. */
 trait MarkdownRenderer:
   def render(markdown: String, width: Int): Vector[String]
+
+/** Optional syntax-highlighting boundary for fenced Markdown code blocks. */
+trait MarkdownCodeHighlighter:
+  def highlight(language: Option[String], code: String): Option[Vector[String]]
+
+/** Styling hooks for the dependency-free Markdown renderer. */
+final case class MarkdownTheme(
+    heading: (Int, String) => String = (_, text) => text,
+    paragraph: String => String = identity,
+    codeSpan: String => String = text => s"`$text`",
+    codeBlockFence: String => String = identity,
+    codeBlockLine: String => String = identity,
+    blockQuotePrefix: String => String = identity,
+    blockQuoteText: String => String = identity,
+    horizontalRule: String => String = identity,
+    listMarker: String => String = identity,
+    tableRow: String => String = identity,
+    emphasis: String => String = identity,
+    strong: String => String = identity,
+    link: (String, String) => String = (label, _) => label,
+    linkFallback: (String, String) => String = (label, url) => s"$label ($url)"
+)
+
+/** Runtime rendering options for Markdown parity helpers. */
+final case class MarkdownRenderOptions(
+    theme: MarkdownTheme = MarkdownTheme(),
+    capabilities: TerminalCapabilities = TerminalCapabilities(
+      trueColor = false,
+      hyperlinks = false,
+      images = None
+    ),
+    highlighter: Option[MarkdownCodeHighlighter] = None
+)
 
 /** Parser boundary for dependency-free or optional dependency-backed Markdown strategies. */
 trait MarkdownParser:
@@ -140,8 +174,10 @@ object BasicMarkdownParser extends MarkdownParser:
     line.trim.stripPrefix("|").stripSuffix("|").split("\\|", -1).toVector.map(_.trim)
 
 /** Dependency-free renderer for a practical baseline Markdown subset. */
-final class BasicMarkdownRenderer(parser: MarkdownParser = BasicMarkdownParser)
-    extends MarkdownRenderer:
+final class BasicMarkdownRenderer(
+    parser: MarkdownParser = BasicMarkdownParser,
+    options: MarkdownRenderOptions = MarkdownRenderOptions()
+) extends MarkdownRenderer:
   override def render(markdown: String, width: Int): Vector[String] =
     val safeWidth = math.max(1, width)
     val rendered  = parser.parse(markdown) match
@@ -155,40 +191,114 @@ final class BasicMarkdownRenderer(parser: MarkdownParser = BasicMarkdownParser)
 
   private def renderBlock(block: MarkdownBlock, width: Int): Vector[String] = block match
     case MarkdownBlock.Heading(level, text)      =>
-      wrap(s"${"#".repeat(level)} ${renderInline(text)}", width) :+ ""
+      wrap(
+        styled(options.theme.heading(level, s"${"#".repeat(level)} ${renderInline(text)}")),
+        width
+      ) :+ ""
     case MarkdownBlock.Paragraph(text)           =>
-      wrap(renderInline(text), width) :+ ""
+      wrap(styled(options.theme.paragraph(renderInline(text))), width) :+ ""
     case MarkdownBlock.CodeBlock(language, text) =>
       val header = language.fold("```")(lang => s"```$lang")
-      Vector(Ansi.truncateToWidth(header, width, "")) ++
-        text.split("\n", -1).toVector.map(line => Ansi.truncateToWidth(line, width, "")) ++
-        Vector(Ansi.truncateToWidth("```", width, ""), "")
+      val body   = options.highlighter
+        .flatMap(_.highlight(language, text))
+        .getOrElse(text.split("\n", -1).toVector)
+        .map(line => styled(options.theme.codeBlockLine(line)))
+      Vector(Ansi.truncateToWidth(styled(options.theme.codeBlockFence(header)), width, "")) ++
+        body.map(line => Ansi.truncateToWidth(line, width, "")) ++
+        Vector(Ansi.truncateToWidth(styled(options.theme.codeBlockFence("```")), width, ""), "")
     case MarkdownBlock.ListBlock(ordered, items) =>
       items.zipWithIndex.flatMap { (item, index) =>
-        val marker = if ordered then s"${index + 1}. " else "- "
+        val marker = styled(options.theme.listMarker(if ordered then s"${index + 1}. " else "- "))
         wrapWithPrefix(marker, renderInline(item), width)
       } :+ ""
     case MarkdownBlock.BlockQuote(text)          =>
       text.split("\n", -1).toVector.flatMap(line =>
-        wrapWithPrefix("> ", renderInline(line), width)
+        wrapWithPrefix(
+          styled(options.theme.blockQuotePrefix("> ")),
+          styled(options.theme.blockQuoteText(renderInline(line))),
+          width
+        )
       ) :+ ""
     case MarkdownBlock.HorizontalRule            =>
-      Vector("─".repeat(width), "")
+      Vector(
+        Ansi.truncateToWidth(styled(options.theme.horizontalRule("─".repeat(width))), width, ""),
+        ""
+      )
     case MarkdownBlock.Table(rows)               =>
-      rows.map(row => Ansi.truncateToWidth(row.map(renderInline).mkString(" | "), width, "")) :+ ""
+      rows.map(row =>
+        Ansi.truncateToWidth(
+          styled(options.theme.tableRow(row.map(renderInline).mkString(" | "))),
+          width,
+          ""
+        )
+      ) :+ ""
 
   private def renderInline(value: String): String =
-    renderLinks(stripEmphasis(value)).replaceAll("`([^`]+)`", "`$1`")
+    val builder = StringBuilder()
+    var i       = 0
+    while i < value.length do
+      if value.startsWith("`", i) then
+        val end = value.indexOf('`', i + 1)
+        if end > i then
+          builder.append(styled(options.theme.codeSpan(value.substring(i + 1, end))))
+          i = end + 1
+        else
+          builder.append(value.charAt(i))
+          i += 1
+      else if value.startsWith("[", i) then
+        parseLink(value, i) match
+          case Some((label, url, next)) =>
+            builder.append(renderLink(renderInline(label), url))
+            i = next
+          case None                     =>
+            builder.append(value.charAt(i))
+            i += 1
+      else if value.startsWith("**", i) || value.startsWith("__", i) then
+        val marker = value.substring(i, i + 2)
+        val end    = value.indexOf(marker, i + 2)
+        if end > i then
+          builder.append(styled(options.theme.strong(renderInline(value.substring(i + 2, end)))))
+          i = end + 2
+        else
+          builder.append(value.charAt(i))
+          i += 1
+      else if value.startsWith("*", i) || value.startsWith("_", i) then
+        val marker = value.substring(i, i + 1)
+        val end    = value.indexOf(marker, i + 1)
+        if end > i then
+          builder.append(styled(options.theme.emphasis(renderInline(value.substring(i + 1, end)))))
+          i = end + 1
+        else
+          builder.append(value.charAt(i))
+          i += 1
+      else
+        builder.append(value.charAt(i))
+        i += 1
+    builder.result()
 
-  private def stripEmphasis(value: String): String =
-    value
-      .replaceAll("\\*\\*([^*]+)\\*\\*", "$1")
-      .replaceAll("__([^_]+)__", "$1")
-      .replaceAll("\\*([^*]+)\\*", "$1")
-      .replaceAll("_([^_]+)_", "$1")
+  private def parseLink(value: String, offset: Int): Option[(String, String, Int)] =
+    val labelEnd = value.indexOf("](", offset + 1)
+    if labelEnd < 0 then None
+    else
+      val urlEnd = value.indexOf(')', labelEnd + 2)
+      Option.when(urlEnd >= 0) {
+        val label = value.substring(offset + 1, labelEnd)
+        val url   = value.substring(labelEnd + 2, urlEnd)
+        (label, url, urlEnd + 1)
+      }
 
-  private def renderLinks(value: String): String =
-    value.replaceAll("\\[([^\\]]+)\\]\\(([^)]+)\\)", "$1 ($2)")
+  private def renderLink(label: String, url: String): String =
+    val safeUrl = stripTerminalControls(url)
+    if options.capabilities.hyperlinks && safeUrl === url then
+      val styledLabel = styled(options.theme.link(label, url))
+      s"\u001b]8;;$url\u0007$styledLabel\u001b]8;;\u0007"
+    else styled(options.theme.linkFallback(label, safeUrl))
+
+  private def stripTerminalControls(value: String): String =
+    value.filterNot(ch => Character.isISOControl(ch))
+
+  private def styled(value: String): String =
+    if value.contains("\u001b[") && !value.endsWith(Ansi.Reset) then value + Ansi.Reset else value
 
   private def wrap(value: String, width: Int): Vector[String] =
     Ansi.wrapTextWithAnsi(value, width).map(Ansi.truncateToWidth(_, width, ""))

@@ -45,12 +45,11 @@ Markdown is intentionally isolated in the `markdown` module. No parser dependenc
 - `MarkdownParser` is the parser strategy boundary.
 - `BasicMarkdownParser` supports the portable first subset without third-party dependencies.
 - `BasicMarkdownRenderer` converts parsed blocks to width-safe terminal lines.
+- `MarkdownTheme` exposes hooks for headings, paragraphs, links, inline code, fenced code, quotes, horizontal rules, lists, tables, emphasis, and strong text.
+- `MarkdownRenderOptions` carries theme, terminal hyperlink capability, and an optional fenced-code highlighter.
 - `Markdown` is a normal component wrapper with padding support.
 
-The dependency-free subset is intentionally conservative: headings, paragraphs, inline emphasis
-normalization, inline code, links, fenced/indented code, ordered/unordered lists, block quotes,
-horizontal rules, and simple pipe tables remain readable and width-safe. Unsupported constructs
-fall back to readable plain/minimal formatting rather than throwing during component rendering.
+The dependency-free subset is intentionally conservative: headings, paragraphs, inline emphasis, inline code, links, fenced/indented code, ordered/unordered lists, block quotes, horizontal rules, and simple pipe tables remain readable and width-safe. Markdown links render as readable `label (url)` text by default and as OSC 8 hyperlinks when the renderer is configured with hyperlink-capable terminal settings. Unsupported constructs fall back to readable plain/minimal formatting rather than throwing during component rendering.
 
 ## Optional adapter boundary
 
@@ -59,10 +58,9 @@ Richer Markdown support should be added as optional modules rather than mandator
 - A future JVM adapter can wrap `commonmark-java` or `flexmark-java` behind `MarkdownParser` or
   `MarkdownRenderer`.
 - A future Native adapter can use a Native-compatible parser if one is approved.
-- Adapter modules must preserve the public renderer/component contract so applications can swap
-  implementations without changing UI code.
-- No parser dependency should be added to `core` or to the baseline `markdown` module without
-  explicit dependency approval.
+- Adapter modules must preserve the public renderer/component contract so applications can swap implementations without changing UI code.
+- Adapter failures must return a parser error so the renderer can emit readable fallback text instead of throwing from component rendering.
+- No parser dependency should be added to `core` or to the baseline `markdown` module without explicit dependency approval.
 
 ## Recommendation for optional parser work
 

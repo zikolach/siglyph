@@ -4,7 +4,14 @@ import scalatui.ansi.Ansi
 import scalatui.autocomplete.*
 import scalatui.core.{CursorMarker, InputResult, OverlayOptions, OverlaySize, TUI}
 import scalatui.editing.EditorCursor
-import scalatui.terminal.{KeyDescriptor, KeybindingManager, KeyModifiers, TerminalInput, TerminalKey, VirtualTerminal}
+import scalatui.terminal.{
+  KeyDescriptor,
+  KeybindingManager,
+  KeyModifiers,
+  TerminalInput,
+  TerminalKey,
+  VirtualTerminal
+}
 
 class EditorSuite extends munit.FunSuite:
   test("renders focused fake cursor on character and hides it when unfocused"):
@@ -183,7 +190,10 @@ class EditorSuite extends munit.FunSuite:
         enterBehavior = EditorEnterBehavior.NewlineOnEnter(),
         keybindings = KeybindingManager.fromRawBindings(
           Map(
-            "tui.input.submit" -> Vector(KeyDescriptor(TerminalKey.Character("x"), KeyModifiers(ctrl = true)))
+            "tui.input.submit" -> Vector(KeyDescriptor(
+              TerminalKey.Character("x"),
+              KeyModifiers(ctrl = true)
+            ))
           )
         ),
         onSubmit = text => submitted = text
@@ -198,7 +208,10 @@ class EditorSuite extends munit.FunSuite:
     assertEquals(editor.text, "a\n")
 
     assertEquals(
-      editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("x"), KeyModifiers(ctrl = true))),
+      editor.handleInputResult(TerminalInput.Key(
+        TerminalKey.Character("x"),
+        KeyModifiers(ctrl = true)
+      )),
       InputResult.Render
     )
     assertEquals(submitted, "a\n")
@@ -210,20 +223,44 @@ class EditorSuite extends munit.FunSuite:
       EditorOptions(
         keybindings = KeybindingManager.fromRawBindings(
           Map(
-            "tui.editor.cursorLeft" -> Vector(KeyDescriptor(TerminalKey.Character("z"), KeyModifiers(alt = true))),
-            "tui.editor.deleteCharBackward" -> Vector(KeyDescriptor(TerminalKey.Character("x"), KeyModifiers(ctrl = true))),
-            "tui.input.newLine" -> Vector(KeyDescriptor(TerminalKey.Character("n"), KeyModifiers(ctrl = true))),
-            "tui.input.submit" -> Vector(KeyDescriptor(TerminalKey.Character("s"), KeyModifiers(ctrl = true)))
+            "tui.editor.cursorLeft"         -> Vector(KeyDescriptor(
+              TerminalKey.Character("z"),
+              KeyModifiers(alt = true)
+            )),
+            "tui.editor.deleteCharBackward" -> Vector(KeyDescriptor(
+              TerminalKey.Character("x"),
+              KeyModifiers(ctrl = true)
+            )),
+            "tui.input.newLine"             -> Vector(KeyDescriptor(
+              TerminalKey.Character("n"),
+              KeyModifiers(ctrl = true)
+            )),
+            "tui.input.submit"              -> Vector(KeyDescriptor(
+              TerminalKey.Character("s"),
+              KeyModifiers(ctrl = true)
+            ))
           )
         ),
         onSubmit = text => submitted = text
       )
     )
 
-    editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("z"), KeyModifiers(alt = true)))
-    editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("x"), KeyModifiers(ctrl = true)))
-    editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("n"), KeyModifiers(ctrl = true)))
-    editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("s"), KeyModifiers(ctrl = true)))
+    editor.handleInputResult(TerminalInput.Key(
+      TerminalKey.Character("z"),
+      KeyModifiers(alt = true)
+    ))
+    editor.handleInputResult(TerminalInput.Key(
+      TerminalKey.Character("x"),
+      KeyModifiers(ctrl = true)
+    ))
+    editor.handleInputResult(TerminalInput.Key(
+      TerminalKey.Character("n"),
+      KeyModifiers(ctrl = true)
+    ))
+    editor.handleInputResult(TerminalInput.Key(
+      TerminalKey.Character("s"),
+      KeyModifiers(ctrl = true)
+    ))
 
     assertEquals(editor.text, "a\nc")
     assertEquals(submitted, "a\nc")
@@ -242,7 +279,10 @@ class EditorSuite extends munit.FunSuite:
         ),
         keybindings = KeybindingManager.fromRawBindings(
           Map(
-            "tui.select.down" -> Vector(KeyDescriptor(TerminalKey.Character("j"), KeyModifiers(alt = true)))
+            "tui.select.down" -> Vector(KeyDescriptor(
+              TerminalKey.Character("j"),
+              KeyModifiers(alt = true)
+            ))
           )
         ),
         onSubmit = text => submitted = text
@@ -250,7 +290,10 @@ class EditorSuite extends munit.FunSuite:
     )
 
     editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("/")))
-    editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("j"), KeyModifiers(alt = true)))
+    editor.handleInputResult(TerminalInput.Key(
+      TerminalKey.Character("j"),
+      KeyModifiers(alt = true)
+    ))
     assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Enter)), InputResult.Render)
     assertEquals(editor.text, "/quit ")
     assertEquals(submitted, "/quit ")
@@ -293,9 +336,15 @@ class EditorSuite extends munit.FunSuite:
     val editor = Editor("abcdefghijklmnopqrst")
     editor.render(1)
     editor.setCursor(EditorCursor(0, 10))
-    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.PageUp)), InputResult.Render)
+    assertEquals(
+      editor.handleInputResult(TerminalInput.Key(TerminalKey.PageUp)),
+      InputResult.Render
+    )
     assertEquals(editor.cursor, EditorCursor(0, 5))
-    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.PageDown)), InputResult.Render)
+    assertEquals(
+      editor.handleInputResult(TerminalInput.Key(TerminalKey.PageDown)),
+      InputResult.Render
+    )
     assertEquals(editor.cursor, EditorCursor(0, 10))
 
   test("jump keybinds jump to typed target characters"):
@@ -303,7 +352,10 @@ class EditorSuite extends munit.FunSuite:
     editor.render(1)
     editor.setCursor(EditorCursor(0, 0))
     assertEquals(
-      editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("]"), KeyModifiers(ctrl = true))),
+      editor.handleInputResult(TerminalInput.Key(
+        TerminalKey.Character("]"),
+        KeyModifiers(ctrl = true)
+      )),
       InputResult.NoRender
     )
     assertEquals(
@@ -314,7 +366,10 @@ class EditorSuite extends munit.FunSuite:
 
     editor.setCursor(EditorCursor(0, 3))
     assertEquals(
-      editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("]"), KeyModifiers(ctrl = true, alt = true))),
+      editor.handleInputResult(TerminalInput.Key(
+        TerminalKey.Character("]"),
+        KeyModifiers(ctrl = true, alt = true)
+      )),
       InputResult.NoRender
     )
     assertEquals(
@@ -390,21 +445,217 @@ class EditorSuite extends munit.FunSuite:
 
     assertEquals(editor.text, "/quit ")
 
-  test("editor autocomplete ignores stale async suggestions and cancels pending handles"):
-    final class ManualProvider extends AutocompleteProvider:
-      var callback  = Option.empty[AutocompleteCallback]
-      var cancelled = 0
-      override def requestSuggestions(
-          request: AutocompleteRequest,
-          callback: AutocompleteCallback
-      ): AutocompleteRequestHandle =
-        this.callback = Some(callback)
-        () => cancelled += 1
+  test("editor autocomplete debounces rapid typing and cancels stale in-flight work"):
+    var events    = Vector.empty[AutocompleteProbeEvent]
+    var scheduled = Vector.empty[() => Unit]
+    val provider  = recordingAutocompleteProvider(event => events :+= event)
+    val debouncer = recordingDebouncer(action => scheduled :+= action)
+    val editor    = Editor(
+      "/",
+      EditorOptions(
+        autocompleteProvider = Some(provider),
+        autocompleteTrigger = EditorAutocompleteTrigger.ExplicitTabOnly,
+        autocompleteDebouncer = debouncer
+      )
+    )
 
-      override def applyCompletion(request: CompletionRequest): CompletionResult =
-        AutocompleteProvider.defaultCompletion(request)
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Tab))
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("a")))
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("b")))
 
-    val provider = ManualProvider()
+    assertEquals(requested(events).map(_.request.lines.mkString("\n")), Vector("/"))
+    assertEquals(cancelled(events), Vector(0))
+    assertEquals(scheduled.length, 2)
+
+    requested(events).head.callback.complete(Some(autocomplete("/old", "/")))
+    assertEquals(editor.text, "/ab")
+
+    scheduled.head()
+    assertEquals(requested(events).map(_.request.lines.mkString("\n")), Vector("/"))
+
+    scheduled.last()
+    assertEquals(requested(events).map(_.request.lines.mkString("\n")), Vector("/", "/ab"))
+
+    requested(events)(1).callback.complete(Some(autocomplete("/abacus", "/ab")))
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Tab))
+    assertEquals(editor.text, "/abacus")
+
+  test("editor explicit tab bypasses pending debounced refresh for current text"):
+    var events    = Vector.empty[AutocompleteProbeEvent]
+    var scheduled = Vector.empty[() => Unit]
+    val provider  = recordingAutocompleteProvider(event => events :+= event)
+    val editor    = Editor(
+      "/",
+      EditorOptions(
+        autocompleteProvider = Some(provider),
+        autocompleteTrigger = EditorAutocompleteTrigger.ExplicitTabOnly,
+        autocompleteDebouncer = recordingDebouncer(action => scheduled :+= action)
+      )
+    )
+
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Tab))
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("x")))
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Tab))
+
+    assertEquals(requested(events).map(_.request.lines.mkString("\n")), Vector("/", "/x"))
+    assertEquals(requested(events).last.request.force, true)
+    assertEquals(cancelled(events), Vector(0))
+    assertEquals(scheduled.length, 1)
+
+    scheduled.last()
+    assertEquals(requested(events).map(_.request.lines.mkString("\n")), Vector("/", "/x"))
+
+  test("editor autocomplete ignores stale failure callbacks after newer requests"):
+    var events    = Vector.empty[AutocompleteProbeEvent]
+    var scheduled = Vector.empty[() => Unit]
+    val provider  = recordingAutocompleteProvider(event => events :+= event)
+    val editor    = Editor(
+      "/",
+      EditorOptions(
+        autocompleteProvider = Some(provider),
+        autocompleteTrigger = EditorAutocompleteTrigger.ExplicitTabOnly,
+        autocompleteDebouncer = recordingDebouncer(action => scheduled :+= action)
+      )
+    )
+
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Tab))
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("x")))
+    scheduled.last()
+    requested(events)(1).callback.complete(Some(autocomplete("/xray", "/x")))
+    requested(events).head.callback.fail(RuntimeException("late"))
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Tab))
+
+    assertEquals(cancelled(events), Vector(0))
+    assertEquals(editor.text, "/xray")
+
+  test("editor autocomplete keeps visible suggestions while refresh is pending"):
+    var events    = Vector.empty[AutocompleteProbeEvent]
+    var scheduled = Vector.empty[() => Unit]
+    val provider  = recordingAutocompleteProvider(event => events :+= event)
+    val terminal  = VirtualTerminal(40, 8)
+    val editor    = Editor(
+      "/",
+      EditorOptions(
+        autocompleteProvider = Some(provider),
+        autocompleteTrigger = EditorAutocompleteTrigger.ExplicitTabOnly,
+        autocompleteDebouncer = recordingDebouncer(action => scheduled :+= action)
+      )
+    )
+    val tui       = TUI(terminal)
+    tui.addChild(editor)
+    tui.setFocus(editor)
+    tui.start()
+    terminal.clearWrites()
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Tab))
+    requested(events).head.callback.complete(Some(autocomplete("/help", "/")))
+    tui.flushRender()
+    terminal.clearWrites()
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("h")))
+    terminal.clearWrites()
+    tui.requestRender(force = true)
+    tui.flushRender()
+
+    assert(visibleFrameLines(terminal.output).exists(_.contains("help")), terminal.output)
+
+    terminal.clearWrites()
+    scheduled.last()
+    requested(events)(1).callback.complete(Some(autocomplete("/hello", "/h")))
+    tui.flushRender()
+
+    val refreshed = visibleFrameLines(terminal.output)
+    assert(refreshed.exists(_.contains("hello")), terminal.output)
+    assert(!refreshed.exists(_.contains("help")), terminal.output)
+
+  test("editor autocomplete does not apply visible stale suggestions during refresh"):
+    var events    = Vector.empty[AutocompleteProbeEvent]
+    var scheduled = Vector.empty[() => Unit]
+    val provider  = recordingAutocompleteProvider(event => events :+= event)
+    val editor    = Editor(
+      "/",
+      EditorOptions(
+        autocompleteProvider = Some(provider),
+        autocompleteTrigger = EditorAutocompleteTrigger.ExplicitTabOnly,
+        autocompleteDebouncer = recordingDebouncer(action => scheduled :+= action)
+      )
+    )
+
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Tab))
+    requested(events).head.callback.complete(Some(autocomplete("/help", "/")))
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("h")))
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Tab))
+
+    assertEquals(editor.text, "/h")
+    assertEquals(scheduled.length, 1)
+    val requestCountAfterTab = requested(events).length
+    scheduled.last()
+    assertEquals(requested(events).length, requestCountAfterTab)
+
+  test("editor autocomplete closes visible suggestions when refresh has no replacement"):
+    var events    = Vector.empty[AutocompleteProbeEvent]
+    var scheduled = Vector.empty[() => Unit]
+    val provider  = recordingAutocompleteProvider(event => events :+= event)
+    val terminal  = VirtualTerminal(40, 8)
+    val editor    = Editor(
+      "/",
+      EditorOptions(
+        autocompleteProvider = Some(provider),
+        autocompleteTrigger = EditorAutocompleteTrigger.ExplicitTabOnly,
+        autocompleteDebouncer = recordingDebouncer(action => scheduled :+= action)
+      )
+    )
+    val tui       = TUI(terminal)
+    tui.addChild(editor)
+    tui.setFocus(editor)
+    tui.start()
+    terminal.clearWrites()
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Tab))
+    requested(events).head.callback.complete(Some(autocomplete("/help", "/")))
+    tui.flushRender()
+    terminal.clearWrites()
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("z")))
+    terminal.clearWrites()
+    tui.requestRender(force = true)
+    tui.flushRender()
+
+    assert(visibleFrameLines(terminal.output).exists(_.contains("help")), terminal.output)
+
+    terminal.clearWrites()
+    scheduled.last()
+    requested(events)(1).callback.complete(None)
+    tui.flushRender()
+
+    assert(!visibleFrameLines(terminal.output).exists(_.contains("help")), terminal.output)
+
+  test("editor autocomplete closes initial empty suggestions"):
+    var events   = Vector.empty[AutocompleteProbeEvent]
+    val provider = recordingAutocompleteProvider(event => events :+= event)
+    val terminal = VirtualTerminal(40, 8)
+    val editor   = Editor(
+      "/",
+      EditorOptions(
+        autocompleteProvider = Some(provider),
+        autocompleteTrigger = EditorAutocompleteTrigger.ExplicitTabOnly
+      )
+    )
+    val tui      = TUI(terminal)
+    tui.addChild(editor)
+    tui.setFocus(editor)
+    tui.start()
+    terminal.clearWrites()
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Tab))
+    requested(events).head.callback.complete(None)
+    tui.flushRender()
+
+    assert(!visibleFrameLines(terminal.output).exists(_.contains("help")), terminal.output)
+
+  test("editor provider replacement cancels pending autocomplete request"):
+    var events   = Vector.empty[AutocompleteProbeEvent]
+    val provider = recordingAutocompleteProvider(event => events :+= event)
     val editor   = Editor(
       "/",
       EditorOptions(
@@ -413,35 +664,33 @@ class EditorSuite extends munit.FunSuite:
       )
     )
 
-    editor.handleInputResult(TerminalInput.Key(TerminalKey.Tab))
-    editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("x")))
-    provider.callback.foreach(_.complete(Some(AutocompleteSuggestions(
-      Vector(AutocompleteItem("help", "help")),
-      "/"
-    ))))
-
-    assertEquals(provider.cancelled, 1)
-    assertEquals(editor.text, "/x")
-
-  test("editor autocomplete closes empty suggestions and provider replacement cancels request"):
-    final class EmptyProvider extends AutocompleteProvider:
-      var cancelled = 0
-      override def requestSuggestions(
-          request: AutocompleteRequest,
-          callback: AutocompleteCallback
-      ): AutocompleteRequestHandle =
-        callback.complete(None)
-        () => cancelled += 1
-
-      override def applyCompletion(request: CompletionRequest): CompletionResult =
-        AutocompleteProvider.defaultCompletion(request)
-
-    val provider = EmptyProvider()
-    val editor   = Editor("/", EditorOptions(autocompleteProvider = Some(provider)))
-
     assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Tab)), InputResult.Render)
     editor.setAutocompleteProvider(None)
 
+    assertEquals(cancelled(events), Vector(0))
+    assertEquals(editor.autocompleteProvider, None)
+
+  test("editor provider replacement cancels pending debounced autocomplete refresh"):
+    var events    = Vector.empty[AutocompleteProbeEvent]
+    var scheduled = Vector.empty[() => Unit]
+    val provider  = recordingAutocompleteProvider(event => events :+= event)
+    val editor    = Editor(
+      "/",
+      EditorOptions(
+        autocompleteProvider = Some(provider),
+        autocompleteTrigger = EditorAutocompleteTrigger.ExplicitTabOnly,
+        autocompleteDebouncer = recordingDebouncer(action => scheduled :+= action)
+      )
+    )
+
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Tab))
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("x")))
+    editor.setAutocompleteProvider(None)
+    val requestsBeforeScheduledAction = requested(events).length
+    scheduled.last()
+
+    assertEquals(cancelled(events), Vector(0))
+    assertEquals(requested(events).length, requestsBeforeScheduledAction)
     assertEquals(editor.autocompleteProvider, None)
 
   test("editor default autocomplete placement appears after single-line editor"):
@@ -507,6 +756,46 @@ class EditorSuite extends munit.FunSuite:
 
     val lines = visibleFrameLines(terminal.output)
     assertEquals(lines.indexWhere(_.contains("help")), 5)
+
+  private def autocomplete(value: String, prefix: String): AutocompleteSuggestions =
+    AutocompleteSuggestions(Vector(AutocompleteItem(value, value)), prefix)
+
+  private sealed trait AutocompleteProbeEvent derives CanEqual
+  private final case class Requested(
+      id: Int,
+      request: AutocompleteRequest,
+      callback: AutocompleteCallback
+  ) extends AutocompleteProbeEvent
+  private final case class Cancelled(id: Int) extends AutocompleteProbeEvent
+
+  private def recordingAutocompleteProvider(
+      record: AutocompleteProbeEvent => Unit
+  ): AutocompleteProvider =
+    var nextId = 0
+    new AutocompleteProvider:
+      override def requestSuggestions(
+          request: AutocompleteRequest,
+          callback: AutocompleteCallback
+      ): AutocompleteRequestHandle =
+        val id = nextId
+        nextId += 1
+        record(Requested(id, request, callback))
+        () => record(Cancelled(id))
+
+      override def applyCompletion(request: CompletionRequest): CompletionResult =
+        AutocompleteProvider.defaultCompletion(request)
+
+  private def recordingDebouncer(record: (() => Unit) => Unit): EditorAutocompleteDebouncer =
+    action =>
+      var cancelled = false
+      record(() => if !cancelled then action())
+      EditorAutocompleteDebouncer.Pending(() => cancelled = true)
+
+  private def requested(events: Vector[AutocompleteProbeEvent]): Vector[Requested] =
+    events.collect { case event: Requested => event }
+
+  private def cancelled(events: Vector[AutocompleteProbeEvent]): Vector[Int] =
+    events.collect { case Cancelled(id) => id }
 
   private def helpProvider: AutocompleteProvider =
     SlashCommandAutocompleteProvider(Vector(SlashCommand("help", Some("Show help"))))
