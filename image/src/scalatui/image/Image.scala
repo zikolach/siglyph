@@ -44,7 +44,10 @@ object ImageSource:
       else
         val bytes = Files.readAllBytes(path)
         fromBytes(bytes, Some(path.getFileName.toString))
-    catch case e: Throwable => Left(ImageHelperError.UnreadableFile(path, e.getMessage))
+    catch
+      case e: Throwable =>
+        val message = Option(e.getMessage).getOrElse(e.getClass.getSimpleName)
+        Left(ImageHelperError.UnreadableFile(path, message))
 
   def fromBytes(
       bytes: Array[Byte],
@@ -74,6 +77,8 @@ object ImageDimensionsSniffer:
 
   private def sniffPng(bytes: Array[Byte]): Either[ImageHelperError, ImageMetadata] =
     if bytes.length < 24 then Left(ImageHelperError.InvalidImage("PNG data is missing IHDR"))
+    else if ascii(bytes, 12, 4) !== "IHDR" then
+      Left(ImageHelperError.InvalidImage("PNG data is missing IHDR"))
     else
       Right(ImageMetadata(
         "image/png",

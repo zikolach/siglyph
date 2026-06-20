@@ -13,6 +13,17 @@ class KeybindingManagerSuite extends munit.FunSuite:
     )
   }
 
+  test("ignores key-release events when matching keybindings") {
+    val manager = KeybindingManager()
+    assert(!manager.matches(
+      TerminalInput.KeyEvent(
+        key = TerminalKey.Enter,
+        eventType = KeyEventType.Release
+      ),
+      KeybindingCommand.InputSubmit
+    ))
+  }
+
   test("supports override keybindings from typed command map") {
     val manager = KeybindingManager().withUserBindings(
       Map(

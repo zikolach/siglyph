@@ -13,6 +13,7 @@ import scalatui.terminal.{
   ImageDimensions,
   ImageProtocol,
   ImageRenderOptions,
+  KeyEventType,
   KeyModifiers,
   TerminalCapabilities,
   TerminalImageProtocol,
@@ -439,6 +440,34 @@ class TUISuite extends munit.FunSuite:
 
     assertEquals(thread.isAlive, false)
     assert(terminal.output.contains("\r\n\u001b[?25h"), terminal.output)
+
+  test("run does not exit on ctrl+c key release when component opts in"):
+    val terminal  = VirtualTerminal(20, 5)
+    val tui       = TUI(terminal)
+    val component = new Component:
+      override def wantsKeyRelease: Boolean                             = true
+      override def handleInputResult(input: TerminalInput): InputResult =
+        InputResult.NoRender
+      override def render(width: Int): Vector[String]                   = Vector("stable")
+    tui.addChild(component)
+    tui.setFocus(component)
+    val thread    = Thread(() => tui.run())
+    thread.start()
+    Thread.sleep(50)
+
+    terminal.sendInput(TerminalInput.KeyEvent(
+      TerminalKey.Character("c"),
+      KeyModifiers(ctrl = true),
+      KeyEventType.Release
+    ))
+    Thread.sleep(50)
+
+    assertEquals(thread.isAlive, true)
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("c"), KeyModifiers(ctrl = true)))
+    thread.join(1000)
+
+    assertEquals(thread.isAlive, false)
 
   test("visible overlay is composited over base content"):
     val terminal = VirtualTerminal(10, 3)

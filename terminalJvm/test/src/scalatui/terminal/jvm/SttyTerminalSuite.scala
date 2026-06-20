@@ -39,6 +39,12 @@ class SttyTerminalSuite extends munit.FunSuite:
     )
 
     terminal.requestKittyKeyboardProtocol(timeoutMillis = 0)
-    Thread.sleep(2)
+
+    val deadline = System.currentTimeMillis() + 1000L
+    while
+      terminal.keyboardProtocolState match
+        case KittyKeyboardProtocolState.Pending(_, _) => System.currentTimeMillis() < deadline
+        case _                                        => false
+    do Thread.sleep(1)
 
     assertEquals(terminal.keyboardProtocolState, KittyKeyboardProtocolState.Inactive)

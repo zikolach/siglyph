@@ -332,9 +332,9 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     stop()
 
   private def isCtrl(input: TerminalInput, char: String): Boolean = input match
-    case TerminalInput.Key(TerminalKey.Character(value), modifiers) =>
-      (value === char) && modifiers.ctrl
-    case _                                                          => false
+    case TerminalInput.KeyEvent(TerminalKey.Character(value), modifiers, eventType) =>
+      (eventType !== KeyEventType.Release) && (value === char) && modifiers.ctrl
+    case _                                                                          => false
 
   private def renderNow(): Unit =
     val width        = positiveDimension(terminal.columns)

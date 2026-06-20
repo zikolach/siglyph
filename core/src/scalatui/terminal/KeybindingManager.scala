@@ -66,9 +66,9 @@ enum KeybindingCommand(val id: String, val scope: KeybindingScope) derives CanEq
 final case class KeyDescriptor(key: TerminalKey, modifiers: KeyModifiers = KeyModifiers.empty)
     derives CanEqual:
   def matches(input: TerminalInput): Boolean = input match
-    case TerminalInput.Key(eventKey, eventModifiers) =>
-      eventKey === key && eventModifiers === modifiers
-    case _                                           => false
+    case TerminalInput.KeyEvent(eventKey, eventModifiers, eventType) =>
+      (eventType !== KeyEventType.Release) && eventKey === key && eventModifiers === modifiers
+    case _                                                           => false
 
 /**
  * Default command data.

@@ -71,6 +71,20 @@ class ImageSuite extends munit.FunSuite:
       Right(ImageMetadata("image/webp", ImageDimensions(19, 35)))
     )
 
+  test("dimension sniffer validates PNG IHDR chunk before reading dimensions"):
+    val bytes = pngBytes(width = 16, height = 32)
+    bytes(12) = 'N'.toByte
+    bytes(13) = 'O'.toByte
+    bytes(14) = 'T'.toByte
+    bytes(15) = 'H'.toByte
+
+    assert(
+      ImageDimensionsSniffer.sniff(bytes)
+        .left
+        .exists(_.isInstanceOf[ImageHelperError.InvalidImage]),
+      bytes.toString
+    )
+
   test("dimension sniffer reports invalid and unsupported bytes safely"):
     assert(ImageDimensionsSniffer.sniff(Array[Byte](1, 2, 3)).left.exists(
       _.isInstanceOf[ImageHelperError.InvalidImage]
