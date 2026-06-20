@@ -1,7 +1,7 @@
 # autocomplete Specification
 
 ## Purpose
-TBD - created by archiving change add-editor-autocomplete-overlay. Update Purpose after archive.
+Defines backend-independent autocomplete models, provider contracts, completion application, path and slash-command helpers, cancellation behavior, overlay interaction, and keybinding integration.
 ## Requirements
 ### Requirement: Autocomplete item and suggestion models
 The library SHALL expose backend-independent autocomplete data models for request context, selectable items, suggestion groups, and completion results in the shared core API.
