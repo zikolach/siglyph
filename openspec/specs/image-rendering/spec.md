@@ -1,7 +1,7 @@
 # image-rendering Specification
 
 ## Purpose
-TBD - created by archiving change port-missing-pi-tui-components. Update Purpose after archive.
+Defines terminal image capability detection, Kitty/iTerm2 image protocol output, optional image helper module behavior, fallback rendering, cache-aware cleanup, and width-safe mixed output.
 ## Requirements
 ### Requirement: Image component for Kitty/iTerm2 protocols
 The library SHALL expose core image capability/protocol contracts and an optional image component/helper module that can emit terminal image escapes for Kitty and iTerm2 when supported.

@@ -1,7 +1,7 @@
 # keybinding-management Specification
 
 ## Purpose
-TBD - created by archiving change complete-editor-keybinding-parity. Update Purpose after archive.
+Defines backend-independent keybinding models, upstream-compatible default command bindings, custom override behavior, conflict reporting, and typed input matching.
 ## Requirements
 ### Requirement: Backend-independent keybinding manager
 The library SHALL expose shared core keybinding models and a keybinding manager that match typed terminal input events to named TUI commands without depending on JVM-only, Native-only, Node.js, or third-party runtime APIs.
