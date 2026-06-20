@@ -77,6 +77,20 @@ class MarkdownRendererSuite extends munit.FunSuite:
     assert(lines.exists(_.contains("\u001b]8;;https://example.test\u0007label\u001b]8;;\u0007")))
     assert(lines.forall(line => Ansi.visibleWidth(line) <= 80), lines.mkString("\n"))
 
+  test("hyperlink-capable rendering falls back for unsafe link URLs"):
+    val renderer = BasicMarkdownRenderer(options =
+      MarkdownRenderOptions(
+        capabilities = TerminalCapabilities(trueColor = true, hyperlinks = true, images = None)
+      )
+    )
+
+    val lines = renderer.render("[label](https://example.test\u0007\u001b[31mbad)", 80)
+    val raw   = lines.mkString("\n")
+
+    assert(!raw.contains("\u001b]8;;"), raw)
+    assert(!raw.exists(Character.isISOControl), raw)
+    assert(raw.contains("label (https://example.test[31mbad)"), raw)
+
   test("non-hyperlink rendering keeps readable link fallback"):
     val lines = BasicMarkdownRenderer.default.render("[label](https://example.test)", 80)
 

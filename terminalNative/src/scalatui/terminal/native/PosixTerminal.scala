@@ -112,6 +112,7 @@ final class PosixTerminal(
   override def clearScreen(): Unit     = write("\u001b[2J\u001b[H")
 
   override def keyboardProtocolState: KittyKeyboardProtocolState =
+    keyboardProtocolNegotiator.expire(System.currentTimeMillis())
     keyboardProtocolNegotiator.state
 
   override def requestKittyKeyboardProtocol(timeoutMillis: Long): Unit =
@@ -122,7 +123,9 @@ final class PosixTerminal(
       response: String,
       nowMillis: Long
   ): Boolean =
-    keyboardProtocolNegotiator.receiveResponse(response, nowMillis)
+    val accepted = keyboardProtocolNegotiator.receiveResponse(response, nowMillis)
+    if accepted then write(KittyKeyboardProtocol.EnableSequence)
+    accepted
 
   override def disableKittyKeyboardProtocol(): Unit =
     if keyboardProtocolState !== KittyKeyboardProtocolState.Inactive then

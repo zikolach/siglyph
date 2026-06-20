@@ -92,6 +92,11 @@ object core extends SiglyphPublishModule {
 object terminalJvm extends SiglyphPublishModule {
   def artifactName = "siglyph-terminal-jvm"
   def moduleDeps   = Seq(core)
+
+  object test extends ScalaTests {
+    def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
+    def testFramework = "munit.Framework"
+  }
 }
 
 object coreNative extends ScalaNativeModule {

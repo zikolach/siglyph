@@ -70,9 +70,13 @@ class TerminalInputParserSuite extends munit.FunSuite:
     assertEquals(negotiator.state, KittyKeyboardProtocolState.Inactive)
 
     negotiator.begin(nowMillis = 2000, timeoutMillis = 10)
-    assertEquals(negotiator.receiveResponse("\u001b[?not-a-response", nowMillis = 2001), false)
-    assertEquals(negotiator.state, KittyKeyboardProtocolState.Pending(2L, 2010L))
-    assertEquals(negotiator.receiveResponse("\u001b[?3u", nowMillis = 2002), true)
+    assertEquals(negotiator.receiveResponse("\u001b[?3u", nowMillis = 2011), false)
+    assertEquals(negotiator.state, KittyKeyboardProtocolState.Inactive)
+
+    negotiator.begin(nowMillis = 3000, timeoutMillis = 10)
+    assertEquals(negotiator.receiveResponse("\u001b[?not-a-response", nowMillis = 3001), false)
+    assertEquals(negotiator.state, KittyKeyboardProtocolState.Pending(3L, 3010L))
+    assertEquals(negotiator.receiveResponse("\u001b[?3u", nowMillis = 3002), true)
     assertEquals(negotiator.state, KittyKeyboardProtocolState.Active(3))
 
   test("parses xterm modifyOtherKeys"):

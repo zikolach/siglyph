@@ -33,6 +33,9 @@ final class KittyKeyboardProtocolNegotiator:
           current = KittyKeyboardProtocolState.Active(flags)
           true
         case None        => false
+    case pending: KittyKeyboardProtocolState.Pending if nowMillis > pending.deadlineMillis  =>
+      current = KittyKeyboardProtocolState.Inactive
+      false
     case _                                                                                  => false
 
   def expire(nowMillis: Long): Unit = current match

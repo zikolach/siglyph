@@ -73,6 +73,7 @@ final class SttyTerminal(
   override def rows: Int    = currentRows
 
   override def keyboardProtocolState: KittyKeyboardProtocolState =
+    keyboardProtocolNegotiator.expire(System.currentTimeMillis())
     keyboardProtocolNegotiator.state
 
   override def requestKittyKeyboardProtocol(timeoutMillis: Long): Unit =
@@ -83,7 +84,9 @@ final class SttyTerminal(
       response: String,
       nowMillis: Long
   ): Boolean =
-    keyboardProtocolNegotiator.receiveResponse(response, nowMillis)
+    val accepted = keyboardProtocolNegotiator.receiveResponse(response, nowMillis)
+    if accepted then write(KittyKeyboardProtocol.EnableSequence)
+    accepted
 
   override def disableKittyKeyboardProtocol(): Unit =
     if keyboardProtocolState !== KittyKeyboardProtocolState.Inactive then

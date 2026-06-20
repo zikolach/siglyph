@@ -288,10 +288,14 @@ final class BasicMarkdownRenderer(
       }
 
   private def renderLink(label: String, url: String): String =
-    if options.capabilities.hyperlinks then
+    val safeUrl = stripTerminalControls(url)
+    if options.capabilities.hyperlinks && safeUrl === url then
       val styledLabel = styled(options.theme.link(label, url))
       s"\u001b]8;;$url\u0007$styledLabel\u001b]8;;\u0007"
-    else styled(options.theme.linkFallback(label, url))
+    else styled(options.theme.linkFallback(label, safeUrl))
+
+  private def stripTerminalControls(value: String): String =
+    value.filterNot(ch => Character.isISOControl(ch))
 
   private def styled(value: String): String =
     if value.contains("\u001b[") && !value.endsWith(Ansi.Reset) then value + Ansi.Reset else value
