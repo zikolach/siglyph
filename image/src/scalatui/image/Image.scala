@@ -12,6 +12,7 @@ import scalatui.terminal.{
   TerminalImageProtocol
 }
 
+import java.io.IOException
 import java.nio.file.{Files, Path}
 import java.util.Base64
 
@@ -45,7 +46,10 @@ object ImageSource:
         val bytes = Files.readAllBytes(path)
         fromBytes(bytes, Some(path.getFileName.toString))
     catch
-      case e: Throwable =>
+      case e: IOException       =>
+        val message = Option(e.getMessage).getOrElse(e.getClass.getSimpleName)
+        Left(ImageHelperError.UnreadableFile(path, message))
+      case e: SecurityException =>
         val message = Option(e.getMessage).getOrElse(e.getClass.getSimpleName)
         Left(ImageHelperError.UnreadableFile(path, message))
 

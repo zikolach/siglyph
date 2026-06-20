@@ -15,6 +15,7 @@ import scalatui.core.{
 import scalatui.matching.FuzzyMatcher
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{TerminalInput, TerminalKey}
+import scalatui.unicode.Unicode
 
 /** Controller passed to application-provided settings submenu components. */
 trait SettingsSubmenuController:
@@ -169,7 +170,7 @@ final class SettingsList(
       InputResult.Render
     case TerminalInput.Key(TerminalKey.Backspace, _)
         if options.effectiveFiltering.enabled && filterQuery.nonEmpty =>
-      filterQuery = filterQuery.dropRight(1)
+      filterQuery = dropLastGrapheme(filterQuery)
       clampSelection()
       InputResult.Render
     case TerminalInput.Key(TerminalKey.Character(text), modifiers)
@@ -232,6 +233,9 @@ final class SettingsList(
 
   private def searchableText(item: SettingItem): String =
     item.id + "\n" + item.label + "\n" + item.currentValue + "\n" + item.description.getOrElse("")
+
+  private def dropLastGrapheme(value: String): String =
+    Unicode.graphemeClusters(value).dropRight(1).mkString
 
   private def selectedEntry: Option[IndexedSetting] = filteredEntries.lift(selectedIndex)
 

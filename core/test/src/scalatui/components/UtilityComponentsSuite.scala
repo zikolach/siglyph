@@ -342,6 +342,18 @@ class UtilityComponentsSuite extends munit.FunSuite:
     list.handleInput(TerminalInput.Key(TerminalKey.Backspace))
     assertEquals(list.query, "c")
 
+  test("settings list filter backspace deletes one grapheme cluster"):
+    val list = SettingsList(
+      Vector(SettingItem("emoji", "Emoji", "on")),
+      SettingsListOptions(filteringEnabled = true, showHints = false)
+    )
+
+    list.handleInput(TerminalInput.Key(TerminalKey.Character("a")))
+    list.handleInput(TerminalInput.Key(TerminalKey.Character("👨‍👩‍👧‍👦")))
+    list.handleInput(TerminalInput.Key(TerminalKey.Backspace))
+
+    assertEquals(list.query, "a")
+
   test("settings list fuzzy filtering ranks rows width-safely"):
     val list = SettingsList(
       Vector(
