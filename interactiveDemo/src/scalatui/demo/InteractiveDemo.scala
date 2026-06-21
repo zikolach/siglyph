@@ -69,8 +69,10 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
   private enum FileModeAction derives CanEqual:
     case Preview, OpenInEditor
 
-  private var mode  = DemoMode.EditorMode
-  private var focus = Focus.EditorPane
+  private var mode                               = DemoMode.EditorMode
+  private var focus                              = Focus.EditorPane
+  private var terminalSchemeNotificationsEnabled = false
+  private var terminalQueryCounter               = 0
 
   // ---------- Shared editor showcase ----------
   private val workspaceRoot = DemoRoot.findWorkspaceRoot(File(System.getProperty("user.dir")))
@@ -114,6 +116,12 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
       SelectItem("expand-paste", "Expand paste markers"),
       SelectItem("tick-loader", "Tick loader"),
       SelectItem("cancel-loader", "Cancel loader"),
+      SelectItem("terminal-title", "Set terminal title"),
+      SelectItem("terminal-progress-on", "Progress on"),
+      SelectItem("terminal-progress-off", "Progress off"),
+      SelectItem("terminal-background", "Query background color"),
+      SelectItem("terminal-scheme", "Query color scheme"),
+      SelectItem("terminal-notifications", "Toggle scheme notifications"),
       SelectItem("quit", "Quit")
     ),
     SelectListOptions(
@@ -186,6 +194,11 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
     messages :+= s"Setting changed: $id = $value"
     updateMessages()
   fileManagerPathInput.onSubmit = text => navigateToPathFromInput(text)
+  tui.onTerminalColorSchemeChange { scheme =>
+    addDemoMessage(s"Terminal color-scheme notification: ${scheme.value}")
+    tui.requestRender()
+    tui.flushRender()
+  }
 
   cancellable.onCancel = () => cancellable.setMessage("Cancelled")
   loader.start()
@@ -197,24 +210,53 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
 
   private def handleAction(item: SelectItem): Unit =
     item.value match
-      case "submit"        => addMessage(editor.text)
-      case "clear"         =>
+      case "submit"                 => addMessage(editor.text)
+      case "clear"                  =>
         messages = Vector.empty
         updateMessages()
-      case "large-paste"   =>
+      case "large-paste"            =>
         editor.handleInput(
           TerminalInput.Paste((1 to 12).map(i => s"pasted line $i").mkString("\n"))
         )
         focus = Focus.EditorPane
         updateEditorFocus()
-      case "expand-paste"  =>
+      case "expand-paste"           =>
         editor.expandPasteMarkers()
         focus = Focus.EditorPane
         updateEditorFocus()
-      case "tick-loader"   => loader.tick()
-      case "cancel-loader" => cancellable.cancel()
-      case "quit"          => tui.requestExit()
-      case _               => ()
+      case "tick-loader"            => loader.tick()
+      case "cancel-loader"          => cancellable.cancel()
+      case "terminal-title"         =>
+        val applied = tui.setTerminalTitle("siglyph demo")
+        addDemoMessage(s"Terminal title ${supportLabel(applied)}: siglyph demo")
+      case "terminal-progress-on"   =>
+        addDemoMessage(
+          s"Terminal progress on ${supportLabel(tui.setTerminalProgress(active = true))}"
+        )
+      case "terminal-progress-off"  =>
+        addDemoMessage(
+          s"Terminal progress off ${supportLabel(tui.setTerminalProgress(active = false))}"
+        )
+      case "terminal-background"    =>
+        runTerminalQuery("background color") {
+          tui.queryTerminalBackgroundColor(timeoutMillis = 500).fold("no reply") { color =>
+            s"rgb(${color.red}, ${color.green}, ${color.blue})"
+          }
+        }
+      case "terminal-scheme"        =>
+        runTerminalQuery("color scheme") {
+          tui.queryTerminalColorScheme(timeoutMillis = 500).fold("no reply")(_.value)
+        }
+      case "terminal-notifications" =>
+        terminalSchemeNotificationsEnabled = !terminalSchemeNotificationsEnabled
+        tui.setTerminalColorSchemeNotifications(terminalSchemeNotificationsEnabled)
+        addDemoMessage(
+          s"Terminal color-scheme notifications ${
+              if terminalSchemeNotificationsEnabled then "on" else "off"
+            }"
+        )
+      case "quit"                   => tui.requestExit()
+      case _                        => ()
 
   override def handleInput(event: TerminalInput): Unit =
     event match
@@ -331,6 +373,16 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
     frame.addComponent(actions)
     frame.addLine(fit(
       s"Loader: ${plainLoaderLine(loader, width)} | ${plainLoaderLine(cancellable, width)}",
+      width
+    ))
+    frame.addLines(Vector(
+      "",
+      fit("Terminal integration:", width)
+    ))
+    frame.addLines(Ansi.wrapTextWithAnsi(
+      s"Actions can set title, toggle OSC 9;4 progress, query background/color scheme, and toggle scheme notifications. Notifications: ${
+          if terminalSchemeNotificationsEnabled then "on" else "off"
+        }.",
       width
     ))
     frame.addLines(Vector(
@@ -619,13 +671,37 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
         updateMessages()
       else if trimmed === "/quit" then tui.requestExit()
       else if trimmed === "/help" then
-        messages :+= "Autocomplete examples: /help, ./ filesystem paths, @ attachments, #bug/#docs/#demo/#release-notes tags"
+        addDemoMessage(
+          "Autocomplete examples: /help, ./ filesystem paths, @ attachments, #bug/#docs/#demo/#release-notes tags"
+        )
         editor.setText("")
-        updateMessages()
       else
-        messages :+= value
+        addDemoMessage(value)
         editor.setText("")
-        updateMessages()
+
+  private def addDemoMessage(value: String): Unit = this.synchronized {
+    messages :+= value
+    updateMessages()
+  }
+
+  private def runTerminalQuery(label: String)(query: => String): Unit =
+    terminalQueryCounter += 1
+    val queryId = terminalQueryCounter
+    addDemoMessage(s"Terminal $label query #$queryId started")
+    val thread  = Thread(
+      () =>
+        val result = query
+        addDemoMessage(s"Terminal $label query #$queryId: $result")
+        tui.requestRender()
+        tui.flushRender()
+      ,
+      s"siglyph-demo-terminal-$label-query-$queryId"
+    )
+    thread.setDaemon(true)
+    thread.start()
+
+  private def supportLabel(applied: Boolean): String =
+    if applied then "supported" else "unsupported"
 
   private def updateMessages(): Unit =
     messagesText.text =

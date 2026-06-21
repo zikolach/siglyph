@@ -150,6 +150,38 @@ class InteractiveDemoSuite extends munit.FunSuite:
 
     assert(Ansi.strip(terminal.output).contains("! Cancelled"), Ansi.strip(terminal.output))
 
+  test("interactive demo exposes terminal integration actions"):
+    val terminal = VirtualTerminal(100, 24)
+    val tui      = TUI(terminal)
+    InteractiveDemo.install(tui)
+    tui.start()
+
+    assert(
+      Ansi.strip(terminal.output).contains("Terminal integration"),
+      Ansi.strip(terminal.output)
+    )
+    terminal.clearWrites()
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("t"), KeyModifiers(ctrl = true)))
+    (1 to 6).foreach(_ => terminal.sendInput(TerminalInput.Key(TerminalKey.Down)))
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Enter))
+
+    assert(terminal.output.contains("\u001b]0;siglyph demo\u0007"), terminal.output)
+    assert(
+      Ansi.strip(terminal.output).contains("Terminal title supported"),
+      Ansi.strip(terminal.output)
+    )
+
+    terminal.clearWrites()
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Down))
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Enter))
+
+    assert(terminal.output.contains("\u001b]9;4;3\u0007"), terminal.output)
+    assert(
+      Ansi.strip(terminal.output).contains("Terminal progress on supported"),
+      Ansi.strip(terminal.output)
+    )
+
   test("interactive demo keeps autocomplete overlay safe during narrow resize"):
     val terminal = VirtualTerminal(60, 20)
     val tui      = TUI(terminal)
