@@ -50,6 +50,27 @@ class TUISuite extends munit.FunSuite:
     override def clearFromCursor(): Unit  = ()
     override def clearScreen(): Unit      = ()
 
+  final class StopCleanupFailingTerminal(failingWrite: String) extends Terminal:
+    @volatile var showCursorCalled = false
+    @volatile var stopCalled       = false
+
+    override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit = ()
+
+    override def stop(): Unit = stopCalled = true
+
+    override def write(data: String): Unit =
+      if data.equals(failingWrite) then throw RuntimeException("write failed")
+
+    override def columns: Int = 20
+    override def rows: Int    = 5
+
+    override def moveBy(lines: Int): Unit = ()
+    override def hideCursor(): Unit       = ()
+    override def showCursor(): Unit       = showCursorCalled = true
+    override def clearLine(): Unit        = ()
+    override def clearFromCursor(): Unit  = ()
+    override def clearScreen(): Unit      = ()
+
   test("first render writes full frame with synchronized output"):
     val terminal = VirtualTerminal(20, 5)
     val tui      = TUI(terminal)
@@ -639,6 +660,26 @@ class TUISuite extends munit.FunSuite:
 
     assertEquals(thread.isAlive, false)
     assert(terminal.output.contains("\r\n\u001b[?25h"), terminal.output)
+
+  test("stop restores cursor stops terminal and notifies run when cleanup write fails"):
+    val terminal = StopCleanupFailingTerminal(TerminalColorProtocol.DisableColorSchemeNotifications)
+    val tui      = TUI(terminal)
+    tui.setTerminalColorSchemeNotifications(enabled = true)
+    val failure  = AtomicReference[Throwable](null)
+    val thread   = Thread(() =>
+      try tui.run()
+      catch case e: Throwable => failure.set(e)
+    )
+    thread.start()
+    Thread.sleep(50)
+
+    intercept[RuntimeException](tui.stop())
+    thread.join(1000)
+
+    assertEquals(thread.isAlive, false)
+    assertEquals(failure.get(), null)
+    assertEquals(terminal.showCursorCalled, true)
+    assertEquals(terminal.stopCalled, true)
 
   test("run does not exit on ctrl+c key release when component opts in"):
     val terminal  = VirtualTerminal(20, 5)

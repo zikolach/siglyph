@@ -240,20 +240,23 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   def stop(): Unit = lifecycleLock.synchronized {
     if running then
       running = false
-      if previousLines.nonEmpty then
-        val builder = StringBuilder()
-        appendVerticalMove(
-          builder,
-          fromRow = cursorRow,
-          toRow = math.max(0, previousLines.length - 1)
-        )
-        builder.append("\r\n")
-        terminal.write(builder.result())
-      if terminalColorSchemeNotificationsEnabled then
-        terminal.write(TerminalColorProtocol.DisableColorSchemeNotifications)
-      terminal.showCursor()
-      terminal.stop()
-      lifecycleLock.notifyAll()
+      try
+        if previousLines.nonEmpty then
+          val builder = StringBuilder()
+          appendVerticalMove(
+            builder,
+            fromRow = cursorRow,
+            toRow = math.max(0, previousLines.length - 1)
+          )
+          builder.append("\r\n")
+          terminal.write(builder.result())
+        if terminalColorSchemeNotificationsEnabled then
+          terminal.write(TerminalColorProtocol.DisableColorSchemeNotifications)
+      finally
+        try terminal.showCursor()
+        finally
+          try terminal.stop()
+          finally lifecycleLock.notifyAll()
   }
 
   override def requestRender(force: Boolean = false): Unit = lifecycleLock.synchronized {
