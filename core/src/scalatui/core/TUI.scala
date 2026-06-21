@@ -508,7 +508,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
       fullRender(frame, width, height, clear = shouldClear)
     else if widthChanged || heightChanged then
       clearRequested = false
-      redrawFromFrameStart(frame, width, height)
+      fullRender(frame, width, height, clear = true)
     else
       clearRequested = false
       val firstChanged = firstChangedLine(previousLines, newLines)
@@ -527,20 +527,6 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     val builder = StringBuilder()
     builder.append(SyncStart)
     if clear then builder.append("\u001b[2J\u001b[H\u001b[3J")
-    builder.append(frame.lines.mkString("\r\n"))
-    appendHardwareCursorMove(builder, frame)
-    builder.append(SyncEnd)
-    terminal.write(builder.result())
-    previousLines = frame.lines
-    previousWidth = width
-    previousHeight = height
-    cursorRow = finalCursorRow(frame)
-
-  private def redrawFromFrameStart(frame: CursorMarker.ScanResult, width: Int, height: Int): Unit =
-    val builder = StringBuilder()
-    builder.append(SyncStart)
-    appendVerticalMove(builder, fromRow = cursorRow, toRow = 0)
-    builder.append("\r\u001b[J")
     builder.append(frame.lines.mkString("\r\n"))
     appendHardwareCursorMove(builder, frame)
     builder.append(SyncEnd)
