@@ -1,7 +1,5 @@
 package scalatui.components
 
-import java.util.Locale
-
 import scalatui.ansi.Ansi
 import scalatui.core.{
   Component,
@@ -15,7 +13,7 @@ import scalatui.core.{
 import scalatui.matching.FuzzyMatcher
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{TerminalInput, TerminalKey}
-import scalatui.unicode.Unicode
+import scalatui.unicode.{TextCase, Unicode}
 
 /** Controller passed to application-provided settings submenu components. */
 trait SettingsSubmenuController:
@@ -224,10 +222,8 @@ final class SettingsList(
       case SettingsListFiltering.Disabled    => indexed
       case _ if filterQuery.isEmpty          => indexed
       case SettingsListFiltering.Containment =>
-        val needle = filterQuery.toLowerCase(Locale.ROOT)
-        indexed.filter(entry =>
-          searchableText(entry.item).toLowerCase(Locale.ROOT).indexOf(needle) >= 0
-        )
+        val needle = TextCase.lowercase(filterQuery)
+        indexed.filter(entry => TextCase.lowercase(searchableText(entry.item)).indexOf(needle) >= 0)
       case SettingsListFiltering.Fuzzy       =>
         FuzzyMatcher.filter(filterQuery, indexed)(entry => searchableText(entry.item)).map(_.item)
 
