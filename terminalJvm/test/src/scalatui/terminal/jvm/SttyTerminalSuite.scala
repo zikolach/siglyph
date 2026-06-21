@@ -1,10 +1,46 @@
 package scalatui.terminal.jvm
 
-import scalatui.terminal.{KittyKeyboardProtocol, KittyKeyboardProtocolState}
+import scalatui.terminal.{KittyKeyboardProtocol, KittyKeyboardProtocolState, Terminal}
 
 import java.io.{ByteArrayOutputStream, InputStream}
 
 class SttyTerminalSuite extends munit.FunSuite:
+  test("title and progress support writes terminal protocol sequences"):
+    val output   = ByteArrayOutputStream()
+    val terminal = SttyTerminal(
+      input = InputStream.nullInputStream(),
+      output = output,
+      columnsOverride = Some(80),
+      rowsOverride = Some(24),
+      sizeQuery = () => Some(24 -> 80)
+    )
+
+    assertEquals(Terminal.setTitle(terminal, "safe\u001btitle"), true)
+    assertEquals(Terminal.setProgress(terminal, active = true), true)
+    assertEquals(Terminal.setProgress(terminal, active = false), true)
+
+    val written = output.toString(java.nio.charset.StandardCharsets.UTF_8)
+    assert(written.contains("\u001b]0;safetitle\u0007"), written)
+    assert(written.contains(Terminal.ProgressActiveSequence), written)
+    assert(written.contains(Terminal.ProgressClearSequence), written)
+
+  test("direct title support sanitizes control characters"):
+    val output   = ByteArrayOutputStream()
+    val terminal = SttyTerminal(
+      input = InputStream.nullInputStream(),
+      output = output,
+      columnsOverride = Some(80),
+      rowsOverride = Some(24),
+      sizeQuery = () => Some(24 -> 80)
+    )
+
+    terminal.setTitle("safe\u001btitle\u0007")
+
+    assertEquals(
+      output.toString(java.nio.charset.StandardCharsets.UTF_8),
+      "\u001b]0;safetitle\u0007"
+    )
+
   test("Kitty keyboard negotiation writes enable sequence after accepted response"):
     val output   = ByteArrayOutputStream()
     val terminal = SttyTerminal(

@@ -8,7 +8,9 @@ import scalatui.terminal.{
   KittyKeyboardProtocolTerminal,
   Terminal,
   TerminalInput,
-  TerminalInputBuffer
+  TerminalInputBuffer,
+  TerminalProgressSupport,
+  TerminalTitleSupport
 }
 
 import scala.scalanative.unsafe.*
@@ -31,7 +33,9 @@ final class PosixTerminal(
     initialColumns: Int = PosixTerminal.envInt("COLUMNS").getOrElse(80),
     initialRows: Int = PosixTerminal.envInt("LINES").getOrElse(24)
 ) extends Terminal,
-      KittyKeyboardProtocolTerminal:
+      KittyKeyboardProtocolTerminal,
+      TerminalTitleSupport,
+      TerminalProgressSupport:
   private type Winsize = CStruct4[CUnsignedShort, CUnsignedShort, CUnsignedShort, CUnsignedShort]
   @volatile private var running                             = false
   @volatile private var resizePolling                       = false
@@ -110,6 +114,11 @@ final class PosixTerminal(
   override def clearLine(): Unit       = write("\u001b[K")
   override def clearFromCursor(): Unit = write("\u001b[J")
   override def clearScreen(): Unit     = write("\u001b[2J\u001b[H")
+
+  override def setTitle(title: String): Unit = write(Terminal.titleSequence(title))
+
+  override def setProgress(active: Boolean): Unit =
+    write(if active then Terminal.ProgressActiveSequence else Terminal.ProgressClearSequence)
 
   override def keyboardProtocolState: KittyKeyboardProtocolState =
     keyboardProtocolNegotiator.expire(System.currentTimeMillis())

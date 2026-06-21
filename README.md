@@ -22,10 +22,10 @@ Published artifacts are available on Maven Central. GitHub Packages and GitHub R
 
 ```scala
 libraryDependencies ++= Seq(
-  "io.github.zikolach" %% "siglyph-core" % "0.1.2",
-  "io.github.zikolach" %% "siglyph-terminal-jvm" % "0.1.2",
-  "io.github.zikolach" %% "siglyph-markdown" % "0.1.2",
-  "io.github.zikolach" %% "siglyph-image" % "0.1.2"
+  "io.github.zikolach" %% "siglyph-core" % "0.2.0",
+  "io.github.zikolach" %% "siglyph-terminal-jvm" % "0.2.0",
+  "io.github.zikolach" %% "siglyph-markdown" % "0.2.0",
+  "io.github.zikolach" %% "siglyph-image" % "0.2.0"
 )
 ```
 
@@ -36,10 +36,10 @@ object app extends ScalaModule {
   def scalaVersion = "3.7.4"
 
   def mvnDeps = Seq(
-    mvn"io.github.zikolach::siglyph-core::0.1.2",
-    mvn"io.github.zikolach::siglyph-terminal-jvm::0.1.2",
-    mvn"io.github.zikolach::siglyph-markdown::0.1.2",
-    mvn"io.github.zikolach::siglyph-image::0.1.2"
+    mvn"io.github.zikolach::siglyph-core::0.2.0",
+    mvn"io.github.zikolach::siglyph-terminal-jvm::0.2.0",
+    mvn"io.github.zikolach::siglyph-markdown::0.2.0",
+    mvn"io.github.zikolach::siglyph-image::0.2.0"
   )
 }
 ```
@@ -127,6 +127,30 @@ Markdown rendering stays in `siglyph-markdown`. The baseline renderer is depende
 
 Image rendering stays in `siglyph-image`. `ImageSource.fromFile(path)` loads supported PNG, JPEG, GIF, and WebP files into base64 data, MIME type, and dimensions for the existing `Image` component contract. Unsupported terminals render readable fallback text.
 
+## Terminal integration helpers
+
+`TUI` exposes optional terminal integration helpers for supported interactive backends:
+
+```scala
+val tui = TUI(SttyTerminal())
+val unsubscribe = tui.onTerminalColorSchemeChange { scheme =>
+  println(s"terminal scheme changed to ${scheme.value}")
+}
+
+tui.start()
+try
+  val titleApplied = tui.setTerminalTitle("siglyph")
+  val progressApplied = tui.setTerminalProgress(active = true)
+  val background = tui.queryTerminalBackgroundColor(timeoutMillis = 500)
+  val scheme = tui.queryTerminalColorScheme(timeoutMillis = 500)
+  tui.setTerminalColorSchemeNotifications(enabled = true)
+finally
+  unsubscribe()
+  tui.stop()
+```
+
+Title and progress helpers return `false` when the backend does not support the protocol. Color queries and notifications require a started TUI so the backend can read and deliver terminal replies. `TUI` owns query correlation, timeouts, and protocol-reply interception before focused components receive input.
+
 ## Demos
 
 The demos are the best starting point for real usage:
@@ -134,9 +158,11 @@ The demos are the best starting point for real usage:
 | Command | Source | What it shows |
 | --- | --- | --- |
 | `mill demo.run` | [`demo/src/scalatui/demo/MvpDemo.scala`](demo/src/scalatui/demo/MvpDemo.scala) | non-interactive rendering through `StreamTerminal` |
-| `mill interactiveJvmDemo.run` | [`interactiveJvmDemo/src/scalatui/demo/InteractiveJvmDemo.scala`](interactiveJvmDemo/src/scalatui/demo/InteractiveJvmDemo.scala) + [`interactiveDemo/src/scalatui/demo/InteractiveDemo.scala`](interactiveDemo/src/scalatui/demo/InteractiveDemo.scala) | interactive JVM app, editor, autocomplete, rich SelectList/SettingsList behavior, file-manager mode, loaders, resize-safe rendering |
-| `mill interactiveNativeDemo.nativeLink` | [`interactiveNativeDemo/src/scalatui/demo/InteractiveNativeDemo.scala`](interactiveNativeDemo/src/scalatui/demo/InteractiveNativeDemo.scala) | Scala Native launcher for the shared interactive demo |
+| `mill interactiveJvmDemo.run` | [`interactiveJvmDemo/src/scalatui/demo/InteractiveJvmDemo.scala`](interactiveJvmDemo/src/scalatui/demo/InteractiveJvmDemo.scala) + [`interactiveDemo/src/scalatui/demo/InteractiveDemo.scala`](interactiveDemo/src/scalatui/demo/InteractiveDemo.scala) | interactive JVM app, editor, autocomplete, rich SelectList/SettingsList behavior, file-manager mode, loaders, terminal integration helpers, resize-safe rendering |
+| `mill interactiveNativeDemo.nativeLink && ./out/interactiveNativeDemo/nativeLink.dest/out` | [`interactiveNativeDemo/src/scalatui/demo/InteractiveNativeDemo.scala`](interactiveNativeDemo/src/scalatui/demo/InteractiveNativeDemo.scala) | Scala Native launcher for the shared interactive demo |
 | `mill keyTester.run` | [`keyTester/src/scalatui/demo/KeyTester.scala`](keyTester/src/scalatui/demo/KeyTester.scala) | typed terminal key/input inspection |
+
+For the Scala Native interactive demo, `nativeLink` builds the executable and the linked binary starts the app. Run both from an interactive terminal with `mill interactiveNativeDemo.nativeLink && ./out/interactiveNativeDemo/nativeLink.dest/out`. Optional flags go after the binary path, for example `mill interactiveNativeDemo.nativeLink && ./out/interactiveNativeDemo/nativeLink.dest/out --hardware-cursor`.
 
 Interactive demo controls are also summarized in [`docs/interactive-smoke.md`](docs/interactive-smoke.md). Default keybindings are listed in [`docs/keybinding-defaults.md`](docs/keybinding-defaults.md).
 
@@ -147,7 +173,7 @@ Interactive demo controls are also summarized in [`docs/interactive-smoke.md`](d
 - **Editing:** Unicode/grapheme-aware movement and deletion, large-paste compaction, prompt history, undo, kill-ring, yank/yank-pop, page movement, jump-to-character.
 - **Keybindings:** shared `KeybindingManager` with configurable editor/input/select command bindings. Typed key events can distinguish press, repeat, and release when terminals report that metadata.
 - **Autocomplete:** slash commands, dependency-free filesystem path and `@` attachment completions, application-owned natural triggers such as `#`, optional fuzzy ranking, cancellable async providers, and injectable debounce scheduling.
-- **Terminals:** JVM `stty` backend, Scala Native POSIX backend, stream and virtual test backends, conservative Kitty keyboard protocol hooks, and readable fallback behavior when advanced metadata is unavailable.
+- **Terminals:** JVM `stty` backend, Scala Native POSIX backend, stream and virtual test backends, optional title/progress helpers, runtime-owned background color and color-scheme queries, conservative Kitty keyboard protocol hooks, and readable fallback behavior when advanced metadata is unavailable.
 - **Optional modules:** dependency-free Markdown rendering with theme/link/highlighter/parser hooks, plus terminal image protocol helpers with file loading, header dimension sniffing, and cell-size bounding helpers.
 
 ## Repository structure
@@ -168,6 +194,20 @@ openspec/                active and promoted OpenSpec change/spec artifacts
 ```
 
 ## Development
+
+### Explicit BSP installation
+
+```bash
+mill --bsp-install
+```
+
+### IntelliJ IDEA XML Support
+
+```bash
+mill mill.idea/
+```
+
+### Project build and validation
 
 ```bash
 mill __.compile

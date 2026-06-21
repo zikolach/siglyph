@@ -2,11 +2,11 @@ package scalatui.autocomplete
 
 import java.io.{File, IOException}
 import java.nio.file.{DirectoryIteratorException, Files, Path}
-import java.util.Locale
 
 import scala.collection.mutable.PriorityQueue
 
 import scalatui.syntax.Equality.*
+import scalatui.unicode.TextCase
 
 /** Configuration for the dependency-free filesystem path completion helper. */
 final case class FileSystemPathCompletionOptions(
@@ -165,7 +165,7 @@ final class FileSystemPathCompletionProvider(
 
   private def sortKey(entry: File): (Int, String, String) =
     val kind = if options.directoriesFirst && entry.isDirectory then 0 else 1
-    (kind, entry.getName.toLowerCase(Locale.ROOT), entry.getName)
+    (kind, TextCase.lowercase(entry.getName), entry.getName)
 
   private def completion(entry: File, outputPrefix: String): PathCompletion =
     val directory = entry.isDirectory

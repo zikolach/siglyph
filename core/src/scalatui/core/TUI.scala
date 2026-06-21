@@ -2,7 +2,15 @@ package scalatui.core
 
 import scalatui.ansi.Ansi
 import scalatui.syntax.Equality.*
-import scalatui.terminal.{KeyEventType, Terminal, TerminalInput, TerminalKey}
+import scalatui.terminal.{
+  KeyEventType,
+  RgbColor,
+  Terminal,
+  TerminalColorProtocol,
+  TerminalColorScheme,
+  TerminalInput,
+  TerminalKey
+}
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -39,6 +47,10 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   private var runtimeFailure                          = Option.empty[Throwable]
   private var nextOverlayId                           = 0L
   private var nextFocusOrder                          = 0L
+  private val pendingBackgroundColorQueries           = ArrayBuffer.empty[TUI.PendingQuery[RgbColor]]
+  private val pendingColorSchemeQueries               = ArrayBuffer.empty[TUI.PendingQuery[TerminalColorScheme]]
+  private val terminalColorSchemeListeners            = ArrayBuffer.empty[TerminalColorScheme => Unit]
+  private var terminalColorSchemeNotificationsEnabled = false
 
   var handlesControlC: Boolean = true
   var exitsOnEscape: Boolean   = false
@@ -64,6 +76,80 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   /** Most recent final rendered line sanitization diagnostic, if any occurred. */
   def lastSanitizedLine: Option[TUI.RenderSanitization] =
     lifecycleLock.synchronized(lastSanitization)
+
+  /**
+   * Set the terminal window title when the backend supports title operations.
+   *
+   * Unsupported terminals return `false` and emit no title sequence. Control characters are removed
+   * before the backend writes the title protocol sequence.
+   */
+  def setTerminalTitle(title: String): Boolean = Terminal.setTitle(terminal, title)
+
+  /**
+   * Set terminal progress state when the backend supports progress operations.
+   *
+   * The operation is fire-and-forget. Unsupported terminals return `false` and emit no progress
+   * sequence.
+   */
+  def setTerminalProgress(active: Boolean): Boolean = Terminal.setProgress(terminal, active)
+
+  /**
+   * Query the terminal default background color using OSC 11.
+   *
+   * `TUI` owns request/response correlation. Terminal backends only write requests and deliver raw
+   * protocol replies. Returns `None` without writing when the TUI is not running. Returns `None`
+   * when the terminal does not answer with a valid RGB response before `timeoutMillis` expires.
+   */
+  def queryTerminalBackgroundColor(timeoutMillis: Long = 1000L): Option[RgbColor] =
+    val query = registerPendingQuery(
+      pendingBackgroundColorQueries,
+      TerminalColorProtocol.BackgroundColorQuery
+    )
+    query.flatMap { pending =>
+      val result = pending.await(timeoutMillis)
+      if result.isEmpty then lifecycleLock.synchronized(pendingBackgroundColorQueries -= pending)
+      result
+    }
+
+  /**
+   * Query the terminal color scheme using DSR `CSI ? 996 n`.
+   *
+   * Valid terminal reports are parsed as [[TerminalColorScheme.Dark]] or
+   * [[TerminalColorScheme.Light]]. Returns `None` without writing when the TUI is not running.
+   * Returns `None` when no valid report arrives before `timeoutMillis` expires.
+   */
+  def queryTerminalColorScheme(timeoutMillis: Long = 1000L): Option[TerminalColorScheme] =
+    val query = registerPendingQuery(
+      pendingColorSchemeQueries,
+      TerminalColorProtocol.ColorSchemeQuery
+    )
+    query.flatMap { pending =>
+      val result = pending.await(timeoutMillis)
+      if result.isEmpty then lifecycleLock.synchronized(pendingColorSchemeQueries -= pending)
+      result
+    }
+
+  /** Subscribe to terminal color-scheme reports. Returns a function that removes the listener. */
+  def onTerminalColorSchemeChange(listener: TerminalColorScheme => Unit): () => Unit =
+    lifecycleLock.synchronized(terminalColorSchemeListeners += listener)
+    () => lifecycleLock.synchronized(terminalColorSchemeListeners -= listener)
+
+  /**
+   * Enable or disable terminal color-scheme notifications.
+   *
+   * When the TUI is running, this writes the terminal notification enable or disable sequence. When
+   * not running, the setting is applied on the next start. Unsupported terminals can ignore the
+   * sequence; incoming color-scheme reports are still consumed before component input routing.
+   */
+  def setTerminalColorSchemeNotifications(enabled: Boolean): Unit = lifecycleLock.synchronized {
+    if terminalColorSchemeNotificationsEnabled !== enabled then
+      terminalColorSchemeNotificationsEnabled = enabled
+      if running then
+        terminal.write(
+          if enabled then TerminalColorProtocol.EnableColorSchemeNotifications
+          else TerminalColorProtocol.DisableColorSchemeNotifications
+        )
+  }
 
   override def setFocus(component: Component | Null): Unit =
     focusedComponent.foreach {
@@ -127,6 +213,8 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
               flushRender()
             }
         )
+        if terminalColorSchemeNotificationsEnabled then
+          terminal.write(TerminalColorProtocol.EnableColorSchemeNotifications)
         terminal.hideCursor()
         requestRenderInternal(force = true, clear = false)
         flushRender()
@@ -152,18 +240,23 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   def stop(): Unit = lifecycleLock.synchronized {
     if running then
       running = false
-      if previousLines.nonEmpty then
-        val builder = StringBuilder()
-        appendVerticalMove(
-          builder,
-          fromRow = cursorRow,
-          toRow = math.max(0, previousLines.length - 1)
-        )
-        builder.append("\r\n")
-        terminal.write(builder.result())
-      terminal.showCursor()
-      terminal.stop()
-      lifecycleLock.notifyAll()
+      try
+        if previousLines.nonEmpty then
+          val builder = StringBuilder()
+          appendVerticalMove(
+            builder,
+            fromRow = cursorRow,
+            toRow = math.max(0, previousLines.length - 1)
+          )
+          builder.append("\r\n")
+          terminal.write(builder.result())
+        if terminalColorSchemeNotificationsEnabled then
+          terminal.write(TerminalColorProtocol.DisableColorSchemeNotifications)
+      finally
+        try terminal.showCursor()
+        finally
+          try terminal.stop()
+          finally lifecycleLock.notifyAll()
   }
 
   override def requestRender(force: Boolean = false): Unit = lifecycleLock.synchronized {
@@ -187,19 +280,68 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
       renderNow()
   }
 
-  private def handleInput(input: TerminalInput): Unit = lifecycleLock.synchronized {
-    if isIgnoredKeyRelease(input) then ()
-    else if handlesControlC && isCtrl(input, "c") then requestExit()
-    else if exitsOnEscape && (input === TerminalInput.Key(TerminalKey.Escape)) then requestExit()
-    else
-      inputTarget.map(_.handleInputResult(input)).foreach {
-        case InputResult.Ignored               => ()
-        case InputResult.Handled(shouldRender) =>
-          if shouldRender then
-            requestRender()
-            flushRender()
-        case InputResult.Exit                  => requestExit()
+  private def handleInput(input: TerminalInput): Unit =
+    val notifications = lifecycleLock.synchronized {
+      consumeTerminalProtocolReply(input) match
+        case Some(value) => value
+        case None        =>
+          if isIgnoredKeyRelease(input) then Vector.empty
+          else if handlesControlC && isCtrl(input, "c") then
+            requestExit()
+            Vector.empty
+          else if exitsOnEscape && (input === TerminalInput.Key(TerminalKey.Escape)) then
+            requestExit()
+            Vector.empty
+          else
+            inputTarget.map(_.handleInputResult(input)).foreach {
+              case InputResult.Ignored               => ()
+              case InputResult.Handled(shouldRender) =>
+                if shouldRender then
+                  requestRender()
+                  flushRender()
+              case InputResult.Exit                  => requestExit()
+            }
+            Vector.empty
+    }
+    notifications.foreach { case (listener, scheme) => listener(scheme) }
+
+  private def consumeTerminalProtocolReply(
+      input: TerminalInput
+  ): Option[Vector[(TerminalColorScheme => Unit, TerminalColorScheme)]] = input match
+    case TerminalInput.Raw(data) if TerminalColorProtocol.isOsc11BackgroundColorResponse(data) =>
+      TerminalColorProtocol.parseOsc11BackgroundColor(data).foreach { color =>
+        pendingBackgroundColorQueries.foreach(_.complete(color))
+        pendingBackgroundColorQueries.clear()
       }
+      Some(Vector.empty)
+    case TerminalInput.Raw(data) if TerminalColorProtocol.isTerminalColorSchemeReport(data)    =>
+      TerminalColorProtocol.parseTerminalColorSchemeReport(data) match
+        case Some(scheme) =>
+          pendingColorSchemeQueries.foreach(_.complete(scheme))
+          pendingColorSchemeQueries.clear()
+          val listeners =
+            if terminalColorSchemeNotificationsEnabled then terminalColorSchemeListeners.toVector
+            else Vector.empty
+          Some(listeners.map(listener => listener -> scheme))
+        case None         => Some(Vector.empty)
+    case TerminalInput.Raw(_)                                                                  => None
+    case _                                                                                     => None
+
+  private def registerPendingQuery[A](
+      pendingQueries: ArrayBuffer[TUI.PendingQuery[A]],
+      request: String
+  ): Option[TUI.PendingQuery[A]] = lifecycleLock.synchronized {
+    if running then
+      val pending = TUI.PendingQuery[A]()
+      pendingQueries += pending
+      try
+        terminal.write(request)
+        Some(pending)
+      catch
+        case e: Throwable =>
+          pendingQueries -= pending
+          throw e
+    else None
   }
 
   private def inputTarget: Option[Component] =
@@ -487,6 +629,26 @@ object TUI:
       var hidden: Boolean,
       var focusOrder: Long
   )
+
+  private final class PendingQuery[A]:
+    private var completed = false
+    private var result    = Option.empty[A]
+
+    def complete(value: A): Unit = synchronized {
+      if !completed then
+        result = Some(value)
+        completed = true
+        notifyAll()
+    }
+
+    def await(timeoutMillis: Long): Option[A] = synchronized {
+      val deadline  = System.currentTimeMillis() + math.max(0L, timeoutMillis)
+      var remaining = math.max(0L, timeoutMillis)
+      while !completed && remaining > 0 do
+        wait(remaining)
+        remaining = deadline - System.currentTimeMillis()
+      result
+    }
 
   final case class RenderSanitization(
       lineIndex: Int,

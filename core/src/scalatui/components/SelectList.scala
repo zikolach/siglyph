@@ -1,13 +1,11 @@
 package scalatui.components
 
-import java.util.Locale
-
 import scalatui.ansi.Ansi
 import scalatui.core.Component
 import scalatui.matching.FuzzyMatcher
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{TerminalInput, TerminalKey}
-import scalatui.unicode.Unicode
+import scalatui.unicode.{TextCase, Unicode}
 
 final case class SelectItem(value: String, label: String, description: Option[String] = None)
     derives CanEqual
@@ -135,8 +133,8 @@ final class SelectList private (
       case SelectListFiltering.Disabled    => items
       case _ if filterQuery.isEmpty        => items
       case SelectListFiltering.Containment =>
-        val needle = filterQuery.toLowerCase(Locale.ROOT)
-        items.filter(item => searchableText(item).toLowerCase(Locale.ROOT).indexOf(needle) >= 0)
+        val needle = TextCase.lowercase(filterQuery)
+        items.filter(item => TextCase.lowercase(searchableText(item)).indexOf(needle) >= 0)
       case SelectListFiltering.Fuzzy       =>
         FuzzyMatcher.filter(filterQuery, items)(searchableText).map(_.item)
 

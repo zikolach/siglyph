@@ -26,6 +26,7 @@ Expected behavior:
 - `PageUp` / `PageDown` pages the cursor in wrapped multiline editor content.
 - `Ctrl+]` and `Ctrl+Alt+]` jump forward/backward to the next typed target character.
 - When the action list is focused, type to fuzzy-filter actions, use `↑` / `↓` to navigate, select `Tick loader` to advance the loader frame, and select `Cancel loader` to update the cancellable loader state.
+- Select terminal integration actions to set the terminal title, turn OSC 9;4 progress on/off, query background color, query color scheme, and toggle color-scheme notifications. Unsupported terminals should show `unsupported` or `no reply` without breaking input. Query actions run in a background thread so the demo remains interactive while waiting for terminal replies.
 - When the settings list is focused, type to fuzzy-filter settings and press `Enter` or Space to cycle the selected setting value.
 - Arrow keys, `Home` / `End`, `Backspace`, `Delete`, `Ctrl+K`, and `Ctrl+W` edit the buffer.
 - `Ctrl+-` undoes, `Ctrl+Y` yanks killed text, `Alt+Y` yank-pops, `Alt+D` / `Alt+Delete` deletes a word forward, and modified word-left/word-right shortcuts move by word when reported by the terminal.
@@ -52,7 +53,8 @@ mill interactiveNativeDemo.nativeLink
 Run the linked binary from Mill's output directory in an interactive terminal. Optional flags are passed after the binary path.
 
 ```bash
-out/interactiveNativeDemo/nativeLink.dest/out -- --hardware-cursor
+./out/interactiveNativeDemo/nativeLink.dest/out
+./out/interactiveNativeDemo/nativeLink.dest/out --hardware-cursor
 ```
 
 Expected behavior matches the JVM multiline editor demo, including narrow-width and height resize redraw checks, using `PosixTerminal` instead of `SttyTerminal`.

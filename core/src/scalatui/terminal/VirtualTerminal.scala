@@ -3,7 +3,10 @@ package scalatui.terminal
 import scala.collection.mutable.ArrayBuffer
 
 /** Test terminal that records writes and can deliver scripted input/resize events. */
-final class VirtualTerminal(initialColumns: Int = 80, initialRows: Int = 24) extends Terminal:
+final class VirtualTerminal(initialColumns: Int = 80, initialRows: Int = 24)
+    extends Terminal,
+      TerminalTitleSupport,
+      TerminalProgressSupport:
   private var inputHandler: TerminalInput => Unit = _ => ()
   private var resizeHandler: () => Unit           = () => ()
   private val writesBuffer                        = ArrayBuffer.empty[String]
@@ -35,6 +38,11 @@ final class VirtualTerminal(initialColumns: Int = 80, initialRows: Int = 24) ext
   override def clearLine(): Unit       = write("\u001b[K")
   override def clearFromCursor(): Unit = write("\u001b[J")
   override def clearScreen(): Unit     = write("\u001b[2J\u001b[H")
+
+  override def setTitle(title: String): Unit = write(Terminal.titleSequence(title))
+
+  override def setProgress(active: Boolean): Unit =
+    write(if active then Terminal.ProgressActiveSequence else Terminal.ProgressClearSequence)
 
   def isRunning: Boolean = running
 
