@@ -17,6 +17,7 @@ import scalatui.terminal.{
   KeyModifiers,
   RgbColor,
   TerminalCapabilities,
+  Terminal,
   TerminalColorProtocol,
   TerminalColorScheme,
   TerminalImageProtocol,
@@ -30,6 +31,24 @@ import java.util.concurrent.atomic.AtomicReference
 class TUISuite extends munit.FunSuite:
   final class MutableLine(var value: String) extends Component:
     override def render(width: Int): Vector[String] = Vector(value)
+
+  final class QueryFailingTerminal(failingWrite: String) extends Terminal:
+    override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit = ()
+
+    override def stop(): Unit = ()
+
+    override def write(data: String): Unit =
+      if data.equals(failingWrite) then throw RuntimeException("write failed")
+
+    override def columns: Int = 20
+    override def rows: Int    = 5
+
+    override def moveBy(lines: Int): Unit = ()
+    override def hideCursor(): Unit       = ()
+    override def showCursor(): Unit       = ()
+    override def clearLine(): Unit        = ()
+    override def clearFromCursor(): Unit  = ()
+    override def clearScreen(): Unit      = ()
 
   test("first render writes full frame with synchronized output"):
     val terminal = VirtualTerminal(20, 5)
@@ -479,6 +498,15 @@ class TUISuite extends munit.FunSuite:
     assertEquals(tui.queryTerminalBackgroundColor(timeoutMillis = 1000), None)
     assertEquals(terminal.output, "")
 
+  test("TUI background color query removes pending query when write fails"):
+    val terminal = QueryFailingTerminal(TerminalColorProtocol.BackgroundColorQuery)
+    val tui      = TUI(terminal)
+    tui.start()
+
+    intercept[RuntimeException](tui.queryTerminalBackgroundColor(timeoutMillis = 1000))
+
+    assertEquals(pendingQueryCount(tui, "pendingBackgroundColorQueries"), 0)
+
   test("TUI color-scheme query writes DSR and resolves valid response"):
     val terminal = VirtualTerminal(20, 5)
     val tui      = TUI(terminal)
@@ -508,6 +536,15 @@ class TUISuite extends munit.FunSuite:
 
     assertEquals(tui.queryTerminalColorScheme(timeoutMillis = 1000), None)
     assertEquals(terminal.output, "")
+
+  test("TUI color-scheme query removes pending query when write fails"):
+    val terminal = QueryFailingTerminal(TerminalColorProtocol.ColorSchemeQuery)
+    val tui      = TUI(terminal)
+    tui.start()
+
+    intercept[RuntimeException](tui.queryTerminalColorScheme(timeoutMillis = 1000))
+
+    assertEquals(pendingQueryCount(tui, "pendingColorSchemeQueries"), 0)
 
   test("color-scheme notifications can be enabled disabled and unsubscribed"):
     val terminal = VirtualTerminal(20, 5)
@@ -571,6 +608,7 @@ class TUISuite extends munit.FunSuite:
 
     terminal.sendInput(TerminalInput.Raw("\u001b]11;not-a-color\u0007"))
     terminal.sendInput(TerminalInput.Raw("\u001b[?997;1n"))
+    terminal.sendInput(TerminalInput.Raw("\u001b[?997;3n"))
     terminal.sendInput(TerminalInput.Key(TerminalKey.Character("x")))
 
     assertEquals(delivered, Vector(TerminalInput.Key(TerminalKey.Character("x"))))
@@ -583,6 +621,11 @@ class TUISuite extends munit.FunSuite:
     while !terminal.output.contains(expected) && System.currentTimeMillis() < deadline do
       Thread.sleep(1)
     assert(terminal.output.contains(expected), terminal.output)
+
+  private def pendingQueryCount(tui: TUI, fieldName: String): Int =
+    val field = classOf[TUI].getDeclaredField(fieldName)
+    field.setAccessible(true)
+    field.get(tui).asInstanceOf[scala.collection.mutable.ArrayBuffer[?]].length
 
   test("run exits on ctrl+c and stop positions cursor below content"):
     val terminal = VirtualTerminal(20, 5)

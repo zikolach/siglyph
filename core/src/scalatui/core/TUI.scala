@@ -101,14 +101,10 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
    * when the terminal does not answer with a valid RGB response before `timeoutMillis` expires.
    */
   def queryTerminalBackgroundColor(timeoutMillis: Long = 1000L): Option[RgbColor] =
-    val query = lifecycleLock.synchronized {
-      if running then
-        val pending = TUI.PendingQuery[RgbColor]()
-        pendingBackgroundColorQueries += pending
-        terminal.write(TerminalColorProtocol.BackgroundColorQuery)
-        Some(pending)
-      else None
-    }
+    val query = registerPendingQuery(
+      pendingBackgroundColorQueries,
+      TerminalColorProtocol.BackgroundColorQuery
+    )
     query.flatMap { pending =>
       val result = pending.await(timeoutMillis)
       if result.isEmpty then lifecycleLock.synchronized(pendingBackgroundColorQueries -= pending)
@@ -123,14 +119,10 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
    * Returns `None` when no valid report arrives before `timeoutMillis` expires.
    */
   def queryTerminalColorScheme(timeoutMillis: Long = 1000L): Option[TerminalColorScheme] =
-    val query = lifecycleLock.synchronized {
-      if running then
-        val pending = TUI.PendingQuery[TerminalColorScheme]()
-        pendingColorSchemeQueries += pending
-        terminal.write(TerminalColorProtocol.ColorSchemeQuery)
-        Some(pending)
-      else None
-    }
+    val query = registerPendingQuery(
+      pendingColorSchemeQueries,
+      TerminalColorProtocol.ColorSchemeQuery
+    )
     query.flatMap { pending =>
       val result = pending.await(timeoutMillis)
       if result.isEmpty then lifecycleLock.synchronized(pendingColorSchemeQueries -= pending)
@@ -319,7 +311,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         pendingBackgroundColorQueries.clear()
       }
       Some(Vector.empty)
-    case TerminalInput.Raw(data)                                                               =>
+    case TerminalInput.Raw(data) if TerminalColorProtocol.isTerminalColorSchemeReport(data)    =>
       TerminalColorProtocol.parseTerminalColorSchemeReport(data) match
         case Some(scheme) =>
           pendingColorSchemeQueries.foreach(_.complete(scheme))
@@ -328,8 +320,26 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
             if terminalColorSchemeNotificationsEnabled then terminalColorSchemeListeners.toVector
             else Vector.empty
           Some(listeners.map(listener => listener -> scheme))
-        case None         => None
+        case None         => Some(Vector.empty)
+    case TerminalInput.Raw(_)                                                                  => None
     case _                                                                                     => None
+
+  private def registerPendingQuery[A](
+      pendingQueries: ArrayBuffer[TUI.PendingQuery[A]],
+      request: String
+  ): Option[TUI.PendingQuery[A]] = lifecycleLock.synchronized {
+    if running then
+      val pending = TUI.PendingQuery[A]()
+      pendingQueries += pending
+      try
+        terminal.write(request)
+        Some(pending)
+      catch
+        case e: Throwable =>
+          pendingQueries -= pending
+          throw e
+    else None
+  }
 
   private def inputTarget: Option[Component] =
     topCapturingOverlay.map(_.component).orElse(focusedComponent)

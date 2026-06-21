@@ -30,15 +30,20 @@ class TerminalColorProtocolSuite extends munit.FunSuite:
     assertEquals(TerminalColorProtocol.parseOsc11BackgroundColor("\u001b]11;nope\u0007"), None)
 
   test("parses terminal color-scheme reports"):
+    assertEquals(TerminalColorProtocol.isTerminalColorSchemeReport("\u001b[?997;1n"), true)
     assertEquals(
       TerminalColorProtocol.parseTerminalColorSchemeReport("\u001b[?997;1n"),
       Some(TerminalColorScheme.Dark)
     )
+    assertEquals(TerminalColorProtocol.isTerminalColorSchemeReport("\u001b[?997;2n"), true)
     assertEquals(
       TerminalColorProtocol.parseTerminalColorSchemeReport("\u001b[?997;2n"),
       Some(TerminalColorScheme.Light)
     )
+    assertEquals(TerminalColorProtocol.isTerminalColorSchemeReport("\u001b[?997;3n"), true)
     assertEquals(TerminalColorProtocol.parseTerminalColorSchemeReport("\u001b[?997;3n"), None)
+    assertEquals(TerminalColorProtocol.isTerminalColorSchemeReport("\u001b[?997;n"), false)
+    assertEquals(TerminalColorProtocol.isTerminalColorSchemeReport("\u001b[?997;xn"), false)
 
   test("color scheme values are lowercase"):
     assertEquals(TerminalColorScheme.Dark.value, "dark")

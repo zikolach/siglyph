@@ -28,11 +28,13 @@ object TerminalColorProtocol:
   /** Disable terminal color-scheme change notifications. */
   val DisableColorSchemeNotifications: String = "\u001b[?2031l"
 
-  private val Osc11Prefix            = "\u001b]11;"
-  private val Osc11BellSuffix        = "\u0007"
-  private val Osc11StSuffix          = "\u001b\\"
-  private val ColorSchemeDarkReport  = "\u001b[?997;1n"
-  private val ColorSchemeLightReport = "\u001b[?997;2n"
+  private val Osc11Prefix             = "\u001b]11;"
+  private val Osc11BellSuffix         = "\u0007"
+  private val Osc11StSuffix           = "\u001b\\"
+  private val ColorSchemeReportPrefix = "\u001b[?997;"
+  private val ColorSchemeReportSuffix = "n"
+  private val ColorSchemeDarkReport   = s"${ColorSchemeReportPrefix}1${ColorSchemeReportSuffix}"
+  private val ColorSchemeLightReport  = s"${ColorSchemeReportPrefix}2${ColorSchemeReportSuffix}"
 
   /** Return true when `data` is an OSC 11 background color response frame. */
   def isOsc11BackgroundColorResponse(data: String): Boolean =
@@ -48,12 +50,24 @@ object TerminalColorProtocol:
     case ColorSchemeLightReport => Some(TerminalColorScheme.Light)
     case _                      => None
 
+  /** Return true when `data` is a color-scheme report frame, including unknown values. */
+  def isTerminalColorSchemeReport(data: String): Boolean =
+    data.startsWith(ColorSchemeReportPrefix) && data.endsWith(ColorSchemeReportSuffix) &&
+      colorSchemeReportPayload(data).exists(_.forall(isDecimalDigit))
+
   private def osc11Payload(data: String): Option[String] =
     if data.startsWith(Osc11Prefix) && data.endsWith(Osc11BellSuffix) then
       Some(data.substring(Osc11Prefix.length, data.length - Osc11BellSuffix.length).trim)
     else if data.startsWith(Osc11Prefix) && data.endsWith(Osc11StSuffix) then
       Some(data.substring(Osc11Prefix.length, data.length - Osc11StSuffix.length).trim)
     else None
+
+  private def colorSchemeReportPayload(data: String): Option[String] =
+    Option
+      .when(data.length > ColorSchemeReportPrefix.length + ColorSchemeReportSuffix.length)(
+        data.substring(ColorSchemeReportPrefix.length, data.length - ColorSchemeReportSuffix.length)
+      )
+      .filter(_.nonEmpty)
 
   private def parseColorPayload(value: String): Option[RgbColor] =
     if value.startsWith("#") then parseHexColor(value.drop(1))
@@ -98,3 +112,5 @@ object TerminalColorProtocol:
     (char >= '0' && char <= '9') ||
       (char >= 'a' && char <= 'f') ||
       (char >= 'A' && char <= 'F')
+
+  private def isDecimalDigit(char: Char): Boolean = char >= '0' && char <= '9'
