@@ -7,6 +7,27 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-06-21
+
+### Added
+
+- Added optional terminal integration APIs so interactive backends can set terminal title and progress without widening the required `Terminal` interface. #5
+- Added `TUI`-owned terminal integration services for background color queries, OSC 11 parsing, color-scheme queries, and color-scheme change notifications with `dark`/`light` support. #5
+- Added Warp Kitty image capability detection with explicit `tmux`/`screen` precedence, along with terminal cell-size parsing for runtime image sizing. #6
+- Added cursor-safe image row reservation semantics for image output and runtime image sizing defaults in `Image` when terminal metadata is unavailable. #6
+- Added Scala Native terminal publish artifacts in the build and docs updates for cross-module publishing visibility. #6
+
+### Changed
+
+- Changed terminal reply handling so protocol replies are consumed by `TUI` before they reach focused component input handling. #5
+- Changed image sizing behavior so runtime cell-size metadata is used when valid and deterministic fixed fallback is preserved otherwise. #6
+- Updated README/examples/docs with terminal integration helpers and image runtime behavior usage guidance. #5 #6
+
+### Fixed
+
+- Fixed malformed terminal protocol reply paths so unsupported or invalid replies no longer break render/input behavior. #5
+- Fixed cell-size query parsing and image-row reservation behavior for mixed terminal/image output. #6
+
 ## [0.2.0] - 2026-06-20
 
 ### Added
@@ -77,7 +98,8 @@ and this project uses semantic versioning while it remains pre-1.0.
 - GitHub Actions CI, jar packaging, GitHub Packages publishing, and GitHub
   release artifacts.
 
-[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/zikolach/siglyph/releases/tag/v0.2.1
 [0.2.0]: https://github.com/zikolach/siglyph/releases/tag/v0.2.0
 [0.1.2]: https://github.com/zikolach/siglyph/releases/tag/v0.1.2
 [0.1.1]: https://github.com/zikolach/siglyph/releases/tag/v0.1.1
