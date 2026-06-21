@@ -60,7 +60,6 @@ object Ansi:
       val pendingEscapes = new StringBuilder
       var visible        = 0
       var emittedWidth   = 0
-      var emittedText    = false
       var usedEscapes    = false
       var i              = 0
 
@@ -93,7 +92,6 @@ object Ansi:
                 appendPendingEscapes()
                 builder.append(cluster)
                 emittedWidth += clusterWidth
-                emittedText = true
               visible = clusterEnd
             }
             i = plainEnd

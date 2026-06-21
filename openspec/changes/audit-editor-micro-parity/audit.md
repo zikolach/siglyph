@@ -11,14 +11,16 @@ Each reviewed behavior uses one status from this full set:
 
 ## Upstream sources used
 
-- `/Users/nikolay.kushin/.cache/checkouts/github.com/earendil-works/pi/packages/tui/src/components/editor.ts`
-- `/Users/nikolay.kushin/.cache/checkouts/github.com/earendil-works/pi/packages/tui/src/editor-component.ts`
-- `/Users/nikolay.kushin/.cache/checkouts/github.com/earendil-works/pi/packages/tui/src/autocomplete.ts`
-- `/Users/nikolay.kushin/.cache/checkouts/github.com/earendil-works/pi/packages/tui/src/components/input.ts`
-- `/Users/nikolay.kushin/.cache/checkouts/github.com/earendil-works/pi/packages/tui/test/editor.test.ts`
-- `/Users/nikolay.kushin/.cache/checkouts/github.com/earendil-works/pi/packages/tui/test/autocomplete.test.ts`
-- `/Users/nikolay.kushin/.cache/checkouts/github.com/earendil-works/pi/packages/tui/test/input.test.ts`
-- `/Users/nikolay.kushin/.cache/checkouts/github.com/earendil-works/pi/packages/tui/test/word-navigation.test.ts`
+Upstream reference: `https://github.com/earendil-works/pi`, commit `500b568b04cc54109480920ab391e76e525339c0`.
+
+- `packages/tui/src/components/editor.ts`
+- `packages/tui/src/editor-component.ts`
+- `packages/tui/src/autocomplete.ts`
+- `packages/tui/src/components/input.ts`
+- `packages/tui/test/editor.test.ts`
+- `packages/tui/test/autocomplete.test.ts`
+- `packages/tui/test/input.test.ts`
+- `packages/tui/test/word-navigation.test.ts`
 
 ## Local sources used
 
