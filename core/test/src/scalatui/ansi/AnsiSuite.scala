@@ -65,6 +65,12 @@ class AnsiSuite extends munit.FunSuite:
     val lines = Ansi.wrapTextWithAnsi("abc表def", 4)
     assert(lines.forall(Ansi.visibleWidth(_) <= 4), lines.toString)
 
+  test("wrap text carries clipped wide grapheme to next line"):
+    val lines = Ansi.wrapTextWithAnsi("abc表def", 4)
+
+    assertEquals(lines.map(Ansi.strip), Vector("abc", "表de", "f"))
+    assert(lines.forall(Ansi.visibleWidth(_) <= 4), lines.toString)
+
   test("wrap text accounts for tabs"):
     val lines = Ansi.wrapTextWithAnsi("a\tb", 4)
 

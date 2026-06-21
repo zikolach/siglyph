@@ -107,9 +107,10 @@ object Ansi:
           val result    = Vector.newBuilder[String]
           var remaining = line
           while visibleWidth(remaining) > width do
-            val sliced = sliceByColumns(remaining, 0, width)
+            val sliced        = sliceByColumns(remaining, 0, width)
             result += sliced.text
-            remaining = sliceByColumns(remaining, width, Int.MaxValue / 4).text
+            val consumedWidth = if sliced.width > 0 then sliced.width else width
+            remaining = sliceByColumns(remaining, consumedWidth, Int.MaxValue / 4).text
           result += remaining
           result.result()
       }
