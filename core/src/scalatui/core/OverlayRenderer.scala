@@ -94,13 +94,19 @@ object OverlayRenderer:
     val safeOverlayWidth  = math.max(0, math.min(overlayWidth, safeTerminalWidth - safeStart))
     if safeOverlayWidth <= 0 then Ansi.truncateToWidth(baseLine, safeTerminalWidth, "")
     else
-      val beforeSlice   = Ansi.sliceByColumns(baseLine, 0, safeStart)
-      val before        = beforeSlice.text + " ".repeat(math.max(0, safeStart - beforeSlice.width))
-      val overlay       = Ansi.sliceByColumns(overlayLine, 0, safeOverlayWidth)
-      val paddedOverlay = overlay.text + " ".repeat(math.max(0, safeOverlayWidth - overlay.width))
-      val afterWidth    = math.max(0, safeTerminalWidth - safeStart - safeOverlayWidth)
-      val after         = Ansi.sliceByColumns(baseLine, safeStart + safeOverlayWidth, afterWidth).text
-      before + Ansi.Reset + paddedOverlay + Ansi.Reset + after
+      val beforeSlice      = Ansi.sliceByColumns(baseLine, 0, safeStart)
+      val before           = beforeSlice.text + " ".repeat(math.max(0, safeStart - beforeSlice.width))
+      val overlay          = Ansi.sliceByColumns(overlayLine, 0, safeOverlayWidth)
+      val paddedOverlay    = overlay.text + " ".repeat(math.max(0, safeOverlayWidth - overlay.width))
+      val afterWidth       = math.max(0, safeTerminalWidth - safeStart - safeOverlayWidth)
+      val afterStart       = safeStart + safeOverlayWidth
+      val beforeAfterSlice = Ansi.sliceByColumns(baseLine, 0, afterStart)
+      val afterGap         =
+        if afterStart < Ansi.visibleWidth(baseLine) then
+          math.max(0, afterStart - beforeAfterSlice.width)
+        else 0
+      val after            = Ansi.sliceByColumns(baseLine, afterStart, afterWidth).text
+      before + Ansi.Reset + paddedOverlay + Ansi.Reset + " ".repeat(afterGap) + after
 
   private def resolvePosition(
       explicit: Option[OverlaySize],

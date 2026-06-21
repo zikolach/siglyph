@@ -97,7 +97,7 @@ object Ansi:
               visible = clusterEnd
             }
             i = plainEnd
-      if emittedText && usedEscapes then builder.append(Reset)
+      if usedEscapes then builder.append(Reset)
       Slice(builder.result(), emittedWidth)
 
   def wrapTextWithAnsi(value: String, width: Int): Vector[String] =

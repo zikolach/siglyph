@@ -87,9 +87,9 @@ class OverlayRendererSuite extends munit.FunSuite:
   test("composites overlay that ends inside a base wide cell"):
     val line = OverlayRenderer.compositeLine("A界B", "Z", 0, 2, 4)
 
-    assertEquals(Ansi.strip(line), "Z B")
+    assertEquals(Ansi.strip(line), "Z  B")
     assert(!Ansi.strip(line).contains("界"), line)
-    assert(Ansi.visibleWidth(line) <= 4, line)
+    assertEquals(Ansi.visibleWidth(line), 4)
 
   test("styled overlay over wide base remains ANSI and width safe"):
     val line = OverlayRenderer.compositeLine("\u001b[34m界AB", "\u001b[31mZZ\u001b[0m", 0, 2, 4)

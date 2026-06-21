@@ -34,6 +34,14 @@ class AnsiSuite extends munit.FunSuite:
     assert(sliced.text.startsWith("\u001b[31m"), sliced.text)
     assert(sliced.text.endsWith(Ansi.Reset), sliced.text)
 
+  test("slice by columns resets ANSI style when wide grapheme is clipped"):
+    val sliced = Ansi.sliceByColumns("\u001b[31m界", 0, 1)
+
+    assertEquals(Ansi.strip(sliced.text), "")
+    assertEquals(sliced.width, 0)
+    assert(sliced.text.startsWith("\u001b[31m"), sliced.text)
+    assert(sliced.text.endsWith(Ansi.Reset), sliced.text)
+
   test("truncate accounts for tabs and clips oversized ellipsis"):
     val tabbed = Ansi.truncateToWidth("a\tb", 4, "")
     val narrow = Ansi.truncateToWidth("表abc", 1)
