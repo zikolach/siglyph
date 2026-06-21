@@ -25,6 +25,12 @@ Mill's `SonatypeCentralPublishModule`:
 - `io.github.zikolach:siglyph-terminal-jvm_3`
 - `io.github.zikolach:siglyph-markdown_3`
 - `io.github.zikolach:siglyph-image_3`
+- `io.github.zikolach:siglyph-core_native0.5_3`
+- `io.github.zikolach:siglyph-terminal-native_native0.5_3`
+
+Use `siglyph-core` and `siglyph-terminal-native` as platform-aware dependencies
+from Scala Native modules. Mill resolves them to the `_native0.5_3` artifacts
+when used from a `ScalaNativeModule`.
 
 Required GitHub Actions secrets:
 
@@ -50,7 +56,7 @@ Snapshot dry run, which does not require a PGP key:
 MILL_TESTS_PUBLISH_DRY_RUN=1 \
 MILL_SONATYPE_USERNAME=dummy \
 MILL_SONATYPE_PASSWORD=dummy \
-SIGLYPH_VERSION=0.1.2-SNAPSHOT \
+SIGLYPH_VERSION=0.2.1-SNAPSHOT \
 mill mill.javalib.SonatypeCentralPublishModule/publishAll
 ```
 

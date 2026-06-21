@@ -75,7 +75,9 @@ jobs:
           rm -rf release-artifacts
           mkdir -p release-artifacts
           cp out/core/jar.dest/out.jar "release-artifacts/siglyph-core_3-${version}.jar"
+          cp out/coreNative/jar.dest/out.jar "release-artifacts/siglyph-core_native0.5_3-${version}.jar"
           cp out/terminalJvm/jar.dest/out.jar "release-artifacts/siglyph-terminal-jvm_3-${version}.jar"
+          cp out/terminalNative/jar.dest/out.jar "release-artifacts/siglyph-terminal-native_native0.5_3-${version}.jar"
           cp out/markdown/jar.dest/out.jar "release-artifacts/siglyph-markdown_3-${version}.jar"
           cp out/image/jar.dest/out.jar "release-artifacts/siglyph-image_3-${version}.jar"
           ls -lh release-artifacts
@@ -118,6 +120,26 @@ jobs:
               mvn"io.github.zikolach::siglyph-terminal-jvm::${version}",
               mvn"io.github.zikolach::siglyph-markdown::${version}",
               mvn"io.github.zikolach::siglyph-image::${version}"
+            )
+          }
+          \`\`\`
+
+          Scala Native artifacts are also published for \`siglyph-core\` and \`siglyph-terminal-native\`.
+
+          ## Mill Scala Native
+
+          \`\`\`scala
+          object nativeApp extends ScalaNativeModule {
+            def scalaVersion = "3.7.4"
+            def scalaNativeVersion = "0.5.12"
+
+            def repositories = Task {
+              super.repositories() ++ Seq("https://maven.pkg.github.com/zikolach/siglyph")
+            }
+
+            def mvnDeps = Seq(
+              mvn"io.github.zikolach::siglyph-core::${version}",
+              mvn"io.github.zikolach::siglyph-terminal-native::${version}"
             )
           }
           \`\`\`

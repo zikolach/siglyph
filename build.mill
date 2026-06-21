@@ -18,17 +18,26 @@ trait SiglyphModule extends ScalaModule {
   def scalaVersion = "3.7.4"
 }
 
+private def siglyphPomSettings: PomSettings = PomSettings(
+  description = "Node-free Scala terminal UI library inspired by pi-tui",
+  organization = SiglyphOrganization,
+  url = s"https://github.com/$SiglyphRepoOwner/$SiglyphRepoName",
+  licenses = Seq(License.MIT),
+  versionControl = VersionControl.github(SiglyphRepoOwner, SiglyphRepoName),
+  developers = Seq(Developer("zikolach", "zikolach", "https://github.com/zikolach"))
+)
+
 trait SiglyphPublishModule extends SiglyphModule with PublishModule {
   def publishVersion = Task.Input { siglyphVersion(Task.env) }
 
-  def pomSettings = PomSettings(
-    description = "Node-free Scala terminal UI library inspired by pi-tui",
-    organization = SiglyphOrganization,
-    url = s"https://github.com/$SiglyphRepoOwner/$SiglyphRepoName",
-    licenses = Seq(License.MIT),
-    versionControl = VersionControl.github(SiglyphRepoOwner, SiglyphRepoName),
-    developers = Seq(Developer("zikolach", "zikolach", "https://github.com/zikolach"))
-  )
+  def pomSettings = siglyphPomSettings
+}
+
+trait SiglyphNativePublishModule extends ScalaNativeModule with PublishModule {
+  def scalaVersion       = "3.7.4"
+  def scalaNativeVersion = "0.5.12"
+  def publishVersion     = Task.Input { siglyphVersion(Task.env) }
+  def pomSettings        = siglyphPomSettings
 }
 
 private def workspaceRoot: os.Path =
@@ -99,16 +108,14 @@ object terminalJvm extends SiglyphPublishModule {
   }
 }
 
-object coreNative extends ScalaNativeModule {
-  def scalaVersion       = "3.7.4"
-  def scalaNativeVersion = "0.5.12"
-  def sources            = Task.Sources(workspaceRoot / "core" / "src")
+object coreNative extends SiglyphNativePublishModule {
+  def artifactName = "siglyph-core"
+  def sources      = Task.Sources(workspaceRoot / "core" / "src")
 }
 
-object terminalNative extends ScalaNativeModule {
-  def scalaVersion       = "3.7.4"
-  def scalaNativeVersion = "0.5.12"
-  def moduleDeps         = Seq(coreNative)
+object terminalNative extends SiglyphNativePublishModule {
+  def artifactName = "siglyph-terminal-native"
+  def moduleDeps   = Seq(coreNative)
 }
 
 object markdown extends SiglyphPublishModule {

@@ -44,7 +44,7 @@ object app extends ScalaModule {
 }
 ```
 
-Most applications start with `siglyph-core` plus one backend, usually `siglyph-terminal-jvm`.
+Most JVM applications start with `siglyph-core` plus `siglyph-terminal-jvm`. Scala Native applications use the same platform-aware `siglyph-core` coordinate plus `siglyph-terminal-native`; Mill resolves those to `_native0.5_3` artifacts from `ScalaNativeModule` projects.
 
 ## Try with Scala CLI
 
