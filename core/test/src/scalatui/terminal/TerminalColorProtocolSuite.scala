@@ -19,6 +19,12 @@ class TerminalColorProtocolSuite extends munit.FunSuite:
       Some(RgbColor(255, 0, 128))
     )
 
+  test("rejects OSC 11 channels longer than four hex digits"):
+    assertEquals(
+      TerminalColorProtocol.parseOsc11BackgroundColor("\u001b]11;rgb:fffff/0000/8000\u001b\\"),
+      None
+    )
+
   test("rejects invalid OSC 11 payload"):
     assertEquals(TerminalColorProtocol.isOsc11BackgroundColorResponse("\u001b]11;nope\u0007"), true)
     assertEquals(TerminalColorProtocol.parseOsc11BackgroundColor("\u001b]11;nope\u0007"), None)

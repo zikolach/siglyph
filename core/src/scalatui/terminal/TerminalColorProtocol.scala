@@ -1,6 +1,5 @@
 package scalatui.terminal
 
-import scala.util.Try
 import scalatui.syntax.Equality.*
 
 /** RGB color reported by terminal color queries. Channel values use the range 0 through 255. */
@@ -89,11 +88,10 @@ object TerminalColorProtocol:
     Option.when(value.length === 2 && value.forall(isHexDigit))(Integer.parseInt(value, 16))
 
   private def parseOscHexChannel(value: String): Option[Int] =
-    if value.nonEmpty && value.forall(isHexDigit) then
-      Try(BigInt(value, 16)).toOption.flatMap { parsed =>
-        val max = BigInt(16).pow(value.length) - 1
-        Option.when(max > 0)(math.round((parsed.toDouble / max.toDouble) * 255.0).toInt)
-      }
+    if value.nonEmpty && value.length <= 4 && value.forall(isHexDigit) then
+      val parsed = Integer.parseInt(value, 16)
+      val max    = (1 << (value.length * 4)) - 1
+      Option.when(max > 0)(math.round((parsed.toDouble / max.toDouble) * 255.0).toInt)
     else None
 
   private def isHexDigit(char: Char): Boolean =

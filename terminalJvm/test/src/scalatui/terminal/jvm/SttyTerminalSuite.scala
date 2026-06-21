@@ -24,6 +24,23 @@ class SttyTerminalSuite extends munit.FunSuite:
     assert(written.contains(Terminal.ProgressActiveSequence), written)
     assert(written.contains(Terminal.ProgressClearSequence), written)
 
+  test("direct title support sanitizes control characters"):
+    val output   = ByteArrayOutputStream()
+    val terminal = SttyTerminal(
+      input = InputStream.nullInputStream(),
+      output = output,
+      columnsOverride = Some(80),
+      rowsOverride = Some(24),
+      sizeQuery = () => Some(24 -> 80)
+    )
+
+    terminal.setTitle("safe\u001btitle\u0007")
+
+    assertEquals(
+      output.toString(java.nio.charset.StandardCharsets.UTF_8),
+      "\u001b]0;safetitle\u0007"
+    )
+
   test("Kitty keyboard negotiation writes enable sequence after accepted response"):
     val output   = ByteArrayOutputStream()
     val terminal = SttyTerminal(

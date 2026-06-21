@@ -511,6 +511,23 @@ class TUISuite extends munit.FunSuite:
       terminal.output
     )
 
+  test("color-scheme listeners run outside lifecycle lock"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal)
+    var joined   = false
+    tui.onTerminalColorSchemeChange { _ =>
+      val thread = Thread(() => tui.requestRender())
+      thread.start()
+      thread.join(1000)
+      joined = !thread.isAlive
+    }
+
+    tui.start()
+    tui.setTerminalColorSchemeNotifications(enabled = true)
+    terminal.sendInput(TerminalInput.Raw("\u001b[?997;1n"))
+
+    assertEquals(joined, true)
+
   test("terminal protocol replies are not routed to focused component"):
     val terminal  = VirtualTerminal(20, 5)
     var delivered = Vector.empty[TerminalInput]

@@ -33,3 +33,10 @@ class VirtualTerminalSuite extends munit.FunSuite:
     assert(terminal.output.contains("\u001b]0;helloworld\u0007"), terminal.output)
     assert(terminal.output.contains(Terminal.ProgressActiveSequence), terminal.output)
     assert(terminal.output.contains(Terminal.ProgressClearSequence), terminal.output)
+
+  test("direct virtual terminal title support sanitizes control characters"):
+    val terminal = VirtualTerminal(80, 24)
+
+    terminal.setTitle("safe\u001btitle\u0007")
+
+    assertEquals(terminal.output, "\u001b]0;safetitle\u0007")

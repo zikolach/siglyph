@@ -275,39 +275,51 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
       renderNow()
   }
 
-  private def handleInput(input: TerminalInput): Unit = lifecycleLock.synchronized {
-    if consumeTerminalProtocolReply(input) then ()
-    else if isIgnoredKeyRelease(input) then ()
-    else if handlesControlC && isCtrl(input, "c") then requestExit()
-    else if exitsOnEscape && (input === TerminalInput.Key(TerminalKey.Escape)) then requestExit()
-    else
-      inputTarget.map(_.handleInputResult(input)).foreach {
-        case InputResult.Ignored               => ()
-        case InputResult.Handled(shouldRender) =>
-          if shouldRender then
-            requestRender()
-            flushRender()
-        case InputResult.Exit                  => requestExit()
-      }
-  }
+  private def handleInput(input: TerminalInput): Unit =
+    val notifications = lifecycleLock.synchronized {
+      consumeTerminalProtocolReply(input) match
+        case Some(value) => value
+        case None        =>
+          if isIgnoredKeyRelease(input) then Vector.empty
+          else if handlesControlC && isCtrl(input, "c") then
+            requestExit()
+            Vector.empty
+          else if exitsOnEscape && (input === TerminalInput.Key(TerminalKey.Escape)) then
+            requestExit()
+            Vector.empty
+          else
+            inputTarget.map(_.handleInputResult(input)).foreach {
+              case InputResult.Ignored               => ()
+              case InputResult.Handled(shouldRender) =>
+                if shouldRender then
+                  requestRender()
+                  flushRender()
+              case InputResult.Exit                  => requestExit()
+            }
+            Vector.empty
+    }
+    notifications.foreach { case (listener, scheme) => listener(scheme) }
 
-  private def consumeTerminalProtocolReply(input: TerminalInput): Boolean = input match
+  private def consumeTerminalProtocolReply(
+      input: TerminalInput
+  ): Option[Vector[(TerminalColorScheme => Unit, TerminalColorScheme)]] = input match
     case TerminalInput.Raw(data) if TerminalColorProtocol.isOsc11BackgroundColorResponse(data) =>
       TerminalColorProtocol.parseOsc11BackgroundColor(data).foreach { color =>
         pendingBackgroundColorQueries.foreach(_.complete(color))
         pendingBackgroundColorQueries.clear()
       }
-      true
+      Some(Vector.empty)
     case TerminalInput.Raw(data)                                                               =>
       TerminalColorProtocol.parseTerminalColorSchemeReport(data) match
         case Some(scheme) =>
           pendingColorSchemeQueries.foreach(_.complete(scheme))
           pendingColorSchemeQueries.clear()
-          if terminalColorSchemeNotificationsEnabled then
-            terminalColorSchemeListeners.toVector.foreach(listener => listener(scheme))
-          true
-        case None         => false
-    case _                                                                                     => false
+          val listeners =
+            if terminalColorSchemeNotificationsEnabled then terminalColorSchemeListeners.toVector
+            else Vector.empty
+          Some(listeners.map(listener => listener -> scheme))
+        case None         => None
+    case _                                                                                     => None
 
   private def inputTarget: Option[Component] =
     topCapturingOverlay.map(_.component).orElse(focusedComponent)

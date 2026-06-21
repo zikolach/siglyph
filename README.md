@@ -133,19 +133,23 @@ Image rendering stays in `siglyph-image`. `ImageSource.fromFile(path)` loads sup
 
 ```scala
 val tui = TUI(SttyTerminal())
-
-val titleApplied = tui.setTerminalTitle("siglyph")
-val progressApplied = tui.setTerminalProgress(active = true)
-
-val background = tui.queryTerminalBackgroundColor(timeoutMillis = 500)
-val scheme = tui.queryTerminalColorScheme(timeoutMillis = 500)
 val unsubscribe = tui.onTerminalColorSchemeChange { scheme =>
   println(s"terminal scheme changed to ${scheme.value}")
 }
-tui.setTerminalColorSchemeNotifications(enabled = true)
+
+tui.start()
+try
+  val titleApplied = tui.setTerminalTitle("siglyph")
+  val progressApplied = tui.setTerminalProgress(active = true)
+  val background = tui.queryTerminalBackgroundColor(timeoutMillis = 500)
+  val scheme = tui.queryTerminalColorScheme(timeoutMillis = 500)
+  tui.setTerminalColorSchemeNotifications(enabled = true)
+finally
+  unsubscribe()
+  tui.stop()
 ```
 
-Title and progress helpers return `false` when the backend does not support the protocol. Color queries are owned by `TUI`: backends write requests and deliver raw terminal replies, while `TUI` correlates replies, applies timeouts, and prevents protocol replies from reaching focused components.
+Title and progress helpers return `false` when the backend does not support the protocol. Color queries and notifications require a started TUI so the backend can read and deliver terminal replies. `TUI` owns query correlation, timeouts, and protocol-reply interception before focused components receive input.
 
 ## Demos
 

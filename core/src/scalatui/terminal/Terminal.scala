@@ -61,7 +61,8 @@ object Terminal:
       true
     case _                                 => false
 
-  private[terminal] def titleSequence(title: String): String = s"\u001b]0;$title\u0007"
+  private[terminal] def titleSequence(title: String): String =
+    s"\u001b]0;${sanitizeTitle(title)}\u0007"
 
   private[terminal] def sanitizeTitle(title: String): String =
     title.filterNot(_.isControl)
