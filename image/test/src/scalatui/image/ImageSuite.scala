@@ -1,12 +1,15 @@
 package scalatui.image
 
 import scalatui.ansi.Ansi
+import scalatui.core.{Component, TUI}
 import scalatui.terminal.{
   ImageCellDimensions,
   ImageDimensions,
   ImageProtocol,
   ImageRenderOptions,
-  TerminalCapabilities
+  TerminalCapabilities,
+  TerminalImageProtocol,
+  VirtualTerminal
 }
 
 import java.nio.file.Files
@@ -113,6 +116,128 @@ class ImageSuite extends munit.FunSuite:
 
     assertEquals(size.widthCells, 1)
     assertEquals(size.heightCells, 5)
+
+  test("Kitty image component reserves rows from protocol result"):
+    val dimensions = ImageDimensions(widthPx = 100, heightPx = 100)
+    val options    = ImageRenderOptions(maxWidthCells = Some(1))
+    val caps       = TerminalCapabilities(
+      trueColor = true,
+      hyperlinks = true,
+      images = Some(
+        ImageProtocol.Kitty
+      )
+    )
+
+    val expected = TerminalImageProtocol.renderBase64Image(
+      "AAAA",
+      dimensions,
+      caps,
+      terminalWidth = 20,
+      options
+    ).get
+
+    val image = Image("AAAA", dimensions, caps, options)
+    val lines = image.render(20)
+
+    assertEquals(lines.length, expected.rows)
+    assertEquals(lines.length >= 1, true)
+
+  test("iTerm2 image component reserves rows from protocol result"):
+    val dimensions = ImageDimensions(widthPx = 100, heightPx = 100)
+    val options    = ImageRenderOptions(maxWidthCells = Some(1))
+    val caps       = TerminalCapabilities(
+      trueColor = true,
+      hyperlinks = true,
+      images = Some(
+        ImageProtocol.ITerm2
+      )
+    )
+
+    val expected = TerminalImageProtocol.renderBase64Image(
+      "AAAA",
+      dimensions,
+      caps,
+      terminalWidth = 20,
+      options
+    ).get
+
+    val image = Image("AAAA", dimensions, caps, options)
+    val lines = image.render(20)
+
+    assertEquals(lines.length, expected.rows)
+    assertEquals(lines.length >= 1, true)
+
+  test("content after Kitty image appears below reserved rows"):
+    val terminal     = VirtualTerminal(20, 10)
+    val dimensions   = ImageDimensions(100, 100)
+    val options      = ImageRenderOptions(maxWidthCells = Some(1))
+    val caps         = TerminalCapabilities(
+      trueColor = true,
+      hyperlinks = true,
+      images = Some(ImageProtocol.Kitty)
+    )
+    val image        = Image("AAAA", dimensions, caps, options)
+    val after        = FixedLine("after")
+    val expectedRows =
+      TerminalImageProtocol.renderBase64Image(
+        "AAAA",
+        dimensions,
+        caps,
+        terminalWidth = 20,
+        options
+      ).get.rows
+
+    val tui = TUI(terminal)
+    tui.addChild(image)
+    tui.addChild(after)
+    tui.start()
+
+    val lines      = visibleOutputLines(terminal.output)
+    val afterIndex = lines.indexWhere(_.contains("after"))
+
+    assert(afterIndex >= 0)
+    assertEquals(afterIndex, expectedRows)
+
+  test("content after iTerm2 image appears below reserved rows"):
+    val terminal     = VirtualTerminal(20, 10)
+    val dimensions   = ImageDimensions(100, 100)
+    val options      = ImageRenderOptions(maxWidthCells = Some(1))
+    val caps         = TerminalCapabilities(
+      trueColor = true,
+      hyperlinks = true,
+      images = Some(ImageProtocol.ITerm2)
+    )
+    val image        = Image("AAAA", dimensions, caps, options)
+    val after        = FixedLine("after")
+    val expectedRows =
+      TerminalImageProtocol.renderBase64Image(
+        "AAAA",
+        dimensions,
+        caps,
+        terminalWidth = 20,
+        options
+      ).get.rows
+
+    val tui = TUI(terminal)
+    tui.addChild(image)
+    tui.addChild(after)
+    tui.start()
+
+    val lines      = visibleOutputLines(terminal.output)
+    val afterIndex = lines.indexWhere(_.contains("after"))
+
+    assert(afterIndex >= 0)
+    assertEquals(afterIndex, expectedRows)
+
+  private final class FixedLine(var value: String) extends Component:
+    override def render(width: Int): Vector[String] = Vector(value)
+
+  private def visibleOutputLines(output: String): Vector[String] =
+    Ansi.strip(output)
+      .replace("\r\n", "\n")
+      .replace('\r', '\n')
+      .split("\n", -1)
+      .toVector
 
   private def pngBytes(width: Int, height: Int): Array[Byte] =
     Array[Byte](

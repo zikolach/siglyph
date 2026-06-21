@@ -16,15 +16,19 @@ Terminal capability detection SHALL treat Warp as Kitty-image capable when not r
 - **THEN** terminal capabilities do not report image support
 
 ### Requirement: Cell-size-aware image sizing
-Image sizing SHALL use queried terminal cell dimensions when valid data is available and SHALL fall back to deterministic default cell dimensions when unavailable.
+Image sizing that opts into runtime terminal cell dimensions SHALL use queried dimensions when valid data is available and SHALL fall back to deterministic default cell dimensions when unavailable. Image sizing with fixed `ImageRenderOptions.cellDimensions` SHALL use those fixed dimensions exactly.
 
 #### Scenario: Valid cell dimensions affect image rows
 - **WHEN** image cell-size calculation receives valid terminal cell pixel dimensions
 - **THEN** calculated image cell rows preserve image aspect ratio using those dimensions
 
 #### Scenario: Missing cell dimensions use default
-- **WHEN** no valid terminal cell dimensions are available
+- **WHEN** runtime image sizing has no valid terminal cell dimensions available
 - **THEN** image sizing uses the documented default cell dimensions
+
+#### Scenario: Fixed cell dimensions remain deterministic
+- **WHEN** image sizing receives fixed `ImageCellDimensions`
+- **THEN** image sizing uses those fixed dimensions without reading cached runtime dimensions
 
 #### Scenario: Invalid cell dimensions are ignored
 - **WHEN** terminal cell dimensions are zero, negative, or malformed

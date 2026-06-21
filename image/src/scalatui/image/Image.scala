@@ -6,6 +6,7 @@ import scalatui.syntax.Equality.*
 import scalatui.terminal.{
   ImageDimensions,
   ImageCellDimensions,
+  ImageCellDimensionsSource,
   ImageCellSize,
   ImageRenderOptions,
   TerminalCapabilities,
@@ -222,7 +223,9 @@ final class Image(
     base64Data: String,
     dimensions: ImageDimensions,
     capabilities: TerminalCapabilities,
-    options: ImageRenderOptions = ImageRenderOptions(),
+    options: ImageRenderOptions = ImageRenderOptions(
+      cellDimensionsSource = ImageCellDimensionsSource.Runtime
+    ),
     theme: ImageTheme = ImageTheme()
 ) extends Component:
   private var imageId = options.imageId
