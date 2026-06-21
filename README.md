@@ -52,6 +52,7 @@ Single-file demos live in [`examples/scala-cli/`](examples/scala-cli/) and are i
 
 ```bash
 ./examples/scala-cli/markdown.scala
+./examples/scala-cli/image.scala /path/to/image.png
 ```
 
 They reference Maven Central dependencies, so they can run without cloning or GitHub Packages credentials.
@@ -125,7 +126,7 @@ import scalatui.terminal.jvm.SttyTerminal
 
 Markdown rendering stays in `siglyph-markdown`. The baseline renderer is dependency-free and supports theme hooks, readable link fallback, OSC 8 links when `TerminalCapabilities.hyperlinks` is true, parser adapters, and optional fenced-code highlighter hooks.
 
-Image rendering stays in `siglyph-image`. `ImageSource.fromFile(path)` loads supported PNG, JPEG, GIF, and WebP files into base64 data, MIME type, and dimensions for the existing `Image` component contract. Unsupported terminals render readable fallback text.
+Image rendering stays in `siglyph-image`. `ImageSource.fromFile(path)` loads supported PNG, JPEG, GIF, and WebP files into base64 data, MIME type, and dimensions for the existing `Image` component contract. Unsupported terminals render readable fallback text. `examples/scala-cli/image.scala` is the quickest visual smoke test for protocol rendering, fallback behavior, runtime cell-size sizing in supported versions, and row reservation.
 
 ## Terminal integration helpers
 

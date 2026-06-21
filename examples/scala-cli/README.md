@@ -12,6 +12,7 @@ Run from this repository:
 ./examples/scala-cli/markdown.scala
 ./examples/scala-cli/hello.scala
 ./examples/scala-cli/editor-autocomplete.scala
+./examples/scala-cli/image.scala /path/to/image.png
 ```
 
 Run from a raw Gist URL:
@@ -22,7 +23,7 @@ chmod +x hello.scala
 ./hello.scala
 ```
 
-`hello.scala` and `editor-autocomplete.scala` require a real macOS/Linux TTY.
+`hello.scala`, `editor-autocomplete.scala`, and `image.scala` require a real macOS/Linux TTY.
 `markdown.scala` is non-interactive and renders to standard output.
 
 `editor-autocomplete.scala` demonstrates the built-in `CombinedAutocompleteProvider` with:
@@ -35,3 +36,13 @@ chmod +x hello.scala
 - an application-owned `#` trigger source for tags.
 
 No external shell tools such as `fd`, `find`, or `bash` are used for completion.
+
+`image.scala` demonstrates `ImageSource.fromFile`, terminal image capability detection, protocol rendering when Kitty/iTerm2-style images are supported, and readable fallback text otherwise. It accepts PNG, JPEG, GIF, and WebP files. In siglyph versions with runtime cell-size support, the image component uses terminal cell-size replies for row sizing and keeps following text below the image area.
+
+To test unreleased changes from this checkout before the next Maven Central release, run the image example against local sources:
+
+```bash
+scala-cli run --workspace /tmp/siglyph-image-demo \
+  examples/scala-cli/image.scala core/src terminalJvm/src image/src -- \
+  /path/to/image.png
+```
