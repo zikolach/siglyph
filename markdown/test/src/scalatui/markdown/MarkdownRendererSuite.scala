@@ -42,6 +42,72 @@ class MarkdownRendererSuite extends munit.FunSuite:
     assert(lines.nonEmpty)
     assert(lines.forall(line => Ansi.visibleWidth(line) <= 8), lines.mkString("\n"))
 
+  test("parser preserves list marker task marker and loose-list metadata"):
+    val parsed = BasicMarkdownParser.parse("+ [ ] todo\n\n7. done")
+
+    val lists = parsed.toOption.get.collect { case block: MarkdownBlock.DetailedListBlock => block }
+    assertEquals(lists.length, 2)
+    assertEquals(lists.head.items.head.sourceMarker, Some("+"))
+    assertEquals(lists.head.items.head.taskMarker, Some("[ ]"))
+    assertEquals(lists.head.items.head.text, "todo")
+    assertEquals(lists(1).items.head.sourceMarker, Some("7."))
+
+    val loose = BasicMarkdownParser.parse("- first\n\n- second").toOption.get.collect {
+      case block: MarkdownBlock.DetailedListBlock => block
+    }.head
+    assertEquals(loose.items(1).blankLinesBefore, 1)
+
+  test("default list rendering keeps normalized markers"):
+    val unordered = BasicMarkdownRenderer.default.render("+ plus\n* star\n- dash", 20)
+    val ordered   = BasicMarkdownRenderer.default.render("3. three\n7. seven", 20)
+
+    assertEquals(unordered, Vector("- plus", "- star", "- dash"))
+    assertEquals(ordered, Vector("1. three", "2. seven"))
+
+  test("source marker option preserves unordered and ordered markers"):
+    val renderer  = BasicMarkdownRenderer(options =
+      MarkdownRenderOptions(
+        preserveSourceListMarkers = true
+      )
+    )
+    val unordered = renderer.render("+ plus\n* star\n- dash", 20)
+    val ordered   = renderer.render("3. three\n7. seven", 20)
+
+    assertEquals(unordered, Vector("+ plus", "* star", "- dash"))
+    assertEquals(ordered, Vector("3. three", "7. seven"))
+
+  test("task markers remain visible and wrapped content aligns after task marker"):
+    val lines = BasicMarkdownRenderer.default.render(
+      "- [ ] todo item wraps\n- [x] done item wraps\n- [X] caps",
+      14
+    )
+
+    assert(lines.exists(_.contains("- [ ] todo")), lines.mkString("\n"))
+    assert(lines.exists(_.contains("- [x] done")), lines.mkString("\n"))
+    assert(lines.exists(_.contains("- [X] caps")), lines.mkString("\n"))
+    assert(lines.exists(_.startsWith("      ")), lines.mkString("\n"))
+    assert(lines.forall(line => Ansi.visibleWidth(line) <= 14), lines.mkString("\n"))
+
+  test("loose lists keep item separation while tight lists stay compact"):
+    val loose = BasicMarkdownRenderer.default.render("- first\n\n- second", 20)
+    val tight = BasicMarkdownRenderer.default.render("- first\n- second", 20)
+
+    assertEquals(loose, Vector("- first", "", "- second"))
+    assertEquals(tight, Vector("- first", "- second"))
+
+  test("wrapped list continuation indentation follows rendered marker width"):
+    val renderer  = BasicMarkdownRenderer(options =
+      MarkdownRenderOptions(
+        preserveSourceListMarkers = true
+      )
+    )
+    val unordered = renderer.render("* abc def ghi", 12)
+    val ordered   = renderer.render("12. abc def ghi", 12)
+
+    assert(unordered.exists(_.startsWith("  ")), unordered.mkString("\n"))
+    assert(ordered.exists(_.startsWith("    ")), ordered.mkString("\n"))
+    assert((unordered ++ ordered).forall(line => Ansi.visibleWidth(line) <= 12))
+
   test("parser failures fall back to readable plain text"):
     val renderer = BasicMarkdownRenderer(new MarkdownParser:
       override def parse(markdown: String): Either[String, Vector[MarkdownBlock]] = Left("boom"))

@@ -94,7 +94,8 @@ object OverlayRenderer:
     val safeOverlayWidth  = math.max(0, math.min(overlayWidth, safeTerminalWidth - safeStart))
     if safeOverlayWidth <= 0 then Ansi.truncateToWidth(baseLine, safeTerminalWidth, "")
     else
-      val before        = Ansi.sliceByColumns(baseLine, 0, safeStart).text
+      val beforeSlice   = Ansi.sliceByColumns(baseLine, 0, safeStart)
+      val before        = beforeSlice.text + " ".repeat(math.max(0, safeStart - beforeSlice.width))
       val overlay       = Ansi.sliceByColumns(overlayLine, 0, safeOverlayWidth)
       val paddedOverlay = overlay.text + " ".repeat(math.max(0, safeOverlayWidth - overlay.width))
       val afterWidth    = math.max(0, safeTerminalWidth - safeStart - safeOverlayWidth)

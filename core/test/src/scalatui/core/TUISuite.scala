@@ -233,6 +233,29 @@ class TUISuite extends munit.FunSuite:
     assert(plainLines.forall(_.length <= 3), plainLines.toString)
     assertEquals(tui.sanitizedLineCount, 1)
 
+  test("one-column render remains width safe"):
+    val terminal = VirtualTerminal(1, 5)
+    val tui      = TUI(terminal)
+    tui.addChild(MutableLine("界x"))
+
+    tui.start()
+
+    assert(visibleOutputLines(terminal.output).forall(Ansi.visibleWidth(_) <= 1), terminal.output)
+    assertEquals(tui.sanitizedLineCount, 1)
+
+  test("shrinking terminal to one column repaints width-safe output"):
+    val terminal = VirtualTerminal(4, 5)
+    val tui      = TUI(terminal)
+    tui.addChild(MutableLine("界ab"))
+    tui.start()
+    terminal.clearWrites()
+
+    terminal.resize(1, 5)
+
+    assert(terminal.output.contains("\r\u001b[J"), terminal.output)
+    assert(visibleOutputLines(terminal.output).forall(Ansi.visibleWidth(_) <= 1), terminal.output)
+    assertEquals(tui.sanitizedLineCount, 1)
+
   test("image protocol escapes remain in synchronized sanitized output"):
     val terminal = VirtualTerminal(3, 5)
     val sequence = TerminalImageProtocol.renderBase64Image(
