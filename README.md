@@ -195,19 +195,19 @@ openspec/                active and promoted OpenSpec change/spec artifacts
 
 ## Development
 
-Explicit BSP installation
+### Explicit BSP installation
 
 ```bash
 mill --bsp-install
 ```
 
-IntelliJ IDEA XML Support
+### IntelliJ IDEA XML Support
 
 ```bash
 mill mill.idea/
 ```
 
-Project build and validation
+### Project build and validation
 
 ```bash
 mill __.compile
