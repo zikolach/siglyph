@@ -6,6 +6,7 @@ import scalatui.syntax.Equality.*
 import scalatui.terminal.{
   ImageDimensions,
   ImageCellDimensions,
+  ImageCellDimensionsSource,
   ImageCellSize,
   ImageRenderOptions,
   TerminalCapabilities,
@@ -217,12 +218,19 @@ object ImageSizing:
  * The component accepts already-base64 encoded image data and caller-supplied dimensions so this
  * module stays dependency-free. File loading, header parsing, scaling, or transcoding can be added
  * by future optional helper modules without changing this component contract.
+ *
+ * By default, this high-level component opts into runtime terminal cell dimensions because it is
+ * rendered inside a [[scalatui.core.TUI]] lifecycle that sends the cell-size query on start. Pass
+ * [[ImageRenderOptions]] with [[ImageCellDimensionsSource.Fixed]] when component rendering must use
+ * caller-supplied deterministic cell dimensions.
  */
 final class Image(
     base64Data: String,
     dimensions: ImageDimensions,
     capabilities: TerminalCapabilities,
-    options: ImageRenderOptions = ImageRenderOptions(),
+    options: ImageRenderOptions = ImageRenderOptions(
+      cellDimensionsSource = ImageCellDimensionsSource.Runtime
+    ),
     theme: ImageTheme = ImageTheme()
 ) extends Component:
   private var imageId = options.imageId

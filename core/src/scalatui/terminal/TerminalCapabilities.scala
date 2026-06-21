@@ -41,6 +41,11 @@ object TerminalCapabilities:
       TerminalCapabilities(trueColor = true, hyperlinks = true, images = Some(ImageProtocol.Kitty))
     else if env.contains("WEZTERM_PANE") || (termProgram === "wezterm") then
       TerminalCapabilities(trueColor = true, hyperlinks = true, images = Some(ImageProtocol.Kitty))
+    else if (termProgram === "warpterminal") || env.contains("WARP_SESSION_ID") || env.contains(
+        "WARP_TERMINAL_SESSION_UUID"
+      )
+    then
+      TerminalCapabilities(trueColor = true, hyperlinks = true, images = Some(ImageProtocol.Kitty))
     else if env.contains("ITERM_SESSION_ID") || (termProgram === "iterm.app") then
       TerminalCapabilities(trueColor = true, hyperlinks = true, images = Some(ImageProtocol.ITerm2))
     else if env.contains(

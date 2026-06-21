@@ -8,6 +8,7 @@ import scalatui.terminal.{
   Terminal,
   TerminalColorProtocol,
   TerminalColorScheme,
+  TerminalImageProtocol,
   TerminalInput,
   TerminalKey
 }
@@ -215,7 +216,9 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         )
         if terminalColorSchemeNotificationsEnabled then
           terminal.write(TerminalColorProtocol.EnableColorSchemeNotifications)
+        TerminalImageProtocol.resetCellDimensions()
         terminal.hideCursor()
+        terminal.write(TerminalImageProtocol.QueryCellDimensions)
         requestRenderInternal(force = true, clear = false)
         flushRender()
       catch
@@ -308,6 +311,17 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   private def consumeTerminalProtocolReply(
       input: TerminalInput
   ): Option[Vector[(TerminalColorScheme => Unit, TerminalColorScheme)]] = input match
+    case TerminalInput.Raw(data) if TerminalImageProtocol.isCellSizeResponse(data)             =>
+      val previousDimensions = TerminalImageProtocol.cellDimensions
+      TerminalImageProtocol.parseCellSizeResponse(data).foreach { dimensions =>
+        TerminalImageProtocol.setCellDimensions(dimensions.widthPx, dimensions.heightPx).foreach {
+          updatedDimensions =>
+            if updatedDimensions !== previousDimensions then
+              requestRender()
+              flushRender()
+        }
+      }
+      Some(Vector.empty)
     case TerminalInput.Raw(data) if TerminalColorProtocol.isOsc11BackgroundColorResponse(data) =>
       TerminalColorProtocol.parseOsc11BackgroundColor(data).foreach { color =>
         pendingBackgroundColorQueries.foreach(_.complete(color))

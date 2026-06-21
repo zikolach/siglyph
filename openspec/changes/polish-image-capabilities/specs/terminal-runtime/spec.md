@@ -4,8 +4,8 @@
 The terminal runtime SHALL support terminal cell-size query response parsing for image capability decisions.
 
 #### Scenario: Cell-size response is parsed
-- **WHEN** the terminal sends a valid cell-size response containing pixel width and pixel height for a terminal cell
-- **THEN** the runtime exposes those positive dimensions to image sizing code
+- **WHEN** the terminal sends a valid cell-size response containing pixel height and pixel width for a terminal cell
+- **THEN** the runtime exposes those positive dimensions to image sizing code as width and height
 
 #### Scenario: Cell-size query has safe fallback
 - **WHEN** no valid cell-size response is available

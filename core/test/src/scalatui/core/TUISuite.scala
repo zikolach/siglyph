@@ -10,6 +10,7 @@ import scalatui.components.{
   Text
 }
 import scalatui.terminal.{
+  ImageCellDimensions,
   ImageDimensions,
   ImageProtocol,
   ImageRenderOptions,
@@ -630,6 +631,56 @@ class TUISuite extends munit.FunSuite:
     terminal.sendInput(TerminalInput.Raw("\u001b]11;not-a-color\u0007"))
     terminal.sendInput(TerminalInput.Raw("\u001b[?997;1n"))
     terminal.sendInput(TerminalInput.Raw("\u001b[?997;3n"))
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("x")))
+
+    assertEquals(delivered, Vector(TerminalInput.Key(TerminalKey.Character("x"))))
+
+  test("cell-size reply is consumed before component input routing"):
+    val terminal  = VirtualTerminal(20, 5)
+    var delivered = Vector.empty[TerminalInput]
+    val component = new Component:
+      override def handleInputResult(input: TerminalInput): InputResult =
+        delivered :+= input
+        InputResult.NoRender
+      override def render(width: Int): Vector[String]                   = Vector("stable")
+    val tui       = TUI(terminal)
+    tui.addChild(component)
+    tui.setFocus(component)
+    tui.start()
+
+    terminal.sendInput(TerminalInput.Raw("\u001b[6;12;24t"))
+    assertEquals(delivered, Vector.empty)
+    assertEquals(TerminalImageProtocol.cellDimensions, ImageCellDimensions(24, 12))
+
+  test("valid cell-size reply triggers repaint"):
+    val terminal  = VirtualTerminal(20, 5)
+    val component = new Component:
+      override def render(width: Int): Vector[String] =
+        val dimensions = TerminalImageProtocol.cellDimensions
+        Vector(s"${dimensions.widthPx}x${dimensions.heightPx}")
+    val tui       = TUI(terminal)
+    tui.addChild(component)
+    tui.start()
+    terminal.clearWrites()
+
+    terminal.sendInput(TerminalInput.Raw("\u001b[6;10;20t"))
+
+    assert(terminal.output.contains("20x10"), terminal.output)
+
+  test("cell-size reply does not block following input"):
+    val terminal  = VirtualTerminal(20, 5)
+    var delivered = Vector.empty[TerminalInput]
+    val component = new Component:
+      override def handleInputResult(input: TerminalInput): InputResult =
+        delivered :+= input
+        InputResult.NoRender
+      override def render(width: Int): Vector[String]                   = Vector("stable")
+    val tui       = TUI(terminal)
+    tui.addChild(component)
+    tui.setFocus(component)
+    tui.start()
+
+    terminal.sendInput(TerminalInput.Raw("\u001b[6;0;24t"))
     terminal.sendInput(TerminalInput.Key(TerminalKey.Character("x")))
 
     assertEquals(delivered, Vector(TerminalInput.Key(TerminalKey.Character("x"))))

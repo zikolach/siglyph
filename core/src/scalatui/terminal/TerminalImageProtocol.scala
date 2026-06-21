@@ -12,14 +12,30 @@ final case class ImageCellDimensions(widthPx: Int = 9, heightPx: Int = 18) deriv
 /** Cell size selected for protocol rendering. */
 final case class ImageCellSize(widthCells: Int, heightCells: Int) derives CanEqual
 
-/** Options for protocol image rendering. */
+/** Source for terminal cell dimensions used by protocol image rendering. */
+enum ImageCellDimensionsSource derives CanEqual:
+  /** Use caller-supplied [[ImageRenderOptions.cellDimensions]] exactly. */
+  case Fixed
+
+  /** Use the last valid runtime terminal cell-size reply, or fallback dimensions before a reply. */
+  case Runtime
+
+/**
+ * Options for protocol image rendering.
+ *
+ * Low-level protocol sizing is deterministic by default: `cellDimensionsSource` defaults to
+ * [[ImageCellDimensionsSource.Fixed]] and uses `cellDimensions` exactly. Use
+ * [[ImageCellDimensionsSource.Runtime]] only when sizing should read the runtime cell-size cache
+ * maintained by [[TerminalImageProtocol]].
+ */
 final case class ImageRenderOptions(
     mimeType: String = "image/png",
     filename: Option[String] = None,
     maxWidthCells: Option[Int] = None,
     maxHeightCells: Option[Int] = None,
     imageId: Option[Int] = None,
-    cellDimensions: ImageCellDimensions = ImageCellDimensions()
+    cellDimensions: ImageCellDimensions = ImageCellDimensions(),
+    cellDimensionsSource: ImageCellDimensionsSource = ImageCellDimensionsSource.Fixed
 ) derives CanEqual
 
 /** Protocol render result and row reservation metadata. */
@@ -28,6 +44,42 @@ final case class ImageRenderResult(sequence: String, rows: Int, imageId: Option[
 
 /** Dependency-free Kitty/iTerm2 terminal image protocol helpers. */
 object TerminalImageProtocol:
+  private val defaultCellDimensions   = ImageCellDimensions(widthPx = 9, heightPx = 18)
+  private val defaultCellSizeResponse = "^\u001b\\[6;(\\d+);(\\d+)t$".r
+  private var currentCellDimensions   = defaultCellDimensions
+
+  /** Query terminal for terminal cell dimensions in pixels. */
+  val QueryCellDimensions: String = "\u001b[16t"
+
+  /** Last known terminal cell dimensions used for image layout decisions. */
+  def cellDimensions: ImageCellDimensions = synchronized(currentCellDimensions)
+
+  /** Parse a terminal cell-size report into validated pixel dimensions. */
+  def parseCellSizeResponse(data: String): Option[ImageCellDimensions] = data match
+    case defaultCellSizeResponse(heightText, widthText) =>
+      for
+        widthPx  <- positiveInt(widthText)
+        heightPx <- positiveInt(heightText)
+      yield ImageCellDimensions(widthPx = widthPx, heightPx = heightPx)
+    case _                                              => None
+
+  /** Return true when data matches the terminal cell-size report format. */
+  def isCellSizeResponse(data: String): Boolean = defaultCellSizeResponse.matches(data)
+
+  /**
+   * Update cached terminal cell dimensions for image layout, returning the normalized value when
+   * valid.
+   */
+  def setCellDimensions(widthPx: Int, heightPx: Int): Option[ImageCellDimensions] =
+    Option.when(widthPx > 0 && heightPx > 0) {
+      val updated = ImageCellDimensions(widthPx, heightPx)
+      synchronized { currentCellDimensions = updated }
+      updated
+    }
+
+  /** Reset cached dimensions to the built-in deterministic fallback. */
+  def resetCellDimensions(): Unit = synchronized { currentCellDimensions = defaultCellDimensions }
+
   private var nextImageId = 1
 
   /** Allocate a stable Kitty image id for reuse/update flows. */
@@ -46,7 +98,7 @@ object TerminalImageProtocol:
       math.max(1, math.min(terminalWidth, options.maxWidthCells.getOrElse(terminalWidth)))
     val sourceWidth      = math.max(1, dimensions.widthPx)
     val sourceHeight     = math.max(1, dimensions.heightPx)
-    val cell             = options.cellDimensions
+    val cell             = effectiveCellDimensions(options)
     val maxHeight        = options.maxHeightCells.map(math.max(1, _))
     val widthFromHeight  = maxHeight.map { heightCap =>
       math.max(
@@ -80,6 +132,13 @@ object TerminalImageProtocol:
         (widthCells.toDouble * cell.widthPx.toDouble * sourceHeight.toDouble) / (cell.heightPx.toDouble * sourceWidth.toDouble)
       ).toInt
     )
+
+  private def effectiveCellDimensions(options: ImageRenderOptions): ImageCellDimensions =
+    options.cellDimensionsSource match
+      case ImageCellDimensionsSource.Fixed   => options.cellDimensions
+      case ImageCellDimensionsSource.Runtime => cellDimensions
+
+  private def positiveInt(value: String): Option[Int] = value.toIntOption.filter(_ > 0)
 
   /** Render base64 image data according to terminal capabilities. */
   def renderBase64Image(
