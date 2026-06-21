@@ -53,7 +53,8 @@ mill interactiveNativeDemo.nativeLink
 Run the linked binary from Mill's output directory in an interactive terminal. Optional flags are passed after the binary path.
 
 ```bash
-out/interactiveNativeDemo/nativeLink.dest/out -- --hardware-cursor
+./out/interactiveNativeDemo/nativeLink.dest/out
+./out/interactiveNativeDemo/nativeLink.dest/out --hardware-cursor
 ```
 
 Expected behavior matches the JVM multiline editor demo, including narrow-width and height resize redraw checks, using `PosixTerminal` instead of `SttyTerminal`.
