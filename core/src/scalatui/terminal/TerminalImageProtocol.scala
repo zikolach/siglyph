@@ -20,7 +20,14 @@ enum ImageCellDimensionsSource derives CanEqual:
   /** Use the last valid runtime terminal cell-size reply, or fallback dimensions before a reply. */
   case Runtime
 
-/** Options for protocol image rendering. */
+/**
+ * Options for protocol image rendering.
+ *
+ * Low-level protocol sizing is deterministic by default: `cellDimensionsSource` defaults to
+ * [[ImageCellDimensionsSource.Fixed]] and uses `cellDimensions` exactly. Use
+ * [[ImageCellDimensionsSource.Runtime]] only when sizing should read the runtime cell-size cache
+ * maintained by [[TerminalImageProtocol]].
+ */
 final case class ImageRenderOptions(
     mimeType: String = "image/png",
     filename: Option[String] = None,

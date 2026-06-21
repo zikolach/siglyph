@@ -37,7 +37,7 @@ chmod +x hello.scala
 
 No external shell tools such as `fd`, `find`, or `bash` are used for completion.
 
-`image.scala` demonstrates `ImageSource.fromFile`, terminal image capability detection, protocol rendering when Kitty/iTerm2-style images are supported, and readable fallback text otherwise. It accepts PNG, JPEG, GIF, and WebP files. In siglyph versions with runtime cell-size support, the image component uses terminal cell-size replies for row sizing and keeps following text below the image area.
+`image.scala` demonstrates `ImageSource.fromFile`, terminal image capability detection, protocol rendering when Kitty/iTerm2-style images are supported, and readable fallback text otherwise. It accepts PNG, JPEG, GIF, and WebP files. In siglyph versions with runtime cell-size support, the image component uses terminal cell-size replies by default for row sizing and keeps following text below the image area. Applications that need deterministic fixed sizing can pass `ImageRenderOptions(cellDimensionsSource = ImageCellDimensionsSource.Fixed, cellDimensions = ...)`.
 
 To test unreleased changes from this checkout before the next Maven Central release, run the image example against local sources:
 
