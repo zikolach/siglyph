@@ -46,10 +46,10 @@ Markdown is intentionally isolated in the `markdown` module. No parser dependenc
 - `BasicMarkdownParser` supports the portable first subset without third-party dependencies.
 - `BasicMarkdownRenderer` converts parsed blocks to width-safe terminal lines.
 - `MarkdownTheme` exposes hooks for headings, paragraphs, links, inline code, fenced code, quotes, horizontal rules, lists, tables, emphasis, and strong text.
-- `MarkdownRenderOptions` carries theme, terminal hyperlink capability, and an optional fenced-code highlighter.
+- `MarkdownRenderOptions` carries theme, terminal hyperlink capability, an optional fenced-code highlighter, and `preserveSourceListMarkers` for opt-in `-`, `*`, `+`, and ordered marker preservation.
 - `Markdown` is a normal component wrapper with padding support.
 
-The dependency-free subset is intentionally conservative: headings, paragraphs, inline emphasis, inline code, links, fenced/indented code, ordered/unordered lists, block quotes, horizontal rules, and simple pipe tables remain readable and width-safe. Markdown links render as readable `label (url)` text by default and as OSC 8 hyperlinks when the renderer is configured with hyperlink-capable terminal settings. Unsupported constructs fall back to readable plain/minimal formatting rather than throwing during component rendering.
+The dependency-free subset is intentionally conservative: headings, paragraphs, inline emphasis, inline code, links, fenced/indented code, ordered/unordered lists, block quotes, horizontal rules, and simple pipe tables remain readable and width-safe. Markdown links render as readable `label (url)` text by default and as OSC 8 hyperlinks when the renderer is configured with hyperlink-capable terminal settings. List rendering normalizes markers by default; applications can enable `MarkdownRenderOptions(preserveSourceListMarkers = true)` to preserve baseline-detected unordered and ordered source markers. Task-list markers such as `[ ]`, `[x]`, and `[X]` remain visible text rather than interactive checkbox state. Blank lines between baseline-supported loose list items are preserved. Nested lists, multi-paragraph list items, and full CommonMark list edge cases remain deferred to optional parser adapters. Unsupported constructs fall back to readable plain/minimal formatting rather than throwing during component rendering.
 
 ## Optional adapter boundary
 

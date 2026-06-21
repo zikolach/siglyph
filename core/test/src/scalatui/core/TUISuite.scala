@@ -167,7 +167,7 @@ class TUISuite extends munit.FunSuite:
     assert(output.contains("changed" + TUI.LineReset), output)
     assert(!output.contains("first" + TUI.LineReset), output)
 
-  test("width change redraws frame in place without clearing scrollback"):
+  test("width change clears screen and redraws like pi-tui"):
     val terminal = VirtualTerminal(20, 5)
     val tui      = TUI(terminal)
     tui.addChild(MutableLine("hello"))
@@ -177,8 +177,7 @@ class TUISuite extends munit.FunSuite:
     terminal.resize(30, 5)
 
     val output = terminal.output
-    assert(output.contains("\r\u001b[J"), output)
-    assert(!output.contains("\u001b[2J\u001b[H\u001b[3J"), output)
+    assert(output.contains("\u001b[2J\u001b[H\u001b[3J"), output)
     assert(output.contains("hello" + TUI.LineReset), output)
 
   test("over-wide lines are sanitized instead of failing"):
@@ -192,7 +191,7 @@ class TUISuite extends munit.FunSuite:
     assertEquals(tui.sanitizedLineCount, 1)
     assertEquals(tui.lastSanitizedLine.map(_.originalWidth), Some(4))
 
-  test("height change redraws frame in place without clearing scrollback"):
+  test("height change clears screen and redraws like pi-tui"):
     val terminal = VirtualTerminal(20, 5)
     val tui      = TUI(terminal)
     tui.addChild(MutableLine("hello"))
@@ -202,8 +201,7 @@ class TUISuite extends munit.FunSuite:
     terminal.resize(20, 3)
 
     val output = terminal.output
-    assert(output.contains("\r\u001b[J"), output)
-    assert(!output.contains("\u001b[2J\u001b[H\u001b[3J"), output)
+    assert(output.contains("\u001b[2J\u001b[H\u001b[3J"), output)
     assert(output.contains("hello" + TUI.LineReset), output)
 
   test("zero terminal dimensions are clamped before component rendering"):
@@ -231,6 +229,29 @@ class TUISuite extends munit.FunSuite:
     val plainLines = visibleOutputLines(terminal.output)
     assert(plainLines.exists(_.contains("a界")), terminal.output)
     assert(plainLines.forall(_.length <= 3), plainLines.toString)
+    assertEquals(tui.sanitizedLineCount, 1)
+
+  test("one-column render remains width safe"):
+    val terminal = VirtualTerminal(1, 5)
+    val tui      = TUI(terminal)
+    tui.addChild(MutableLine("界x"))
+
+    tui.start()
+
+    assert(visibleOutputLines(terminal.output).forall(Ansi.visibleWidth(_) <= 1), terminal.output)
+    assertEquals(tui.sanitizedLineCount, 1)
+
+  test("shrinking terminal to one column clears and repaints width-safe output"):
+    val terminal = VirtualTerminal(4, 5)
+    val tui      = TUI(terminal)
+    tui.addChild(MutableLine("界ab"))
+    tui.start()
+    terminal.clearWrites()
+
+    terminal.resize(1, 5)
+
+    assert(terminal.output.contains("\u001b[2J\u001b[H\u001b[3J"), terminal.output)
+    assert(visibleOutputLines(terminal.output).forall(Ansi.visibleWidth(_) <= 1), terminal.output)
     assertEquals(tui.sanitizedLineCount, 1)
 
   test("image protocol escapes remain in synchronized sanitized output"):
@@ -856,6 +877,5 @@ class TUISuite extends munit.FunSuite:
 
     terminal.resize(2, 2)
 
-    assert(terminal.output.contains("\r\u001b[J"), terminal.output)
-    assert(!terminal.output.contains("\u001b[2J\u001b[H\u001b[3J"), terminal.output)
+    assert(terminal.output.contains("\u001b[2J\u001b[H\u001b[3J"), terminal.output)
     assert(visibleOutputLines(terminal.output).exists(_.contains("wi")), terminal.output)

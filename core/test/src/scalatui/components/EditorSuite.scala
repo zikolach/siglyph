@@ -332,6 +332,64 @@ class EditorSuite extends munit.FunSuite:
     assertEquals(clean.handleInputResult(TerminalInput.Key(TerminalKey.Down)), InputResult.Render)
     assertEquals(clean.text, "")
 
+  test("history ignores empty and consecutive duplicate entries"):
+    val editor = Editor()
+    editor.addToHistory("")
+    editor.addToHistory("   ")
+    editor.addToHistory("same")
+    editor.addToHistory("same")
+
+    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Up)), InputResult.Render)
+    assertEquals(editor.text, "same")
+    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Up)), InputResult.NoRender)
+    assertEquals(editor.text, "same")
+
+  test("history keeps non-consecutive duplicates and caps at one hundred entries"):
+    val duplicate = Editor()
+    duplicate.addToHistory("first")
+    duplicate.addToHistory("second")
+    duplicate.addToHistory("first")
+
+    duplicate.handleInputResult(TerminalInput.Key(TerminalKey.Up))
+    assertEquals(duplicate.text, "first")
+    duplicate.handleInputResult(TerminalInput.Key(TerminalKey.Up))
+    assertEquals(duplicate.text, "second")
+    duplicate.handleInputResult(TerminalInput.Key(TerminalKey.Up))
+    assertEquals(duplicate.text, "first")
+
+    val capped = Editor()
+    (0 until 105).foreach(index => capped.addToHistory(s"prompt $index"))
+    (0 until 100).foreach(_ => capped.handleInputResult(TerminalInput.Key(TerminalKey.Up)))
+
+    assertEquals(capped.text, "prompt 5")
+    assertEquals(capped.handleInputResult(TerminalInput.Key(TerminalKey.Up)), InputResult.NoRender)
+    assertEquals(capped.text, "prompt 5")
+
+  test("setText exits history browsing"):
+    val editor = Editor()
+    editor.addToHistory("first")
+    editor.addToHistory("second")
+
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Up))
+    assertEquals(editor.text, "second")
+
+    editor.setText("")
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Up))
+    assertEquals(editor.text, "second")
+
+  test("large paste marker is edited as one logical unit"):
+    val pasted = (1 to 11).map(index => s"line$index").mkString("\n")
+    val editor = Editor("ab")
+    editor.setCursor(EditorCursor(0, 1))
+    editor.handleInputResult(TerminalInput.Paste(pasted))
+
+    assert(editor.text.contains("[paste #1 +11 lines]"), editor.text)
+    assertEquals(editor.cursor, EditorCursor(0, 2))
+
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Backspace))
+    assertEquals(editor.text, "ab")
+    assertEquals(editor.cursor, EditorCursor(0, 1))
+
   test("page up and page down preserve wrapped visual columns"):
     val editor = Editor("abcdefghijklmnopqrst")
     editor.render(1)

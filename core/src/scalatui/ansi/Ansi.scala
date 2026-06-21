@@ -3,6 +3,10 @@ package scalatui.ansi
 import scalatui.syntax.Equality.*
 import scalatui.unicode.Unicode
 
+/**
+ * ANSI-aware terminal text helpers. Visible width counts tabs as 3 columns, ignores escape
+ * sequences, and treats wide grapheme clusters as atomic cells when slicing or truncating.
+ */
 object Ansi:
   final case class Escape(code: String, length: Int) derives CanEqual
   final case class Slice(text: String, width: Int) derives CanEqual
@@ -37,9 +41,12 @@ object Ansi:
     else if visibleWidth(value) <= maxWidth then value
     else
       val ellipsisWidth = visibleWidth(ellipsis)
-      val target        = math.max(0, maxWidth - ellipsisWidth)
-      val prefix        = sliceByColumns(value, 0, target).text
-      if ellipsisWidth === 0 then prefix + Reset else prefix + Reset + ellipsis + Reset
+      if ellipsisWidth === 0 then withReset(sliceByColumns(value, 0, maxWidth).text)
+      else if ellipsisWidth >= maxWidth then withReset(sliceByColumns(ellipsis, 0, maxWidth).text)
+      else
+        val target = maxWidth - ellipsisWidth
+        val prefix = sliceByColumns(value, 0, target).text
+        withReset(prefix) + ellipsis + Reset
 
   def padRight(value: String, width: Int): String =
     val padding = math.max(0, width - visibleWidth(value))
@@ -48,32 +55,47 @@ object Ansi:
   def sliceByColumns(value: String, startColumn: Int, maxWidth: Int): Slice =
     if maxWidth <= 0 then Slice("", 0)
     else
-      val builder      = new StringBuilder
-      var visible      = 0
-      var emittedWidth = 0
-      var i            = 0
+      val safeStart      = math.max(0, startColumn)
+      val builder        = new StringBuilder
+      val pendingEscapes = new StringBuilder
+      var visible        = 0
+      var emittedWidth   = 0
+      var usedEscapes    = false
+      var i              = 0
+
+      def appendPendingEscapes(): Unit =
+        if pendingEscapes.nonEmpty then
+          builder.append(pendingEscapes.result())
+          pendingEscapes.clear()
+          usedEscapes = true
+
       while i < value.length && emittedWidth < maxWidth do
         extractEscape(value, i) match
           case Some(escape) =>
-            if visible >= startColumn then builder.append(escape.code)
+            if visible >= safeStart then
+              appendPendingEscapes()
+              builder.append(escape.code)
+              usedEscapes = true
+            else pendingEscapes.append(escape.code)
             i += escape.length
           case None         =>
-            val nextEscape  = nextEscapeIndex(value, i)
-            val plainEnd    = if nextEscape < 0 then value.length else nextEscape
-            val plain       = value.substring(i, plainEnd)
-            val clusters    = Unicode.graphemeClusters(plain)
-            var localOffset = 0
+            val nextEscape = nextEscapeIndex(value, i)
+            val plainEnd   = if nextEscape < 0 then value.length else nextEscape
+            val plain      = value.substring(i, plainEnd)
+            val clusters   = Unicode.graphemeClusters(plain)
             clusters.foreach { cluster =>
               val clusterWidth = Unicode.graphemeWidth(cluster)
               val clusterStart = visible
               val clusterEnd   = visible + clusterWidth
-              if clusterEnd > startColumn && emittedWidth + clusterWidth <= maxWidth then
+              if clusterStart >= safeStart && clusterEnd <= safeStart + maxWidth && emittedWidth + clusterWidth <= maxWidth
+              then
+                appendPendingEscapes()
                 builder.append(cluster)
                 emittedWidth += clusterWidth
               visible = clusterEnd
-              localOffset += cluster.length
             }
             i = plainEnd
+      if usedEscapes then builder.append(Reset)
       Slice(builder.result(), emittedWidth)
 
   def wrapTextWithAnsi(value: String, width: Int): Vector[String] =
@@ -85,9 +107,10 @@ object Ansi:
           val result    = Vector.newBuilder[String]
           var remaining = line
           while visibleWidth(remaining) > width do
-            val sliced = sliceByColumns(remaining, 0, width)
+            val sliced        = sliceByColumns(remaining, 0, width)
             result += sliced.text
-            remaining = sliceByColumns(remaining, width, Int.MaxValue / 4).text
+            val consumedWidth = if sliced.width > 0 then sliced.width else width
+            remaining = sliceByColumns(remaining, consumedWidth, Int.MaxValue / 4).text
           result += remaining
           result.result()
       }
@@ -115,3 +138,6 @@ object Ansi:
     result
 
   private def nextEscapeIndex(value: String, offset: Int): Int = value.indexOf('\u001b', offset)
+
+  private def withReset(value: String): String =
+    if value.endsWith(Reset) then value else value + Reset

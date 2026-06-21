@@ -39,7 +39,8 @@ final case class MarkdownRenderOptions(
       hyperlinks = false,
       images = None
     ),
-    highlighter: Option[MarkdownCodeHighlighter] = None
+    highlighter: Option[MarkdownCodeHighlighter] = None,
+    preserveSourceListMarkers: Boolean = false
 )
 
 /** Parser boundary for dependency-free or optional dependency-backed Markdown strategies. */
@@ -54,9 +55,17 @@ object MarkdownBlock:
   final case class Paragraph(text: String)                            extends MarkdownBlock
   final case class CodeBlock(language: Option[String], text: String)  extends MarkdownBlock
   final case class ListBlock(ordered: Boolean, items: Vector[String]) extends MarkdownBlock
+  final case class DetailedListBlock(ordered: Boolean, items: Vector[ListItem])
+      extends MarkdownBlock
   final case class BlockQuote(text: String)                           extends MarkdownBlock
   case object HorizontalRule                                          extends MarkdownBlock
   final case class Table(rows: Vector[Vector[String]])                extends MarkdownBlock
+  final case class ListItem(
+      text: String,
+      sourceMarker: Option[String] = None,
+      taskMarker: Option[String] = None,
+      blankLinesBefore: Int = 0
+  ) derives CanEqual
 
 /** Dependency-free line-oriented Markdown parser for the documented baseline subset. */
 object BasicMarkdownParser extends MarkdownParser:
@@ -107,13 +116,31 @@ object BasicMarkdownParser extends MarkdownParser:
           i += 1
         out += MarkdownBlock.BlockQuote(quoted.result().mkString("\n"))
       else if listMarker(line).nonEmpty then
-        val ordered = listMarker(line).exists(_._1)
-        val items   = Vector.newBuilder[String]
-        while i < lines.length && listMarker(lines(i)).exists(_._1 === ordered) do
-          val marker = listMarker(lines(i)).get
-          items += lines(i).trim.drop(marker._2).trim
-          i += 1
-        out += MarkdownBlock.ListBlock(ordered, items.result())
+        val ordered          = listMarker(line).exists(_.ordered)
+        val items            = Vector.newBuilder[MarkdownBlock.ListItem]
+        var blankLinesBefore = 0
+        var done             = false
+        while i < lines.length && !done do
+          listMarker(lines(i)) match
+            case Some(marker) if marker.ordered === ordered =>
+              val rawItem            = lines(i).trim.drop(marker.length).trim
+              val (taskMarker, text) = extractTaskMarker(rawItem)
+              items += MarkdownBlock.ListItem(
+                text = text,
+                sourceMarker = Some(marker.sourceMarker),
+                taskMarker = taskMarker,
+                blankLinesBefore = blankLinesBefore
+              )
+              blankLinesBefore = 0
+              i += 1
+            case None
+                if lines(i).trim.isEmpty && nextListMarker(lines, i + 1).exists(
+                  _.ordered === ordered
+                ) =>
+              blankLinesBefore += 1
+              i += 1
+            case _                                          => done = true
+        out += MarkdownBlock.DetailedListBlock(ordered, items.result())
       else if isTableLine(line) then
         val rows = Vector.newBuilder[Vector[String]]
         while i < lines.length && isTableLine(lines(i)) do
@@ -152,15 +179,33 @@ object BasicMarkdownParser extends MarkdownParser:
   private def isIndentedCode(line: String): Boolean =
     line.startsWith("    ") || line.startsWith("\t")
 
-  private def listMarker(line: String): Option[(Boolean, Int)] =
+  private final case class ParsedListMarker(ordered: Boolean, sourceMarker: String, length: Int)
+
+  private def listMarker(line: String): Option[ParsedListMarker] =
     val trimmed = line.trim
     if trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("+ ") then
-      Some(false -> 2)
+      Some(ParsedListMarker(ordered = false, sourceMarker = trimmed.take(1), length = 2))
     else
       val dot = trimmed.indexOf('.')
       Option.when(
         dot > 0 && trimmed.take(dot).forall(_.isDigit) && trimmed.drop(dot).startsWith(". ")
-      )(true -> (dot + 2))
+      )(ParsedListMarker(ordered = true, sourceMarker = trimmed.take(dot + 1), length = dot + 2))
+
+  private def nextListMarker(lines: Vector[String], start: Int): Option[ParsedListMarker] =
+    var i      = start
+    var result = Option.empty[ParsedListMarker]
+    while i < lines.length && result.isEmpty && lines(i).trim.isEmpty do i += 1
+    if i < lines.length then result = listMarker(lines(i))
+    result
+
+  private def extractTaskMarker(value: String): (Option[String], String) =
+    val marker = value.take(3)
+    if isTaskMarker(marker) && (value.length === 3 || value.charAt(3).isWhitespace) then
+      Some(marker) -> value.drop(3).trim
+    else None      -> value
+
+  private def isTaskMarker(value: String): Boolean =
+    value === "[ ]" || value === "[x]" || value === "[X]"
 
   private def isTableLine(line: String): Boolean =
     line.trim.startsWith("|") && line.trim.endsWith("|")
@@ -190,14 +235,14 @@ final class BasicMarkdownRenderer(
     blocks.flatMap(renderBlock(_, width)).dropWhile(_.isEmpty).reverse.dropWhile(_.isEmpty).reverse
 
   private def renderBlock(block: MarkdownBlock, width: Int): Vector[String] = block match
-    case MarkdownBlock.Heading(level, text)      =>
+    case MarkdownBlock.Heading(level, text)              =>
       wrap(
         styled(options.theme.heading(level, s"${"#".repeat(level)} ${renderInline(text)}")),
         width
       ) :+ ""
-    case MarkdownBlock.Paragraph(text)           =>
+    case MarkdownBlock.Paragraph(text)                   =>
       wrap(styled(options.theme.paragraph(renderInline(text))), width) :+ ""
-    case MarkdownBlock.CodeBlock(language, text) =>
+    case MarkdownBlock.CodeBlock(language, text)         =>
       val header = language.fold("```")(lang => s"```$lang")
       val body   = options.highlighter
         .flatMap(_.highlight(language, text))
@@ -206,12 +251,24 @@ final class BasicMarkdownRenderer(
       Vector(Ansi.truncateToWidth(styled(options.theme.codeBlockFence(header)), width, "")) ++
         body.map(line => Ansi.truncateToWidth(line, width, "")) ++
         Vector(Ansi.truncateToWidth(styled(options.theme.codeBlockFence("```")), width, ""), "")
-    case MarkdownBlock.ListBlock(ordered, items) =>
+    case MarkdownBlock.ListBlock(ordered, items)         =>
       items.zipWithIndex.flatMap { (item, index) =>
         val marker = styled(options.theme.listMarker(if ordered then s"${index + 1}. " else "- "))
         wrapWithPrefix(marker, renderInline(item), width)
       } :+ ""
-    case MarkdownBlock.BlockQuote(text)          =>
+    case MarkdownBlock.DetailedListBlock(ordered, items) =>
+      items.zipWithIndex.flatMap { (item, index) =>
+        val marker = styled(options.theme.listMarker(listMarkerText(ordered, item, index) + " "))
+        val prefix = item.taskMarker match
+          case Some(taskMarker) => marker + styled(options.theme.listMarker(taskMarker + " "))
+          case None             => marker
+        Vector.fill(item.blankLinesBefore)("") ++ wrapWithPrefix(
+          prefix,
+          renderInline(item.text),
+          width
+        )
+      } :+ ""
+    case MarkdownBlock.BlockQuote(text)                  =>
       text.split("\n", -1).toVector.flatMap(line =>
         wrapWithPrefix(
           styled(options.theme.blockQuotePrefix("> ")),
@@ -219,12 +276,12 @@ final class BasicMarkdownRenderer(
           width
         )
       ) :+ ""
-    case MarkdownBlock.HorizontalRule            =>
+    case MarkdownBlock.HorizontalRule                    =>
       Vector(
         Ansi.truncateToWidth(styled(options.theme.horizontalRule("─".repeat(width))), width, ""),
         ""
       )
-    case MarkdownBlock.Table(rows)               =>
+    case MarkdownBlock.Table(rows)                       =>
       rows.map(row =>
         Ansi.truncateToWidth(
           styled(options.theme.tableRow(row.map(renderInline).mkString(" | "))),
@@ -310,6 +367,21 @@ final class BasicMarkdownRenderer(
       val actualPrefix = if index === 0 then prefix else " ".repeat(Ansi.visibleWidth(prefix))
       Ansi.truncateToWidth(actualPrefix + line, width, "")
     }
+
+  private def listMarkerText(
+      ordered: Boolean,
+      item: MarkdownBlock.ListItem,
+      index: Int
+  ): String =
+    if options.preserveSourceListMarkers then
+      item.sourceMarker.getOrElse(normalizedListMarker(
+        ordered,
+        index
+      ))
+    else normalizedListMarker(ordered, index)
+
+  private def normalizedListMarker(ordered: Boolean, index: Int): String =
+    if ordered then s"${index + 1}." else "-"
 
   private def plainFallback(markdown: String, width: Int): Vector[String] =
     Ansi.wrapTextWithAnsi(markdown, width).map(Ansi.truncateToWidth(_, width, ""))
