@@ -77,7 +77,10 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
   // ---------- Shared editor showcase ----------
   private val workspaceRoot = DemoRoot.findWorkspaceRoot(File(System.getProperty("user.dir")))
   private var messages      = Vector.empty[String]
-  private val messagesText  = Text("Submitted: (none)", paddingX = 0)
+  private val messagesText  = new Component:
+    override def render(width: Int): Vector[String] =
+      val content = DemoRoot.this.synchronized(messagesContent)
+      Text(content, paddingX = 0).render(width)
   private val editor        = Editor(options =
     EditorOptions(
       onSubmit = addMessage,
@@ -191,8 +194,7 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
   // Shared behavior wiring
   actions.onSelect = handleAction
   settings.onChange = (id, value) =>
-    messages :+= s"Setting changed: $id = $value"
-    updateMessages()
+    addDemoMessage(s"Setting changed: $id = $value")
   fileManagerPathInput.onSubmit = text => navigateToPathFromInput(text)
   tui.onTerminalColorSchemeChange { scheme =>
     addDemoMessage(s"Terminal color-scheme notification: ${scheme.value}")
@@ -212,8 +214,7 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
     item.value match
       case "submit"                 => addMessage(editor.text)
       case "clear"                  =>
-        messages = Vector.empty
-        updateMessages()
+        clearDemoMessages()
       case "large-paste"            =>
         editor.handleInput(
           TerminalInput.Paste((1 to 12).map(i => s"pasted line $i").mkString("\n"))
@@ -280,8 +281,7 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
         updateEditorFocus()
       case TerminalInput.Key(TerminalKey.Character("l"), modifiers)
           if modifiers.ctrl && mode === DemoMode.EditorMode =>
-        messages = Vector.empty
-        updateMessages()
+        clearDemoMessages()
       case _ if mode === DemoMode.FileManagerMode                                     =>
         handleFileManagerInput(event)
       case _                                                                          =>
@@ -666,9 +666,8 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
     val trimmed = value.trim
     if trimmed.nonEmpty then
       if trimmed === "/clear" then
-        messages = Vector.empty
+        clearDemoMessages()
         editor.setText("")
-        updateMessages()
       else if trimmed === "/quit" then tui.requestExit()
       else if trimmed === "/help" then
         addDemoMessage(
@@ -681,7 +680,10 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
 
   private def addDemoMessage(value: String): Unit = this.synchronized {
     messages :+= value
-    updateMessages()
+  }
+
+  private def clearDemoMessages(): Unit = this.synchronized {
+    messages = Vector.empty
   }
 
   private def runTerminalQuery(label: String)(query: => String): Unit =
@@ -703,17 +705,16 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
   private def supportLabel(applied: Boolean): String =
     if applied then "supported" else "unsupported"
 
-  private def updateMessages(): Unit =
-    messagesText.text =
-      if messages.isEmpty then "Submitted: (none)"
-      else
-        messages.zipWithIndex.map((msg, idx) =>
-          s"${idx + 1}. ${msg.replace("\n", " ⏎ ")}"
-        ).mkString(
-          "Submitted:\n",
-          "\n",
-          ""
-        )
+  private def messagesContent: String =
+    if messages.isEmpty then "Submitted: (none)"
+    else
+      messages.zipWithIndex.map((msg, idx) =>
+        s"${idx + 1}. ${msg.replace("\n", " ⏎ ")}"
+      ).mkString(
+        "Submitted:\n",
+        "\n",
+        ""
+      )
 
   private def plainLoaderLine(component: Component, width: Int): String =
     component.render(width).headOption.map(Ansi.strip).getOrElse("").trim

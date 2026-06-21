@@ -465,6 +465,20 @@ class TUISuite extends munit.FunSuite:
     assertEquals(tui.queryTerminalBackgroundColor(timeoutMillis = 1), None)
     assert(terminal.output.contains(TerminalColorProtocol.BackgroundColorQuery), terminal.output)
 
+  test("TUI background color query returns none without writing when stopped"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal)
+
+    assertEquals(tui.queryTerminalBackgroundColor(timeoutMillis = 1000), None)
+    assertEquals(terminal.output, "")
+
+    tui.start()
+    tui.stop()
+    terminal.clearWrites()
+
+    assertEquals(tui.queryTerminalBackgroundColor(timeoutMillis = 1000), None)
+    assertEquals(terminal.output, "")
+
   test("TUI color-scheme query writes DSR and resolves valid response"):
     val terminal = VirtualTerminal(20, 5)
     val tui      = TUI(terminal)
@@ -480,6 +494,20 @@ class TUISuite extends munit.FunSuite:
 
     assertEquals(thread.isAlive, false)
     assertEquals(result, Some(TerminalColorScheme.Light))
+
+  test("TUI color-scheme query returns none without writing when stopped"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal)
+
+    assertEquals(tui.queryTerminalColorScheme(timeoutMillis = 1000), None)
+    assertEquals(terminal.output, "")
+
+    tui.start()
+    tui.stop()
+    terminal.clearWrites()
+
+    assertEquals(tui.queryTerminalColorScheme(timeoutMillis = 1000), None)
+    assertEquals(terminal.output, "")
 
   test("color-scheme notifications can be enabled disabled and unsubscribed"):
     val terminal = VirtualTerminal(20, 5)

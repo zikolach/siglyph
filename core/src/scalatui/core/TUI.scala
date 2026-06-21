@@ -97,35 +97,45 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
    * Query the terminal default background color using OSC 11.
    *
    * `TUI` owns request/response correlation. Terminal backends only write requests and deliver raw
-   * protocol replies. Returns `None` when the terminal does not answer with a valid RGB response
-   * before `timeoutMillis` expires.
+   * protocol replies. Returns `None` without writing when the TUI is not running. Returns `None`
+   * when the terminal does not answer with a valid RGB response before `timeoutMillis` expires.
    */
   def queryTerminalBackgroundColor(timeoutMillis: Long = 1000L): Option[RgbColor] =
-    val query  = TUI.PendingQuery[RgbColor]()
-    lifecycleLock.synchronized {
-      pendingBackgroundColorQueries += query
-      terminal.write(TerminalColorProtocol.BackgroundColorQuery)
+    val query = lifecycleLock.synchronized {
+      if running then
+        val pending = TUI.PendingQuery[RgbColor]()
+        pendingBackgroundColorQueries += pending
+        terminal.write(TerminalColorProtocol.BackgroundColorQuery)
+        Some(pending)
+      else None
     }
-    val result = query.await(timeoutMillis)
-    if result.isEmpty then lifecycleLock.synchronized(pendingBackgroundColorQueries -= query)
-    result
+    query.flatMap { pending =>
+      val result = pending.await(timeoutMillis)
+      if result.isEmpty then lifecycleLock.synchronized(pendingBackgroundColorQueries -= pending)
+      result
+    }
 
   /**
    * Query the terminal color scheme using DSR `CSI ? 996 n`.
    *
    * Valid terminal reports are parsed as [[TerminalColorScheme.Dark]] or
-   * [[TerminalColorScheme.Light]]. Returns `None` when no valid report arrives before
-   * `timeoutMillis` expires.
+   * [[TerminalColorScheme.Light]]. Returns `None` without writing when the TUI is not running.
+   * Returns `None` when no valid report arrives before `timeoutMillis` expires.
    */
   def queryTerminalColorScheme(timeoutMillis: Long = 1000L): Option[TerminalColorScheme] =
-    val query  = TUI.PendingQuery[TerminalColorScheme]()
-    lifecycleLock.synchronized {
-      pendingColorSchemeQueries += query
-      terminal.write(TerminalColorProtocol.ColorSchemeQuery)
+    val query = lifecycleLock.synchronized {
+      if running then
+        val pending = TUI.PendingQuery[TerminalColorScheme]()
+        pendingColorSchemeQueries += pending
+        terminal.write(TerminalColorProtocol.ColorSchemeQuery)
+        Some(pending)
+      else None
     }
-    val result = query.await(timeoutMillis)
-    if result.isEmpty then lifecycleLock.synchronized(pendingColorSchemeQueries -= query)
-    result
+    query.flatMap { pending =>
+      val result = pending.await(timeoutMillis)
+      if result.isEmpty then lifecycleLock.synchronized(pendingColorSchemeQueries -= pending)
+      result
+    }
 
   /** Subscribe to terminal color-scheme reports. Returns a function that removes the listener. */
   def onTerminalColorSchemeChange(listener: TerminalColorScheme => Unit): () => Unit =
