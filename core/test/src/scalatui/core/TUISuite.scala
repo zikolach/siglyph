@@ -15,7 +15,10 @@ import scalatui.terminal.{
   ImageRenderOptions,
   KeyEventType,
   KeyModifiers,
+  RgbColor,
   TerminalCapabilities,
+  TerminalColorProtocol,
+  TerminalColorScheme,
   TerminalImageProtocol,
   TerminalInput,
   TerminalKey,
@@ -425,8 +428,116 @@ class TUISuite extends munit.FunSuite:
     assertEquals(thread.isAlive, false)
     assert(terminal.output.contains("\r\n\u001b[?25h"), terminal.output)
 
+  test("TUI title and progress helpers report virtual terminal support"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal)
+
+    assertEquals(tui.setTerminalTitle("demo"), true)
+    assertEquals(tui.setTerminalProgress(active = true), true)
+    assertEquals(tui.setTerminalProgress(active = false), true)
+
+    assert(terminal.output.contains("\u001b]0;demo\u0007"), terminal.output)
+    assert(terminal.output.contains("\u001b]9;4;3\u0007"), terminal.output)
+    assert(terminal.output.contains("\u001b]9;4;0\u0007"), terminal.output)
+
+  test("TUI background color query writes OSC 11 and resolves valid response"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal)
+    tui.start()
+    terminal.clearWrites()
+
+    var result = Option.empty[RgbColor]
+    val thread = Thread(() => result = tui.queryTerminalBackgroundColor(timeoutMillis = 1000))
+    thread.start()
+    awaitOutput(terminal, TerminalColorProtocol.BackgroundColorQuery)
+    terminal.sendInput(TerminalInput.Raw("\u001b]11;#112233\u0007"))
+    thread.join(1000)
+
+    assertEquals(thread.isAlive, false)
+    assertEquals(result, Some(RgbColor(17, 34, 51)))
+
+  test("TUI background color query times out without valid response"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal)
+    tui.start()
+    terminal.clearWrites()
+
+    assertEquals(tui.queryTerminalBackgroundColor(timeoutMillis = 1), None)
+    assert(terminal.output.contains(TerminalColorProtocol.BackgroundColorQuery), terminal.output)
+
+  test("TUI color-scheme query writes DSR and resolves valid response"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal)
+    tui.start()
+    terminal.clearWrites()
+
+    var result = Option.empty[TerminalColorScheme]
+    val thread = Thread(() => result = tui.queryTerminalColorScheme(timeoutMillis = 1000))
+    thread.start()
+    awaitOutput(terminal, TerminalColorProtocol.ColorSchemeQuery)
+    terminal.sendInput(TerminalInput.Raw("\u001b[?997;2n"))
+    thread.join(1000)
+
+    assertEquals(thread.isAlive, false)
+    assertEquals(result, Some(TerminalColorScheme.Light))
+
+  test("color-scheme notifications can be enabled disabled and unsubscribed"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal)
+    var schemes  = Vector.empty[TerminalColorScheme]
+    val remove   = tui.onTerminalColorSchemeChange(scheme => schemes :+= scheme)
+
+    tui.start()
+    terminal.clearWrites()
+    terminal.sendInput(TerminalInput.Raw("\u001b[?997;1n"))
+    assertEquals(schemes, Vector.empty)
+
+    tui.setTerminalColorSchemeNotifications(enabled = true)
+    assert(
+      terminal.output.contains(TerminalColorProtocol.EnableColorSchemeNotifications),
+      terminal.output
+    )
+    terminal.sendInput(TerminalInput.Raw("\u001b[?997;1n"))
+    assertEquals(schemes, Vector(TerminalColorScheme.Dark))
+
+    terminal.clearWrites()
+    remove()
+    terminal.sendInput(TerminalInput.Raw("\u001b[?997;2n"))
+    assertEquals(schemes, Vector(TerminalColorScheme.Dark))
+
+    tui.setTerminalColorSchemeNotifications(enabled = false)
+    assert(
+      terminal.output.contains(TerminalColorProtocol.DisableColorSchemeNotifications),
+      terminal.output
+    )
+
+  test("terminal protocol replies are not routed to focused component"):
+    val terminal  = VirtualTerminal(20, 5)
+    var delivered = Vector.empty[TerminalInput]
+    val component = new Component:
+      override def handleInputResult(input: TerminalInput): InputResult =
+        delivered :+= input
+        InputResult.NoRender
+      override def render(width: Int): Vector[String]                   = Vector("stable")
+    val tui       = TUI(terminal)
+    tui.addChild(component)
+    tui.setFocus(component)
+    tui.start()
+
+    terminal.sendInput(TerminalInput.Raw("\u001b]11;not-a-color\u0007"))
+    terminal.sendInput(TerminalInput.Raw("\u001b[?997;1n"))
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("x")))
+
+    assertEquals(delivered, Vector(TerminalInput.Key(TerminalKey.Character("x"))))
+
   private def visibleOutputLines(output: String): Vector[String] =
     Ansi.strip(output).replace("\r\n", "\n").replace('\r', '\n').split("\n", -1).toVector
+
+  private def awaitOutput(terminal: VirtualTerminal, expected: String): Unit =
+    val deadline = System.currentTimeMillis() + 1000L
+    while !terminal.output.contains(expected) && System.currentTimeMillis() < deadline do
+      Thread.sleep(1)
+    assert(terminal.output.contains(expected), terminal.output)
 
   test("run exits on ctrl+c and stop positions cursor below content"):
     val terminal = VirtualTerminal(20, 5)

@@ -22,3 +22,14 @@ class VirtualTerminalSuite extends munit.FunSuite:
     assertEquals(terminal.columns, 100)
     assertEquals(terminal.rows, 40)
     assertEquals(resizes, 1)
+
+  test("virtual terminal supports title and progress assertions"):
+    val terminal = VirtualTerminal(80, 24)
+
+    assertEquals(Terminal.setTitle(terminal, "hello\u0007world"), true)
+    assertEquals(Terminal.setProgress(terminal, active = true), true)
+    assertEquals(Terminal.setProgress(terminal, active = false), true)
+
+    assert(terminal.output.contains("\u001b]0;helloworld\u0007"), terminal.output)
+    assert(terminal.output.contains(Terminal.ProgressActiveSequence), terminal.output)
+    assert(terminal.output.contains(Terminal.ProgressClearSequence), terminal.output)

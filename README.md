@@ -127,6 +127,26 @@ Markdown rendering stays in `siglyph-markdown`. The baseline renderer is depende
 
 Image rendering stays in `siglyph-image`. `ImageSource.fromFile(path)` loads supported PNG, JPEG, GIF, and WebP files into base64 data, MIME type, and dimensions for the existing `Image` component contract. Unsupported terminals render readable fallback text.
 
+## Terminal integration helpers
+
+`TUI` exposes optional terminal integration helpers for supported interactive backends:
+
+```scala
+val tui = TUI(SttyTerminal())
+
+val titleApplied = tui.setTerminalTitle("siglyph")
+val progressApplied = tui.setTerminalProgress(active = true)
+
+val background = tui.queryTerminalBackgroundColor(timeoutMillis = 500)
+val scheme = tui.queryTerminalColorScheme(timeoutMillis = 500)
+val unsubscribe = tui.onTerminalColorSchemeChange { scheme =>
+  println(s"terminal scheme changed to ${scheme.value}")
+}
+tui.setTerminalColorSchemeNotifications(enabled = true)
+```
+
+Title and progress helpers return `false` when the backend does not support the protocol. Color queries are owned by `TUI`: backends write requests and deliver raw terminal replies, while `TUI` correlates replies, applies timeouts, and prevents protocol replies from reaching focused components.
+
 ## Demos
 
 The demos are the best starting point for real usage:
@@ -147,7 +167,7 @@ Interactive demo controls are also summarized in [`docs/interactive-smoke.md`](d
 - **Editing:** Unicode/grapheme-aware movement and deletion, large-paste compaction, prompt history, undo, kill-ring, yank/yank-pop, page movement, jump-to-character.
 - **Keybindings:** shared `KeybindingManager` with configurable editor/input/select command bindings. Typed key events can distinguish press, repeat, and release when terminals report that metadata.
 - **Autocomplete:** slash commands, dependency-free filesystem path and `@` attachment completions, application-owned natural triggers such as `#`, optional fuzzy ranking, cancellable async providers, and injectable debounce scheduling.
-- **Terminals:** JVM `stty` backend, Scala Native POSIX backend, stream and virtual test backends, conservative Kitty keyboard protocol hooks, and readable fallback behavior when advanced metadata is unavailable.
+- **Terminals:** JVM `stty` backend, Scala Native POSIX backend, stream and virtual test backends, optional title/progress helpers, runtime-owned background color and color-scheme queries, conservative Kitty keyboard protocol hooks, and readable fallback behavior when advanced metadata is unavailable.
 - **Optional modules:** dependency-free Markdown rendering with theme/link/highlighter/parser hooks, plus terminal image protocol helpers with file loading, header dimension sniffing, and cell-size bounding helpers.
 
 ## Repository structure

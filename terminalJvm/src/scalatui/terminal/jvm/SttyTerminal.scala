@@ -6,7 +6,10 @@ import scalatui.terminal.{
   KittyKeyboardProtocolNegotiator,
   KittyKeyboardProtocolState,
   KittyKeyboardProtocolTerminal,
-  StreamTerminal
+  StreamTerminal,
+  Terminal,
+  TerminalProgressSupport,
+  TerminalTitleSupport
 }
 
 import java.io.{InputStream, OutputStream}
@@ -25,7 +28,9 @@ final class SttyTerminal(
       initialColumns = columnsOverride.orElse(StreamTerminal.envInt("COLUMNS")).getOrElse(80),
       initialRows = rowsOverride.orElse(StreamTerminal.envInt("LINES")).getOrElse(24)
     ),
-      KittyKeyboardProtocolTerminal:
+      KittyKeyboardProtocolTerminal,
+      TerminalTitleSupport,
+      TerminalProgressSupport:
   @volatile private var savedState: Option[String] = None
   @volatile private var resizePolling              = false
   @volatile private var currentColumns             = columnsOverride
@@ -71,6 +76,11 @@ final class SttyTerminal(
 
   override def columns: Int = currentColumns
   override def rows: Int    = currentRows
+
+  override def setTitle(title: String): Unit = write(Terminal.titleSequence(title))
+
+  override def setProgress(active: Boolean): Unit =
+    write(if active then Terminal.ProgressActiveSequence else Terminal.ProgressClearSequence)
 
   override def keyboardProtocolState: KittyKeyboardProtocolState =
     keyboardProtocolNegotiator.expire(System.currentTimeMillis())

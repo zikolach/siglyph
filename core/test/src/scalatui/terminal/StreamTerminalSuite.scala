@@ -91,3 +91,12 @@ class StreamTerminalSuite extends munit.FunSuite:
     terminal.start(_ => (), () => ())
     terminal.stop()
     terminal.stop()
+
+  test("stream terminal reports unsupported title and progress without writing escapes"):
+    val out      = ByteArrayOutputStream()
+    val terminal = StreamTerminal(output = out)
+
+    assertEquals(Terminal.setTitle(terminal, "title"), false)
+    assertEquals(Terminal.setProgress(terminal, active = true), false)
+
+    assertEquals(out.toString("UTF-8"), "")
