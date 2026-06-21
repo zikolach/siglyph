@@ -1,7 +1,7 @@
 #!/usr/bin/env -S scala-cli shebang
 //> using scala 3.7.4
-//> using dep io.github.zikolach::siglyph-core:0.1.2
-//> using dep io.github.zikolach::siglyph-terminal-jvm:0.1.2
+//> using dep io.github.zikolach::siglyph-core:0.2.0
+//> using dep io.github.zikolach::siglyph-terminal-jvm:0.2.0
 
 import java.io.File
 import java.util.concurrent.Executors
@@ -47,15 +47,19 @@ import scalatui.terminal.jvm.SttyTerminal
             triggerSources = Vector(tagSource),
             fuzzyRanking = AutocompleteFuzzyRanking.Enabled
           )),
-          autocompleteDebouncer = EditorAutocompleteDebouncer.Delayed(scheduler, delayMillis = 40),
-          onSubmit = text =>
-            text.trim match
-              case "/quit"                 => tui.requestExit()
-              case "/clear"                => output.text = "Submitted: (none)"
-              case value if value.nonEmpty => output.text = s"Submitted: $value"
-              case _                       => ()
+          autocompleteDebouncer = EditorAutocompleteDebouncer.Delayed(scheduler, delayMillis = 40)
         )
       )
+      editor.onSubmit = text =>
+        text.trim match
+          case "/quit"                 => tui.requestExit()
+          case "/clear"                =>
+            output.text = "Submitted: (none)"
+            editor.setText("")
+          case value if value.nonEmpty =>
+            output.text = s"Submitted: $value"
+            editor.setText("")
+          case _                       => ()
 
       tui.addChild(Text("Autocomplete demo — try /he, ./, @\"README, or #dc then Tab"))
       tui.addChild(
