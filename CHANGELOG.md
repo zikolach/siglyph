@@ -7,6 +7,23 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-21
+
+### Added
+
+- Added Markdown list-fidelity rendering options with richer source marker and task-list parsing, including `MarkdownRenderOptions.preserveSourceListMarkers`. #9
+- Added task-list marker handling (`[ ]`, `[x]`, `[X]`) and detailed list block metadata to preserve list spacing and marker intent during rendering. #9
+
+### Changed
+
+- Changed terminal resize behavior to perform a full clear-and-redraw sequence when width or height changes. #9
+- Changed ANSI-wide-cell slicing and wrapping to preserve partial-state safety around clipping boundaries. #9
+
+### Fixed
+
+- Fixed overlay composition on wide-cell boundaries to prevent partial wide-cell emission and keep width-safe output. #9
+- Fixed wide grapheme clipping during text wrapping so clipped characters are carried to the next line instead of being dropped. #9
+
 ## [0.2.1] - 2026-06-21
 
 ### Added
@@ -98,7 +115,8 @@ and this project uses semantic versioning while it remains pre-1.0.
 - GitHub Actions CI, jar packaging, GitHub Packages publishing, and GitHub
   release artifacts.
 
-[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/zikolach/siglyph/releases/tag/v0.2.2
 [0.2.1]: https://github.com/zikolach/siglyph/releases/tag/v0.2.1
 [0.2.0]: https://github.com/zikolach/siglyph/releases/tag/v0.2.0
 [0.1.2]: https://github.com/zikolach/siglyph/releases/tag/v0.1.2
