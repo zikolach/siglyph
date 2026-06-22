@@ -28,10 +28,13 @@ enum KeyEventType derives CanEqual:
 sealed trait TerminalKey derives CanEqual
 
 object TerminalKey:
-  case object Enter                         extends TerminalKey
-  case object Escape                        extends TerminalKey
-  case object Tab                           extends TerminalKey
-  case object Backspace                     extends TerminalKey
+  case object Enter     extends TerminalKey
+  case object Escape    extends TerminalKey
+  case object Tab       extends TerminalKey
+  case object Backspace extends TerminalKey
+
+  /** Insert key from standard terminal insert-key escape sequences. */
+  case object Insert                        extends TerminalKey
   case object Delete                        extends TerminalKey
   case object Home                          extends TerminalKey
   case object End                           extends TerminalKey

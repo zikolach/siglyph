@@ -90,6 +90,27 @@ class KeybindingManagerSuite extends munit.FunSuite:
     ))
   }
 
+  test("matches typed insert key descriptors") {
+    val manager = KeybindingManager().withUserBindings(
+      Map(
+        KeybindingCommand.EditorUndo -> Vector(
+          KeyDescriptor(TerminalKey.Insert),
+          KeyDescriptor(TerminalKey.Insert, KeyModifiers(ctrl = true))
+        )
+      )
+    )
+
+    assert(manager.matches(TerminalInput.Key(TerminalKey.Insert), KeybindingCommand.EditorUndo))
+    assert(manager.matches(
+      TerminalInput.Key(TerminalKey.Insert, KeyModifiers(ctrl = true)),
+      KeybindingCommand.EditorUndo
+    ))
+    assert(!manager.matches(
+      TerminalInput.Key(TerminalKey.Unknown("insert")),
+      KeybindingCommand.EditorUndo
+    ))
+  }
+
   test("keeps defaults for unspecified commands") {
     val manager = KeybindingManager.fromRawBindings(
       Map(

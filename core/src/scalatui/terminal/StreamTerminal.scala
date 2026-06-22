@@ -15,7 +15,8 @@ class StreamTerminal(
     output: OutputStream = OutputStream.nullOutputStream(),
     initialColumns: Int = StreamTerminal.envInt("COLUMNS").getOrElse(80),
     initialRows: Int = StreamTerminal.envInt("LINES").getOrElse(24)
-) extends Terminal:
+) extends Terminal,
+      TerminalInputDrainSupport:
   @volatile private var inputHandler: TerminalInput => Unit = _ => ()
   @volatile private var running                             = false
   private var inputThread: Thread | Null                    = null
@@ -43,6 +44,9 @@ class StreamTerminal(
       inputThread = null
       flushThread = null
       inputLock.synchronized(inputBuffer.clear())
+
+  override def drainInput(maxMillis: Long, idleMillis: Long): Unit =
+    flushPending()
 
   override def write(data: String): Unit =
     val bytes = data.getBytes(java.nio.charset.StandardCharsets.UTF_8)

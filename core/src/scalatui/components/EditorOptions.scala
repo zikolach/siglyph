@@ -66,6 +66,10 @@ object EditorAutocompleteDebouncer:
  *   scheduler used to coalesce refresh-triggered autocomplete after edits; explicit Tab requests
  *   are immediate. The default is immediate; applications can inject
  *   [[EditorAutocompleteDebouncer.Delayed]] with a scheduler they own.
+ * @param autoApplySingleForcedCompletion
+ *   when true, an explicit forced autocomplete request with exactly one suggestion applies that
+ *   suggestion immediately through the provider completion contract. The default keeps explicit
+ *   selection behavior.
  * @param keybindings
  *   command to input mapping resolved through the shared keybinding manager
  */
@@ -78,6 +82,7 @@ final case class EditorOptions(
     autocompleteTrigger: EditorAutocompleteTrigger = EditorAutocompleteTrigger.Default,
     autocompletePlacement: EditorAutocompletePlacement = EditorAutocompletePlacement.Default,
     autocompleteDebouncer: EditorAutocompleteDebouncer = EditorAutocompleteDebouncer.Immediate,
+    autoApplySingleForcedCompletion: Boolean = false,
     keybindings: KeybindingManager = KeybindingManager()
 )
 

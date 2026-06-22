@@ -52,6 +52,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   private val pendingColorSchemeQueries               = ArrayBuffer.empty[TUI.PendingQuery[TerminalColorScheme]]
   private val terminalColorSchemeListeners            = ArrayBuffer.empty[TerminalColorScheme => Unit]
   private var terminalColorSchemeNotificationsEnabled = false
+  private val inputListeners                          = ArrayBuffer.empty[TerminalInput => InputResult]
 
   var handlesControlC: Boolean = true
   var exitsOnEscape: Boolean   = false
@@ -195,6 +196,21 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   override def hasOverlay: Boolean =
     lifecycleLock.synchronized(overlayStack.exists(isOverlayVisible))
 
+  /**
+   * Register a typed global input listener.
+   *
+   * Listeners run before focused component routing. `InputResult.Ignored` lets routing continue to
+   * the focused component. Handled or exit results stop routing for that input. The returned
+   * function removes this listener.
+   */
+  def addInputListener(listener: TerminalInput => InputResult): () => Unit =
+    lifecycleLock.synchronized(inputListeners += listener)
+    () => removeInputListener(listener)
+
+  /** Remove a previously registered typed global input listener. */
+  def removeInputListener(listener: TerminalInput => InputResult): Unit =
+    lifecycleLock.synchronized(inputListeners -= listener)
+
   def start(): Unit =
     val shouldStart = lifecycleLock.synchronized {
       if running then false
@@ -255,6 +271,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
           terminal.write(builder.result())
         if terminalColorSchemeNotificationsEnabled then
           terminal.write(TerminalColorProtocol.DisableColorSchemeNotifications)
+        Terminal.drainInput(terminal)
       finally
         try terminal.showCursor()
         finally
@@ -288,7 +305,8 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
       consumeTerminalProtocolReply(input) match
         case Some(value) => value
         case None        =>
-          if isIgnoredKeyRelease(input) then Vector.empty
+          if routeGlobalInputListeners(input) !== InputResult.Ignored then Vector.empty
+          else if isIgnoredKeyRelease(input) then Vector.empty
           else if handlesControlC && isCtrl(input, "c") then
             requestExit()
             Vector.empty
@@ -296,14 +314,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
             requestExit()
             Vector.empty
           else
-            inputTarget.map(_.handleInputResult(input)).foreach {
-              case InputResult.Ignored               => ()
-              case InputResult.Handled(shouldRender) =>
-                if shouldRender then
-                  requestRender()
-                  flushRender()
-              case InputResult.Exit                  => requestExit()
-            }
+            inputTarget.map(_.handleInputResult(input)).foreach(handleInputResult)
             Vector.empty
     }
     notifications.foreach { case (listener, scheme) => listener(scheme) }
@@ -360,6 +371,24 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
 
   private def inputTarget: Option[Component] =
     topCapturingOverlay.map(_.component).orElse(focusedComponent)
+
+  private def routeGlobalInputListeners(input: TerminalInput): InputResult =
+    val listeners = inputListeners.toVector
+    var result    = InputResult.Ignored
+    var index     = 0
+    while index < listeners.length && result === InputResult.Ignored do
+      result = listeners(index)(input)
+      index += 1
+    handleInputResult(result)
+    result
+
+  private def handleInputResult(result: InputResult): Unit = result match
+    case InputResult.Ignored               => ()
+    case InputResult.Handled(shouldRender) =>
+      if shouldRender then
+        requestRender()
+        flushRender()
+    case InputResult.Exit                  => requestExit()
 
   private def isIgnoredKeyRelease(input: TerminalInput): Boolean = input match
     case TerminalInput.KeyEvent(_, _, KeyEventType.Release) =>

@@ -17,6 +17,16 @@ trait Terminal:
   def clearFromCursor(): Unit
   def clearScreen(): Unit
 
+/** Optional terminal capability for backends that can flush pending input before shutdown. */
+trait TerminalInputDrainSupport:
+  /**
+   * Flush pending input or protocol replies before terminal shutdown.
+   *
+   * Implementations MUST keep the operation bounded by `maxMillis` and SHOULD treat `idleMillis` as
+   * the maximum quiet period to wait for when they support idle detection.
+   */
+  def drainInput(maxMillis: Long = 1000L, idleMillis: Long = 50L): Unit
+
 /** Optional terminal capability for backends that can set the terminal window title. */
 trait TerminalTitleSupport:
   /** Set the terminal window title. Callers use [[Terminal.setTitle]] to detect support. */
@@ -60,6 +70,22 @@ object Terminal:
       progress.setProgress(active)
       true
     case _                                 => false
+
+  /**
+   * Drain pending terminal input when the backend supports it.
+   *
+   * Unsupported terminals return `false` and perform no operation. Backends that support draining
+   * are responsible for keeping the operation bounded.
+   */
+  def drainInput(
+      terminal: Terminal,
+      maxMillis: Long = 1000L,
+      idleMillis: Long = 50L
+  ): Boolean = terminal match
+    case drain: TerminalInputDrainSupport =>
+      drain.drainInput(maxMillis, idleMillis)
+      true
+    case _                                => false
 
   private[terminal] def titleSequence(title: String): String =
     s"\u001b]0;${sanitizeTitle(title)}\u0007"

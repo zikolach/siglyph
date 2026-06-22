@@ -105,6 +105,13 @@ class TerminalInputParserSuite extends munit.FunSuite:
     assertEquals(TerminalInputParser.parseOne("\u001b[5~"), TerminalInput.Key(TerminalKey.PageUp))
     assertEquals(TerminalInputParser.parseOne("\u001b[6~"), TerminalInput.Key(TerminalKey.PageDown))
 
+  test("parses insert key and modified insert key"):
+    assertEquals(TerminalInputParser.parseOne("\u001b[2~"), TerminalInput.Key(TerminalKey.Insert))
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[2;5~"),
+      TerminalInput.Key(TerminalKey.Insert, KeyModifiers(ctrl = true))
+    )
+
   test("normalizes common raw control bytes"):
     assertEquals(
       TerminalInputParser.parseOne("\u0003"),

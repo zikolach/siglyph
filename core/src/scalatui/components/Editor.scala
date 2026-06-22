@@ -100,6 +100,21 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     historyIndex = -1
   }
 
+  /**
+   * Insert application-supplied text at the current cursor.
+   *
+   * The insertion uses the same editor-buffer path as typed text and paste input. Newline forms are
+   * normalized, large values can become compact paste markers, one undo snapshot is created for the
+   * call, `onChange` is invoked when text changes, active autocomplete is refreshed, and an
+   * attached TUI context is asked to render changed visible state.
+   */
+  def insertAtCursor(text: String): Unit = synchronized {
+    val result = mutate(_.insert(text), refreshAutocomplete = false)
+    if result !== InputResult.NoRender then
+      refreshAutocompleteIfActive()
+      context.foreach(_.requestRender())
+  }
+
   /** Move the editor cursor, clamped to valid logical buffer bounds. */
   def setCursor(cursor: EditorCursor): Unit = synchronized {
     cancelAutocomplete()
@@ -634,6 +649,9 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
               completed = true
               currentAutocompleteHandle = None
               val operation = result.filter(_.items.nonEmpty) match
+                case Some(suggestions)
+                    if shouldAutoApplySingleForcedCompletion(request, suggestions) =>
+                  prepareApplyAutocompleteLocked(autocompleteProvider, suggestions, snapshot)
                 case Some(suggestions) =>
                   prepareShowAutocompleteLocked(suggestions, snapshot, token)
                 case None              => prepareCloseAutocompleteOverlayLocked()
@@ -719,6 +737,36 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
           }
           staleShown.foreach(_.hide())
         }
+
+  private def shouldAutoApplySingleForcedCompletion(
+      request: AutocompleteRequest,
+      suggestions: AutocompleteSuggestions
+  ): Boolean =
+    request.force && options.autoApplySingleForcedCompletion && suggestions.items.length === 1
+
+  private def prepareApplyAutocompleteLocked(
+      autocompleteProvider: AutocompleteProvider,
+      suggestions: AutocompleteSuggestions,
+      snapshot: Editor.AutocompleteSnapshot
+  ): Option[() => Unit] =
+    suggestions.items.headOption match
+      case Some(item) =>
+        val beforeText = buffer.text
+        val result     = autocompleteProvider.applyCompletion(CompletionRequest(
+          snapshot.lines,
+          snapshot.cursor,
+          item,
+          suggestions.prefix
+        ))
+        buffer = EditorBuffer.fromLines(result.lines, result.cursor)
+        currentAutocompleteHandle = None
+        autocompleteRequestToken += 1
+        if buffer.text !== beforeText then
+          resetEditingAction()
+          historyIndex = -1
+          onChange(buffer.text)
+        prepareCloseAutocompleteOverlayLocked()
+      case None       => prepareCloseAutocompleteOverlayLocked()
 
   private def acceptAutocomplete(): InputResult =
     handleAutocompleteSelection(submitOnSlash = false)
