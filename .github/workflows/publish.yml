@@ -89,7 +89,19 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
+          changelog_notes="$(
+            awk -v version="$version" '
+              $0 ~ "^## \\[" version "\\]" { in_section = 1; print; next }
+              in_section && /^## \[/ { exit }
+              in_section { print }
+            ' CHANGELOG.md
+          )"
+          if [ -z "$changelog_notes" ]; then
+            changelog_notes="No changelog section found for ${GITHUB_REF_NAME}."
+          fi
           notes=$(cat <<EOF
+          ${changelog_notes}
+
           Published to GitHub Packages.
 
           ## SBT

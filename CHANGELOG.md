@@ -7,6 +7,17 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-06-23
+
+### Added
+
+- Added API parity helpers for typed global input listeners, cursor insertion, forced autocomplete auto-apply, optional terminal input draining, and insert-key parsing. #11
+- Added deterministic asciinema demo scenarios, recording scripts, published clip links, and README/demo documentation for the interactive API. #11
+
+### Fixed
+
+- Fixed terminal shutdown input draining so pending buffered fragments are discarded without invoking input callbacks. #11
+
 ## [0.2.2] - 2026-06-21
 
 ### Added
@@ -115,7 +126,8 @@ and this project uses semantic versioning while it remains pre-1.0.
 - GitHub Actions CI, jar packaging, GitHub Packages publishing, and GitHub
   release artifacts.
 
-[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/zikolach/siglyph/releases/tag/v0.2.3
 [0.2.2]: https://github.com/zikolach/siglyph/releases/tag/v0.2.2
 [0.2.1]: https://github.com/zikolach/siglyph/releases/tag/v0.2.1
 [0.2.0]: https://github.com/zikolach/siglyph/releases/tag/v0.2.0
