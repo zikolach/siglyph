@@ -85,6 +85,28 @@ class StreamTerminalSuite extends munit.FunSuite:
     terminal.stop()
     assertEquals(inputs, Vector(TerminalInput.Key(TerminalKey.Escape)))
 
+  test("stream terminal drain discards pending escape without dispatching input"):
+    val in       = new java.io.InputStream:
+      @volatile private var first                                     = true
+      override def read(): Int                                        = -1
+      override def read(buffer: Array[Byte], off: Int, len: Int): Int =
+        if first then
+          first = false
+          buffer(off) = 0x1b.toByte
+          1
+        else
+          try Thread.sleep(1000)
+          catch case _: InterruptedException => ()
+          -1
+    val terminal = StreamTerminal(input = in)
+    var inputs   = Vector.empty[TerminalInput]
+    terminal.start(input => inputs :+= input, () => ())
+    Thread.sleep(20)
+    terminal.drainInput()
+    Thread.sleep(120)
+    terminal.stop()
+    assertEquals(inputs, Vector.empty)
+
   test("stream terminal stop is idempotent"):
     val terminal = StreamTerminal()
     terminal.stop()

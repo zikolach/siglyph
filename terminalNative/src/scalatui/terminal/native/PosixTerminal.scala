@@ -96,7 +96,7 @@ final class PosixTerminal(
       restoreMode()
 
   override def drainInput(maxMillis: Long, idleMillis: Long): Unit =
-    flushPending()
+    inputLock.synchronized(inputBuffer.clear())
 
   override def write(data: String): Unit =
     System.out.print(data)

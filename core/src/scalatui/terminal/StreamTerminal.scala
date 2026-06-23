@@ -46,7 +46,7 @@ class StreamTerminal(
       inputLock.synchronized(inputBuffer.clear())
 
   override def drainInput(maxMillis: Long, idleMillis: Long): Unit =
-    flushPending()
+    inputLock.synchronized(inputBuffer.clear())
 
   override def write(data: String): Unit =
     val bytes = data.getBytes(java.nio.charset.StandardCharsets.UTF_8)

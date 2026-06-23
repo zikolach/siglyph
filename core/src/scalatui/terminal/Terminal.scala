@@ -17,10 +17,11 @@ trait Terminal:
   def clearFromCursor(): Unit
   def clearScreen(): Unit
 
-/** Optional terminal capability for backends that can flush pending input before shutdown. */
+/** Optional terminal capability for backends that can discard pending input before shutdown. */
 trait TerminalInputDrainSupport:
   /**
-   * Flush pending input or protocol replies before terminal shutdown.
+   * Discard pending input or protocol fragments before terminal shutdown without invoking input
+   * callbacks.
    *
    * Implementations MUST keep the operation bounded by `maxMillis` and SHOULD treat `idleMillis` as
    * the maximum quiet period to wait for when they support idle detection.
@@ -72,10 +73,10 @@ object Terminal:
     case _                                 => false
 
   /**
-   * Drain pending terminal input when the backend supports it.
+   * Discard pending terminal input when the backend supports it.
    *
    * Unsupported terminals return `false` and perform no operation. Backends that support draining
-   * are responsible for keeping the operation bounded.
+   * are responsible for keeping the operation bounded and not invoking input callbacks.
    */
   def drainInput(
       terminal: Terminal,
