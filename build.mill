@@ -62,7 +62,7 @@ private def runScalafmt(check: Boolean): Unit =
 
 private def runScalafix(): Unit =
   runShell("""
-    sources="core/src core/test terminalJvm/src terminalNative/src markdown/src markdown/test image/src image/test demo/src keyTester/src interactiveDemo/src interactiveJvmDemo/src interactiveNativeDemo/src scripts/GenerateUnicodeTables.scala"
+    sources="core/src core/test terminalJvm/src terminalNative/src markdown/src markdown/test image/src image/test demo/src asciinemaDemo/src keyTester/src interactiveDemo/src interactiveJvmDemo/src interactiveNativeDemo/src scripts/GenerateUnicodeTables.scala"
     if command -v scalafix >/dev/null 2>&1; then
       exec scalafix --syntactic --check --scala-version 3.7.4 --files $sources
     fi
@@ -139,6 +139,10 @@ object image extends SiglyphPublishModule {
 }
 
 object demo extends SiglyphModule {
+  def moduleDeps = Seq(core)
+}
+
+object asciinemaDemo extends SiglyphModule {
   def moduleDeps = Seq(core)
 }
 
