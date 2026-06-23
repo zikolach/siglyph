@@ -22,6 +22,7 @@ import scalatui.terminal.{
   TerminalColorProtocol,
   TerminalColorScheme,
   TerminalImageProtocol,
+  TerminalInputDrainSupport,
   TerminalInput,
   TerminalKey,
   VirtualTerminal
@@ -71,6 +72,33 @@ class TUISuite extends munit.FunSuite:
     override def clearLine(): Unit        = ()
     override def clearFromCursor(): Unit  = ()
     override def clearScreen(): Unit      = ()
+
+  final class DrainingTerminal extends Terminal, TerminalInputDrainSupport:
+    var drainCalls     = 0
+    var stopCalls      = 0
+    var lastMaxMillis  = Option.empty[Long]
+    var lastIdleMillis = Option.empty[Long]
+
+    override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit = ()
+
+    override def stop(): Unit = stopCalls += 1
+
+    override def drainInput(maxMillis: Long, idleMillis: Long): Unit =
+      assert(maxMillis >= 0L)
+      assert(idleMillis >= 0L)
+      lastMaxMillis = Some(maxMillis)
+      lastIdleMillis = Some(idleMillis)
+      drainCalls += 1
+
+    override def write(data: String): Unit = ()
+    override def columns: Int              = 20
+    override def rows: Int                 = 5
+    override def moveBy(lines: Int): Unit  = ()
+    override def hideCursor(): Unit        = ()
+    override def showCursor(): Unit        = ()
+    override def clearLine(): Unit         = ()
+    override def clearFromCursor(): Unit   = ()
+    override def clearScreen(): Unit       = ()
 
   test("first render writes full frame with synchronized output"):
     val terminal = VirtualTerminal(20, 5)
@@ -378,6 +406,94 @@ class TUISuite extends munit.FunSuite:
 
     assert(terminal.output.contains("x" + TUI.LineReset), terminal.output)
 
+  test("global input listener observes typed input before focused component"):
+    val terminal     = VirtualTerminal(20, 5)
+    var listenerLog  = Vector.empty[TerminalInput]
+    var componentLog = Vector.empty[TerminalInput]
+    val component    = new Component:
+      override def handleInputResult(input: TerminalInput): InputResult =
+        componentLog :+= input
+        InputResult.NoRender
+      override def render(width: Int): Vector[String]                   = Vector("stable")
+    val tui          = TUI(terminal)
+    tui.addChild(component)
+    tui.setFocus(component)
+    tui.addInputListener { input =>
+      listenerLog :+= input
+      InputResult.Ignored
+    }
+    tui.start()
+
+    val input = TerminalInput.Key(TerminalKey.Character("x"))
+    terminal.sendInput(input)
+
+    assertEquals(listenerLog, Vector(input))
+    assertEquals(componentLog, Vector(input))
+
+  test("global input listener handled result stops focused routing and can render"):
+    val terminal  = VirtualTerminal(20, 5)
+    var delivered = 0
+    val line      = MutableLine("before")
+    val component = new Component:
+      override def handleInputResult(input: TerminalInput): InputResult =
+        delivered += 1
+        InputResult.NoRender
+      override def render(width: Int): Vector[String]                   = Vector("component")
+    val tui       = TUI(terminal)
+    tui.addChild(line)
+    tui.addChild(component)
+    tui.setFocus(component)
+    tui.addInputListener { _ =>
+      line.value = "after"
+      InputResult.Render
+    }
+    tui.start()
+    terminal.clearWrites()
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("x")))
+
+    assertEquals(delivered, 0)
+    assert(terminal.output.contains("after" + TUI.LineReset), terminal.output)
+
+  test("global input listener can be removed"):
+    val terminal       = VirtualTerminal(20, 5)
+    var listenerCalls  = 0
+    var componentCalls = 0
+    val component      = new Component:
+      override def handleInputResult(input: TerminalInput): InputResult =
+        componentCalls += 1
+        InputResult.NoRender
+      override def render(width: Int): Vector[String]                   = Vector("stable")
+    val tui            = TUI(terminal)
+    tui.addChild(component)
+    tui.setFocus(component)
+    val remove         = tui.addInputListener { _ =>
+      listenerCalls += 1
+      InputResult.Ignored
+    }
+    tui.start()
+
+    remove()
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("x")))
+
+    assertEquals(listenerCalls, 0)
+    assertEquals(componentCalls, 1)
+
+  test("global input listener can request exit"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal)
+    tui.addChild(MutableLine("stable"))
+    tui.addInputListener(_ => InputResult.Exit)
+    val thread   = Thread(() => tui.run())
+    thread.start()
+    Thread.sleep(50)
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("x")))
+    thread.join(1000)
+
+    assertEquals(thread.isAlive, false)
+    assert(terminal.output.contains("\u001b[?25h"), terminal.output)
+
   test("key release is ignored by default"):
     val terminal  = VirtualTerminal(20, 5)
     var delivered = 0
@@ -656,6 +772,21 @@ class TUISuite extends munit.FunSuite:
 
     assertEquals(delivered, Vector(TerminalInput.Key(TerminalKey.Character("x"))))
 
+  test("terminal protocol replies are not routed to global input listeners"):
+    val terminal  = VirtualTerminal(20, 5)
+    var delivered = Vector.empty[TerminalInput]
+    val tui       = TUI(terminal)
+    tui.addInputListener { input =>
+      delivered :+= input
+      InputResult.Ignored
+    }
+    tui.start()
+
+    terminal.sendInput(TerminalInput.Raw("\u001b[6;12;24t"))
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("x")))
+
+    assertEquals(delivered, Vector(TerminalInput.Key(TerminalKey.Character("x"))))
+
   test("cell-size reply is consumed before component input routing"):
     val terminal  = VirtualTerminal(20, 5)
     var delivered = Vector.empty[TerminalInput]
@@ -752,6 +883,35 @@ class TUISuite extends munit.FunSuite:
     assertEquals(failure.get(), null)
     assertEquals(terminal.showCursorCalled, true)
     assertEquals(terminal.stopCalled, true)
+
+  test("stop drains supported terminal before terminal stop and remains idempotent"):
+    val terminal = DrainingTerminal()
+    val tui      = TUI(terminal)
+    tui.start()
+
+    tui.stop()
+    tui.stop()
+
+    assertEquals(terminal.drainCalls, 1)
+    assertEquals(terminal.stopCalls, 1)
+
+  test("terminal drain helper clamps negative timeout values"):
+    val terminal = DrainingTerminal()
+
+    val drained = Terminal.drainInput(terminal, maxMillis = -1L, idleMillis = -2L)
+
+    assertEquals(drained, true)
+    assertEquals(terminal.lastMaxMillis, Some(0L))
+    assertEquals(terminal.lastIdleMillis, Some(0L))
+
+  test("stop works without optional terminal drain support"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal)
+    tui.start()
+
+    tui.stop()
+
+    assertEquals(terminal.isRunning, false)
 
   test("run does not exit on ctrl+c key release when component opts in"):
     val terminal  = VirtualTerminal(20, 5)

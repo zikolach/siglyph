@@ -42,6 +42,7 @@ object TerminalInputParser:
     "\u001b[F"     -> key(TerminalKey.End),
     "\u001bOH"     -> key(TerminalKey.Home),
     "\u001bOF"     -> key(TerminalKey.End),
+    "\u001b[2~"    -> key(TerminalKey.Insert),
     "\u001b[3~"    -> key(TerminalKey.Delete),
     "\u001b[5~"    -> key(TerminalKey.PageUp),
     "\u001b[6~"    -> key(TerminalKey.PageDown),
@@ -111,7 +112,7 @@ object TerminalInputParser:
     case other => TerminalKey.Unknown(other)
 
   private def functionKey(number: Int): Option[TerminalKey] = number match
-    case 2 => Some(TerminalKey.Unknown("insert"))
+    case 2 => Some(TerminalKey.Insert)
     case 3 => Some(TerminalKey.Delete)
     case 5 => Some(TerminalKey.PageUp)
     case 6 => Some(TerminalKey.PageDown)

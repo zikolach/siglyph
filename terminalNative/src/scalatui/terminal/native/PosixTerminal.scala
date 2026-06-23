@@ -7,6 +7,7 @@ import scalatui.terminal.{
   KittyKeyboardProtocolState,
   KittyKeyboardProtocolTerminal,
   Terminal,
+  TerminalInputDrainSupport,
   TerminalInput,
   TerminalInputBuffer,
   TerminalProgressSupport,
@@ -33,6 +34,7 @@ final class PosixTerminal(
     initialColumns: Int = PosixTerminal.envInt("COLUMNS").getOrElse(80),
     initialRows: Int = PosixTerminal.envInt("LINES").getOrElse(24)
 ) extends Terminal,
+      TerminalInputDrainSupport,
       KittyKeyboardProtocolTerminal,
       TerminalTitleSupport,
       TerminalProgressSupport:
@@ -92,6 +94,9 @@ final class PosixTerminal(
       flushThread = null
       inputLock.synchronized(inputBuffer.clear())
       restoreMode()
+
+  override def drainInput(maxMillis: Long, idleMillis: Long): Unit =
+    inputLock.synchronized(inputBuffer.clear())
 
   override def write(data: String): Unit =
     System.out.print(data)

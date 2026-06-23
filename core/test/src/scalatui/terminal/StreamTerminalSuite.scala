@@ -1,6 +1,7 @@
 package scalatui.terminal
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream}
+import java.util.concurrent.{CountDownLatch, TimeUnit}
 
 class StreamTerminalSuite extends munit.FunSuite:
   test("stream terminal writes to provided output stream"):
@@ -84,6 +85,32 @@ class StreamTerminalSuite extends munit.FunSuite:
     Thread.sleep(200)
     terminal.stop()
     assertEquals(inputs, Vector(TerminalInput.Key(TerminalKey.Escape)))
+
+  test("stream terminal drain discards pending escape without dispatching input"):
+    val drained                         = CountDownLatch(1)
+    var terminal: StreamTerminal | Null = null
+    val in                              = new java.io.InputStream:
+      private var reads                                               = 0
+      override def read(): Int                                        = -1
+      override def read(buffer: Array[Byte], off: Int, len: Int): Int =
+        reads += 1
+        reads match
+          case 1 =>
+            buffer(off) = 0x1b.toByte
+            1
+          case 2 =>
+            Option(terminal).foreach(_.drainInput())
+            drained.countDown()
+            try Thread.sleep(150)
+            catch case _: InterruptedException => ()
+            -1
+          case _ => -1
+    terminal = StreamTerminal(input = in)
+    var inputs                          = Vector.empty[TerminalInput]
+    terminal.start(input => inputs :+= input, () => ())
+    assertEquals(drained.await(1, TimeUnit.SECONDS), true)
+    terminal.stop()
+    assertEquals(inputs, Vector.empty)
 
   test("stream terminal stop is idempotent"):
     val terminal = StreamTerminal()

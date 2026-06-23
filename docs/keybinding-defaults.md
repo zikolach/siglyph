@@ -38,6 +38,7 @@ This table summarizes the default keybinding commands used by the editor/input/k
 
 ## Parser limitations / closest supported behavior
 
+- Standard and supported modified Insert-key sequences parse to `TerminalKey.Insert`. Insert is not bound to a default command, but applications can use it in custom keybindings without matching `TerminalKey.Unknown("insert")`.
 - The parser exposes `TerminalKey.Enter` and can mark modifiers for printable control-like sequences from known terminal escape forms. If a terminal emits an escape sequence that does not map to `Shift+Enter`, `InputNewLine` should still be treated through terminal-specific handling where available.
 - `Esc` and `Ctrl+C` both map to cancel selection/autocomplete by command model; by default, `TUI` exits on `Ctrl+C` before component handling unless `handlesControlC` is disabled for that runtime.
 - Additional raw terminal encodings and IME variants can arrive as `TerminalInput.Raw`; these are not part of the command model and are intentionally not promoted into stable public API commands.

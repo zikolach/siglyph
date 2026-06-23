@@ -82,6 +82,36 @@ class EditorSuite extends munit.FunSuite:
     editor.expandPasteMarkers()
     assertEquals(editor.text, s"a${pasted}b")
 
+  test("insertAtCursor inserts text normalizes newlines and creates one undo step"):
+    var changed = Vector.empty[String]
+    val editor  = Editor("ab", EditorOptions(onChange = text => changed :+= text))
+    editor.setCursor(EditorCursor(0, 1))
+
+    editor.insertAtCursor("x\r\ny\rz")
+
+    assertEquals(editor.text, "ax\ny\nzb")
+    assertEquals(editor.cursor, EditorCursor(2, 1))
+    assertEquals(changed, Vector("ax\ny\nzb"))
+
+    assertEquals(editor.undo(), true)
+    assertEquals(editor.text, "ab")
+
+  test("insertAtCursor requests render when attached and preserves large paste markers"):
+    val terminal = VirtualTerminal(80, 8)
+    val pasted   = (1 to 11).map(i => s"line$i").mkString("\n")
+    val editor   = Editor("ab")
+    editor.setCursor(EditorCursor(0, 1))
+    val tui      = TUI(terminal)
+    tui.addChild(editor)
+    tui.start()
+    terminal.clearWrites()
+
+    editor.insertAtCursor(pasted)
+    tui.flushRender()
+
+    assertEquals(editor.text, "a[paste #1 +11 lines]b")
+    assert(terminal.output.contains("[paste #1 +11 lines]"), terminal.output)
+
   test("handles deletion keys and readline-style movement"):
     val editor = Editor("hello world")
 
@@ -502,6 +532,80 @@ class EditorSuite extends munit.FunSuite:
     terminal.sendInput(TerminalInput.Key(TerminalKey.Enter))
 
     assertEquals(editor.text, "/quit ")
+
+  test("forced autocomplete auto-applies a single suggestion when enabled"):
+    val provider = AutocompleteProvider.sync(_ =>
+      Some(AutocompleteSuggestions(Vector(AutocompleteItem("only", "only")), ""))
+    )
+    val editor   = Editor(
+      options = EditorOptions(
+        autocompleteProvider = Some(provider),
+        autoApplySingleForcedCompletion = true
+      )
+    )
+
+    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Tab)), InputResult.Render)
+
+    assertEquals(editor.text, "only")
+
+  test("forced autocomplete keeps explicit selection by default"):
+    val provider = AutocompleteProvider.sync(_ =>
+      Some(AutocompleteSuggestions(Vector(AutocompleteItem("only", "only")), ""))
+    )
+    val editor   = Editor(options = EditorOptions(autocompleteProvider = Some(provider)))
+
+    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Tab)), InputResult.Render)
+    assertEquals(editor.text, "")
+
+    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Enter)), InputResult.Render)
+    assertEquals(editor.text, "only")
+
+  test("forced autocomplete with auto-apply shows selection UI for multiple suggestions"):
+    val provider = AutocompleteProvider.sync(_ =>
+      Some(AutocompleteSuggestions(
+        Vector(AutocompleteItem("one", "one"), AutocompleteItem("two", "two")),
+        ""
+      ))
+    )
+    val editor   = Editor(
+      options = EditorOptions(
+        autocompleteProvider = Some(provider),
+        autoApplySingleForcedCompletion = true
+      )
+    )
+
+    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Tab)), InputResult.Render)
+    assertEquals(editor.text, "")
+
+    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Down)), InputResult.Render)
+    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Enter)), InputResult.Render)
+    assertEquals(editor.text, "two")
+
+  test("forced autocomplete empty and stale single suggestions do not mutate editor"):
+    var events   = Vector.empty[AutocompleteProbeEvent]
+    val provider = recordingAutocompleteProvider(event => events :+= event)
+    val empty    = AutocompleteProvider.sync(_ => None)
+    val noMatch  = Editor(
+      options = EditorOptions(
+        autocompleteProvider = Some(empty),
+        autoApplySingleForcedCompletion = true
+      )
+    )
+
+    assertEquals(noMatch.handleInputResult(TerminalInput.Key(TerminalKey.Tab)), InputResult.Render)
+    assertEquals(noMatch.text, "")
+
+    val editor = Editor(
+      options = EditorOptions(
+        autocompleteProvider = Some(provider),
+        autoApplySingleForcedCompletion = true
+      )
+    )
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Tab))
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("x")))
+    requested(events).head.callback.complete(Some(autocomplete("late", "")))
+
+    assertEquals(editor.text, "x")
 
   test("editor autocomplete debounces rapid typing and cancels stale in-flight work"):
     var events    = Vector.empty[AutocompleteProbeEvent]
