@@ -74,8 +74,10 @@ class TUISuite extends munit.FunSuite:
     override def clearScreen(): Unit      = ()
 
   final class DrainingTerminal extends Terminal, TerminalInputDrainSupport:
-    var drainCalls = 0
-    var stopCalls  = 0
+    var drainCalls     = 0
+    var stopCalls      = 0
+    var lastMaxMillis  = Option.empty[Long]
+    var lastIdleMillis = Option.empty[Long]
 
     override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit = ()
 
@@ -84,6 +86,8 @@ class TUISuite extends munit.FunSuite:
     override def drainInput(maxMillis: Long, idleMillis: Long): Unit =
       assert(maxMillis >= 0L)
       assert(idleMillis >= 0L)
+      lastMaxMillis = Some(maxMillis)
+      lastIdleMillis = Some(idleMillis)
       drainCalls += 1
 
     override def write(data: String): Unit = ()
@@ -890,6 +894,15 @@ class TUISuite extends munit.FunSuite:
 
     assertEquals(terminal.drainCalls, 1)
     assertEquals(terminal.stopCalls, 1)
+
+  test("terminal drain helper clamps negative timeout values"):
+    val terminal = DrainingTerminal()
+
+    val drained = Terminal.drainInput(terminal, maxMillis = -1L, idleMillis = -2L)
+
+    assertEquals(drained, true)
+    assertEquals(terminal.lastMaxMillis, Some(0L))
+    assertEquals(terminal.lastIdleMillis, Some(0L))
 
   test("stop works without optional terminal drain support"):
     val terminal = VirtualTerminal(20, 5)

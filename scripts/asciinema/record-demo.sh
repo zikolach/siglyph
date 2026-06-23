@@ -18,6 +18,10 @@ if [ "$#" -ne 1 ]; then
   exit 2
 fi
 
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+repo_root=$(CDPATH= cd "$script_dir/../.." && pwd)
+cd "$repo_root"
+
 if ! command -v asciinema >/dev/null 2>&1; then
   echo "asciinema is required only for local recording. Install it to generate .cast files." >&2
   exit 127
@@ -50,7 +54,7 @@ record_one() {
 
   log="$artifact_dir/$scenario.stderr.log"
   pause_ms="${SIGLYPH_ASCIINEMA_PAUSE_MS:-2000}"
-  command="SIGLYPH_ASCIINEMA_PAUSE_MS=$pause_ms mill asciinemaDemo.run $scenario 2>\"$log\""
+  command="SIGLYPH_ASCIINEMA_PAUSE_MS=$pause_ms mill asciinemaDemo.run \"$scenario\" 2>\"$log\""
 
   asciinema rec \
     --quiet \

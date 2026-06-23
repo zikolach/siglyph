@@ -84,7 +84,7 @@ object Terminal:
       idleMillis: Long = 50L
   ): Boolean = terminal match
     case drain: TerminalInputDrainSupport =>
-      drain.drainInput(maxMillis, idleMillis)
+      drain.drainInput(math.max(0L, maxMillis), math.max(0L, idleMillis))
       true
     case _                                => false
 
