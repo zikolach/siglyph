@@ -50,7 +50,31 @@ object app extends ScalaModule {
 }
 ```
 
-Most JVM applications start with `siglyph-core` plus `siglyph-terminal-jvm`. Scala Native applications use the same platform-aware `siglyph-core` coordinates along with `siglyph-terminal-native`; Mill resolves those to `_native0.5_3` artifacts from `ScalaNativeModule` projects.
+### Maven for Java and Kotlin JVM apps
+
+```xml
+<dependencies>
+  <dependency>
+    <groupId>io.github.zikolach</groupId>
+    <artifactId>siglyph-core_3</artifactId>
+    <version>0.2.0</version>
+  </dependency>
+  <dependency>
+    <groupId>io.github.zikolach</groupId>
+    <artifactId>siglyph-terminal-jvm_3</artifactId>
+    <version>0.2.0</version>
+  </dependency>
+</dependencies>
+```
+
+### Gradle for Java and Kotlin JVM apps
+
+```kotlin
+implementation("io.github.zikolach:siglyph-core_3:0.2.0")
+implementation("io.github.zikolach:siglyph-terminal-jvm_3:0.2.0")
+```
+
+Most JVM applications start with `siglyph-core` plus `siglyph-terminal-jvm`. Java and Kotlin JVM applications can use `scalatui.terminal.jvm.interop.SiglyphJvm` for a narrow Java-friendly facade. Scala Native applications use the same platform-aware `siglyph-core` coordinates along with `siglyph-terminal-native`; Mill resolves those to `_native0.5_3` artifacts from `ScalaNativeModule` projects. The Java/Kotlin facade is JVM-only; Scala Native artifacts remain Scala-focused.
 
 ## Try with Scala CLI
 
@@ -83,6 +107,52 @@ import scalatui.terminal.jvm.SttyTerminal
   tui.addChild(input)
   tui.setFocus(input)
   tui.run()
+```
+
+The JVM interop facade gives Java and Kotlin call sites the same basic path without Scala default-argument methods or Scala function types.
+
+```java
+import scalatui.components.Input;
+import scalatui.core.TUI;
+import scalatui.terminal.jvm.interop.SiglyphJvm;
+
+public final class HelloTui {
+  public static void main(String[] args) {
+    SiglyphJvm siglyph = new SiglyphJvm();
+    TUI tui = siglyph.createTui();
+    Input input = siglyph.createInput();
+
+    siglyph.onSubmit(input, value -> {
+      input.setValue("");
+      siglyph.addChild(tui, siglyph.createText("You typed: " + value));
+    });
+
+    siglyph.addChild(tui, siglyph.createText("siglyph demo — type and press Enter"));
+    siglyph.addChild(tui, input);
+    siglyph.setFocus(tui, input);
+    siglyph.run(tui);
+  }
+}
+```
+
+```kotlin
+import scalatui.terminal.jvm.interop.SiglyphJvm
+
+fun main() {
+  val siglyph = SiglyphJvm()
+  val tui = siglyph.createTui()
+  val input = siglyph.createInput()
+
+  siglyph.onSubmit(input) { value ->
+    input.setValue("")
+    siglyph.addChild(tui, siglyph.createText("You typed: $value"))
+  }
+
+  siglyph.addChild(tui, siglyph.createText("siglyph demo — type and press Enter"))
+  siglyph.addChild(tui, input)
+  siglyph.setFocus(tui, input)
+  siglyph.run(tui)
+}
 ```
 
 A multiline editor with slash, filesystem, attachment, fuzzy, and `#` trigger autocomplete:

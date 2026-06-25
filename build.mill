@@ -103,7 +103,11 @@ object terminalJvm extends SiglyphPublishModule {
   def moduleDeps   = Seq(core)
 
   object test extends ScalaTests {
-    def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
+    def mvnDeps       = Seq(
+      mvn"org.scalameta::munit::1.2.0",
+      mvn"org.jetbrains.kotlin:kotlin-compiler-embeddable:2.2.21",
+      mvn"org.jetbrains.kotlin:kotlin-stdlib:2.2.21"
+    )
     def testFramework = "munit.Framework"
   }
 }
