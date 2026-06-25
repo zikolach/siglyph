@@ -15,6 +15,7 @@ final class SiglyphJvmInteropCompileSuite extends munit.FunSuite:
     compileJava(JavaSmoke)
 
   test("Kotlin smoke source compiles through JVM interop facade"):
+    assert(!KotlinSmoke.contains("$lessinit$greater$default"))
     assert(!KotlinSmoke.contains("scala.Function1"))
     compileKotlin(KotlinSmoke)
 
@@ -74,7 +75,9 @@ final class SiglyphJvmInteropCompileSuite extends munit.FunSuite:
   private def deleteRecursively(path: Path): Unit =
     if Files.exists(path) then
       if Files.isDirectory(path) then
-        Files.list(path).forEach(child => deleteRecursively(child))
+        val children = Files.list(path)
+        try children.iterator().asScala.foreach(child => deleteRecursively(child))
+        finally children.close()
       Files.deleteIfExists(path)
 
   private def classpath: String = System.getProperty("java.class.path")
