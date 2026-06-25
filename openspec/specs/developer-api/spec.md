@@ -441,3 +441,84 @@ If this change clarifies or exposes public ANSI geometry behavior, the public AP
 - **WHEN** geometry hardening changes only internal behavior and tests
 - **THEN** no new public helper documentation is required beyond updated regression notes if relevant
 
+### Requirement: Typed global input listener API
+The public TUI API SHALL allow applications to register typed global input listeners that observe terminal input before the focused component receives it.
+
+#### Scenario: Listener observes typed input first
+- **WHEN** a terminal input event is received and a global input listener is registered
+- **THEN** the listener receives the typed `TerminalInput` before the focused component input handler is invoked
+
+#### Scenario: Ignored listener allows focused routing
+- **WHEN** every global input listener reports ignored input
+- **THEN** the TUI routes the input to the focused component using the existing focused input path
+
+#### Scenario: Handled listener stops focused routing
+- **WHEN** a global input listener reports handled input
+- **THEN** the TUI does not route that same input event to the focused component
+
+#### Scenario: Listener can request exit
+- **WHEN** a global input listener returns the input result for application exit
+- **THEN** the TUI exits through the existing shutdown path and restores terminal state
+
+### Requirement: Public editor programmatic insertion API
+The public editor API SHALL expose a Scala-idiomatic method for inserting application-supplied text at the current cursor without requiring applications to synthesize terminal input.
+
+#### Scenario: Application inserts text programmatically
+- **WHEN** application code calls the editor insertion API with text
+- **THEN** the editor inserts that text at the current cursor using the same logical buffer rules as editor-owned insertion
+
+#### Scenario: Programmatic insertion is documented
+- **WHEN** the editor insertion API is added
+- **THEN** Scaladoc and project documentation describe callbacks, undo behavior, paste normalization, autocomplete refresh behavior, and render behavior
+
+### Requirement: API parity documentation
+The project documentation SHALL record the selected `pi-tui` parity gaps closed by this change and any intentional default differences.
+
+#### Scenario: Porting notes describe listener parity
+- **WHEN** the change is complete
+- **THEN** `docs/porting-notes.md` describes typed global input listeners as the siglyph counterpart to `pi-tui` raw input listeners
+
+#### Scenario: Porting notes describe autocomplete default
+- **WHEN** forced single-completion auto-apply is implemented as opt-in behavior
+- **THEN** `docs/porting-notes.md` states that siglyph preserves explicit selection by default and enables auto-apply only when configured
+
+### Requirement: Deterministic asciinema demo scenarios
+The project SHALL provide deterministic local demo scenarios for asciinema recording that are separate from the manual interactive smoke demos.
+
+#### Scenario: Recording scenarios are available
+- **WHEN** a contributor wants to record polished terminal demos locally
+- **THEN** the repository provides commands or scripts for the agent prompt composer, command palette and settings, and Unicode typed input scenarios
+
+#### Scenario: Scenarios avoid build-tool noise
+- **WHEN** a recording scenario is run through the documented recording command
+- **THEN** the visible cast output contains the scenario content without Mill progress output, Scala CLI resolver output, or compiler progress output
+
+#### Scenario: Scenario output is deterministic
+- **WHEN** the same recording scenario is run twice with the same repository state and terminal dimensions
+- **THEN** the visible scene order, captions, and feature steps are the same apart from timing metadata
+
+### Requirement: Asciinema recording remains optional
+The project SHALL keep asciinema recording as an optional local publishing workflow, not as a required build, test, or runtime dependency.
+
+#### Scenario: Build does not require asciinema
+- **WHEN** a contributor runs normal compile, test, formatting, lint, or OpenSpec validation commands
+- **THEN** those commands do not require asciinema, expect, Node.js, npm, `agg`, `svg-term`, or browser tooling
+
+#### Scenario: Recording writes local artifacts
+- **WHEN** a contributor runs the documented asciinema recording commands
+- **THEN** generated `.cast` files are written to a local artifact path and are not required inputs to compile, test, formatting, lint, or OpenSpec validation commands
+
+### Requirement: Demo recording documentation
+The project SHALL document how to record, replay, and publish the asciinema demo scenarios.
+
+#### Scenario: Contributor plays a local recording
+- **WHEN** a contributor has a generated `.cast` file
+- **THEN** the documentation shows the exact `asciinema play` command needed to replay it locally
+
+#### Scenario: Contributor publishes a README preview
+- **WHEN** a contributor uploads a cast to asciinema.org for README use
+- **THEN** the documentation shows the clickable SVG preview Markdown format `[![asciicast](https://asciinema.org/a/<id>.svg)](https://asciinema.org/a/<id>)`
+
+#### Scenario: Documentation identifies scenario purpose
+- **WHEN** a contributor reviews the recording documentation
+- **THEN** each scenario states the feature story it demonstrates and the command that generates its local `.cast` file
