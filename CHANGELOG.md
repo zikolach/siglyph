@@ -7,6 +7,11 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Added
+
+- Added a JVM-only Java and Kotlin interop facade for creating terminal-backed TUIs, `Text` and `Input` components, focus, run, exit, child attachment, and input submit callbacks through JDK functional interfaces. #14
+- Added Java and Kotlin JVM setup documentation and smoke coverage for the interop API. #14
+
 ## [0.2.3] - 2026-06-23
 
 ### Added
