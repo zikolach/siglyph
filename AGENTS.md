@@ -101,6 +101,14 @@ stty sane
 - Archive completed changes with the archive workflow after implementation and
   validation are done.
 
+## Pull requests
+
+- Create PR descriptions with real Markdown line breaks. Prefer `gh pr create` or
+  `gh pr edit` with `--body-file` and a temporary Markdown file instead of an
+  inline shell string containing literal `\n` sequences.
+- Include `## Summary` and `## Validation` sections in PR descriptions. List the
+  validation commands that were run, or state the exact validation gap.
+
 ## Conventions
 
 ### Scala style
