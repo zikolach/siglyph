@@ -50,7 +50,35 @@ object app extends ScalaModule {
 }
 ```
 
-Most JVM applications start with `siglyph-core` plus `siglyph-terminal-jvm`. Scala Native applications use the same platform-aware `siglyph-core` coordinates along with `siglyph-terminal-native`; Mill resolves those to `_native0.5_3` artifacts from `ScalaNativeModule` projects.
+### Maven for Java and Kotlin JVM apps
+
+Replace `VERSION` with a published release that includes the JVM interop facade.
+
+```xml
+<dependencies>
+  <dependency>
+    <groupId>io.github.zikolach</groupId>
+    <artifactId>siglyph-core_3</artifactId>
+    <version>VERSION</version>
+  </dependency>
+  <dependency>
+    <groupId>io.github.zikolach</groupId>
+    <artifactId>siglyph-terminal-jvm_3</artifactId>
+    <version>VERSION</version>
+  </dependency>
+</dependencies>
+```
+
+### Gradle for Java and Kotlin JVM apps
+
+Replace `VERSION` with a published release that includes the JVM interop facade.
+
+```kotlin
+implementation("io.github.zikolach:siglyph-core_3:VERSION")
+implementation("io.github.zikolach:siglyph-terminal-jvm_3:VERSION")
+```
+
+Scala JVM applications usually start with `siglyph-core` and `siglyph-terminal-jvm` through Scala build-tool syntax such as `%%` or Mill `::`. Java and Kotlin JVM applications use the concrete JVM artifact IDs `siglyph-core_3` and `siglyph-terminal-jvm_3`, and can use `scalatui.terminal.jvm.interop.SiglyphJvm` for a narrow Java-friendly facade. Scala Native applications use the platform-aware `siglyph-core` coordinates along with `siglyph-terminal-native`; Mill resolves those to `_native0.5_3` artifacts from `ScalaNativeModule` projects. The Java/Kotlin facade is JVM-only; Scala Native artifacts remain Scala-focused.
 
 ## Try with Scala CLI
 
@@ -84,6 +112,8 @@ import scalatui.terminal.jvm.SttyTerminal
   tui.setFocus(input)
   tui.run()
 ```
+
+The JVM interop facade gives Java and Kotlin call sites the same basic path without Scala default-argument methods or Scala function types. Scala, Java, and Kotlin versions of the basic example are in [`docs/jvm-language-examples.md`](docs/jvm-language-examples.md).
 
 A multiline editor with slash, filesystem, attachment, fuzzy, and `#` trigger autocomplete:
 
