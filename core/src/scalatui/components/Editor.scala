@@ -394,6 +394,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     cancelAutocomplete()
     onSubmit(buffer.submitText)
     undoStack.clear()
+    resetEditingAction()
     InputResult.Render
 
   private def move(operation: EditorBuffer => Unit): InputResult =
