@@ -13,7 +13,7 @@ The default keybinding definitions SHALL mirror current upstream `pi-tui` defaul
 
 #### Scenario: Input and selection defaults are present
 - **WHEN** default keybindings are resolved
-- **THEN** generic input/select commands include Shift+Enter and representable `Ctrl+J` input for newline, Enter for submit, Tab for autocomplete, `Ctrl+C` for copy/cancel behavior, Up/Down/PageUp/PageDown for selection, Enter for confirm, and Escape or `Ctrl+C` for cancel
+- **THEN** generic input/select commands include `Shift+Enter` and representable `Ctrl+J` input for newline, Enter for submit, Tab for autocomplete, `Ctrl+C` for copy/cancel behavior, Up/Down/PageUp/PageDown for selection, Enter for confirm, and Escape or `Ctrl+C` for cancel
 
 #### Scenario: Ctrl J newline alias is typed when distinguishable
 - **WHEN** the runtime receives a typed Ctrl+J input event that is distinguishable from plain Enter
