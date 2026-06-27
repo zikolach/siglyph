@@ -7,6 +7,19 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-06-27
+
+### Added
+
+- Added a local Maven snapshot publishing helper that derives the base version from the latest Git tag, compiles all modules, and publishes all publishable modules to Maven local. #17
+- Added `Ctrl+J` as a typed newline alias when terminal input can distinguish it from plain Enter. #17
+
+### Fixed
+
+- Fixed editor submit boundaries so undo and yank-pop state do not continue across submitted prompts. #17
+- Fixed Scaladoc links that produced broken-link warnings during local publishing. #17
+- Added parity coverage for fullwidth punctuation word navigation and streaming Markdown fenced-code stability. #17
+
 ## [0.2.4] - 2026-06-26
 
 ### Added
@@ -133,7 +146,9 @@ and this project uses semantic versioning while it remains pre-1.0.
 - GitHub Actions CI, jar packaging, GitHub Packages publishing, and GitHub
   release artifacts.
 
-[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/zikolach/siglyph/compare/v0.2.4...v0.2.5
+[0.2.4]: https://github.com/zikolach/siglyph/releases/tag/v0.2.4
 [0.2.3]: https://github.com/zikolach/siglyph/releases/tag/v0.2.3
 [0.2.2]: https://github.com/zikolach/siglyph/releases/tag/v0.2.2
 [0.2.1]: https://github.com/zikolach/siglyph/releases/tag/v0.2.1
