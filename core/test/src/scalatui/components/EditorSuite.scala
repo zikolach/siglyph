@@ -466,6 +466,20 @@ class EditorSuite extends munit.FunSuite:
     )
     assertEquals(editor.cursor, EditorCursor(0, 2))
 
+  test("submit clears undo history"):
+    var submitted = ""
+    val editor    = Editor(options = EditorOptions(onSubmit = text => submitted = text))
+
+    assertEquals(
+      editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("a"))),
+      InputResult.Render
+    )
+    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Enter)), InputResult.Render)
+
+    assertEquals(submitted, "a")
+    assertEquals(editor.undo(), false)
+    assertEquals(editor.text, "a")
+
   test("submit-on-enter mode submits plain enter and inserts newline on shift enter"):
     var submitted = ""
     val editor    = Editor(options = EditorOptions(onSubmit = text => submitted = text))

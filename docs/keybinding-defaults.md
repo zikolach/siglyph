@@ -25,7 +25,7 @@ This table summarizes the default keybinding commands used by the editor/input/k
 | `tui.editor.yank` | Editor | `Ctrl+Y` |
 | `tui.editor.yankPop` | Editor | `Alt+Y` |
 | `tui.editor.undo` | Editor | `Ctrl+-` |
-| `tui.input.newLine` | Input | `Shift+Enter` |
+| `tui.input.newLine` | Input | `Shift+Enter`, `Ctrl+J` when reported as typed Ctrl+J |
 | `tui.input.submit` | Input | `Enter` |
 | `tui.input.tab` | Input | `Tab` |
 | `tui.input.copy` | Input | `Ctrl+C` |
@@ -39,6 +39,6 @@ This table summarizes the default keybinding commands used by the editor/input/k
 ## Parser limitations / closest supported behavior
 
 - Standard and supported modified Insert-key sequences parse to `TerminalKey.Insert`. Insert is not bound to a default command, but applications can use it in custom keybindings without matching `TerminalKey.Unknown("insert")`.
-- The parser exposes `TerminalKey.Enter` and can mark modifiers for printable control-like sequences from known terminal escape forms. If a terminal emits an escape sequence that does not map to `Shift+Enter`, `InputNewLine` should still be treated through terminal-specific handling where available.
+- The parser exposes `TerminalKey.Enter` and can mark modifiers for printable control-like sequences from known terminal escape forms. `Ctrl+J` matches `InputNewLine` when the terminal reports a distinguishable typed Ctrl+J event, such as CSI-u `ESC[106;5u`. A bare line-feed byte (`\n`) remains plain Enter because many terminals use it for Return.
 - `Esc` and `Ctrl+C` both map to cancel selection/autocomplete by command model; by default, `TUI` exits on `Ctrl+C` before component handling unless `handlesControlC` is disabled for that runtime.
 - Additional raw terminal encodings and IME variants can arrive as `TerminalInput.Raw`; these are not part of the command model and are intentionally not promoted into stable public API commands.

@@ -393,6 +393,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
   private def submit(): InputResult =
     cancelAutocomplete()
     onSubmit(buffer.submitText)
+    undoStack.clear()
     InputResult.Render
 
   private def move(operation: EditorBuffer => Unit): InputResult =
