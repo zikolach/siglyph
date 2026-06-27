@@ -5,6 +5,11 @@ class KeybindingManagerSuite extends munit.FunSuite:
     val manager = KeybindingManager()
     assert(manager.matches(TerminalInput.Key(TerminalKey.Up), KeybindingCommand.EditorCursorUp))
     assert(manager.matches(TerminalInput.Key(TerminalKey.Enter), KeybindingCommand.InputSubmit))
+    assert(manager.matches(
+      TerminalInput.Key(TerminalKey.Character("j"), KeyModifiers(ctrl = true)),
+      KeybindingCommand.InputNewLine
+    ))
+    assert(!manager.matches(TerminalInput.Key(TerminalKey.Enter), KeybindingCommand.InputNewLine))
     assert(
       manager.matches(
         TerminalInput.Key(TerminalKey.Character("]"), KeyModifiers(ctrl = true)),

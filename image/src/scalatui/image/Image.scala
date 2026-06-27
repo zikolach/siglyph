@@ -221,7 +221,8 @@ object ImageSizing:
  *
  * By default, this high-level component opts into runtime terminal cell dimensions because it is
  * rendered inside a [[scalatui.core.TUI]] lifecycle that sends the cell-size query on start. Pass
- * [[ImageRenderOptions]] with [[ImageCellDimensionsSource.Fixed]] when component rendering must use
+ * [[scalatui.terminal.ImageRenderOptions]] with
+ * [[scalatui.terminal.ImageCellDimensionsSource.Fixed]] when component rendering must use
  * caller-supplied deterministic cell dimensions.
  */
 final class Image(

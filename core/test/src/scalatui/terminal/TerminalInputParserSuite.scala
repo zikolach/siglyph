@@ -35,6 +35,13 @@ class TerminalInputParserSuite extends munit.FunSuite:
       TerminalInputParser.parseOne("\u001b[97;5u"),
       TerminalInput.Key(TerminalKey.Character("a"), KeyModifiers(ctrl = true))
     )
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[106;5u"),
+      TerminalInput.Key(TerminalKey.Character("j"), KeyModifiers(ctrl = true))
+    )
+
+  test("keeps bare line feed as plain enter"):
+    assertEquals(TerminalInputParser.parseOne("\n"), TerminalInput.Key(TerminalKey.Enter))
 
   test("parses kitty csi-u event metadata and super modifier"):
     assertEquals(

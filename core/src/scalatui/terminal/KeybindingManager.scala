@@ -337,7 +337,10 @@ object KeybindingManager:
       ),
     KeybindingCommand.InputNewLine             ->
       KeybindingDefinition(
-        Vector(KeyDescriptor(TerminalKey.Enter, KeyModifiers(shift = true))),
+        Vector(
+          KeyDescriptor(TerminalKey.Enter, KeyModifiers(shift = true)),
+          KeyDescriptor(TerminalKey.Character("j"), KeyModifiers(ctrl = true))
+        ),
         "Insert newline"
       ),
     KeybindingCommand.InputSubmit              ->

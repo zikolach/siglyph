@@ -162,6 +162,20 @@ class MarkdownRendererSuite extends munit.FunSuite:
 
     assert(lines.exists(_.contains("label (https://example.test)")), lines.mkString("\n"))
 
+  test("partial streaming closing fences stay inside code block"):
+    val oneTick  = BasicMarkdownRenderer.default.render("```scala\nval x = 1\n`", 80)
+    val twoTicks = BasicMarkdownRenderer.default.render("```scala\nval x = 1\n``", 80)
+
+    assertEquals(oneTick.filterNot(_.isEmpty), Vector("```scala", "val x = 1", "`", "```"))
+    assertEquals(twoTicks.filterNot(_.isEmpty), Vector("```scala", "val x = 1", "``", "```"))
+
+  test("complete streaming closing fence resumes normal block parsing"):
+    val lines = BasicMarkdownRenderer.default.render("```scala\nval x = 1\n```\n\n# Done", 10)
+
+    assert(lines.exists(_.contains("val x = 1")), lines.mkString("\n"))
+    assert(lines.exists(_.contains("# Done")), lines.mkString("\n"))
+    assert(lines.forall(line => Ansi.visibleWidth(line) <= 10), lines.mkString("\n"))
+
   test("highlighter hook can replace fenced code block lines"):
     val renderer = BasicMarkdownRenderer(options =
       MarkdownRenderOptions(

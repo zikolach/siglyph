@@ -307,6 +307,10 @@ The editor SHALL expose undo and kill-ring behavior through the rendered `Editor
 - **WHEN** editable multiline text is changed and Undo is invoked with the configured undo key binding (`Ctrl+-` by default, matching `pi-tui`)
 - **THEN** the editor restores the prior `EditorBuffer` snapshot, including cursor line/column, and continues rendering from that state
 
+#### Scenario: Submit clears editor undo stack
+- **WHEN** the editor submits its current text through the configured submit behavior
+- **THEN** later undo commands do not restore pre-submit draft snapshots
+
 #### Scenario: Redo is not invented beyond upstream parity
 - **WHEN** applications use the default editing model for `Editor`
 - **THEN** no redo command is exposed unless a future upstream-compatible design adds redo semantics explicitly
@@ -344,6 +348,10 @@ The `Input` and `Editor` components SHALL treat word boundaries consistently acr
 #### Scenario: Word deletion uses matched boundaries after punctuation runs
 - **WHEN** the user deletes a word from a cursor position next to punctuation or mixed scripts
 - **THEN** only the expected boundary-consistent segment is removed and cursor position remains valid for subsequent edits
+
+#### Scenario: Fullwidth punctuation separates words
+- **WHEN** word navigation crosses mixed CJK text separated by fullwidth punctuation
+- **THEN** cursor movement and word deletion treat the fullwidth punctuation as a boundary and do not merge adjacent words across that punctuation
 
 ### Requirement: Editing command bindings follow pi-tui defaults
 The `Input` and `Editor` components SHALL map advanced editing commands to the current upstream `pi-tui` defaults where the typed terminal input model can represent those keys.
@@ -492,3 +500,4 @@ The multiline editor SHALL expose a public method that inserts application-suppl
 #### Scenario: Programmatic insertion preserves large paste marker behavior
 - **WHEN** application code inserts text that exceeds the configured large-paste threshold
 - **THEN** the editor uses the same large-paste marker behavior as paste insertion
+

@@ -116,9 +116,9 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   /**
    * Query the terminal color scheme using DSR `CSI ? 996 n`.
    *
-   * Valid terminal reports are parsed as [[TerminalColorScheme.Dark]] or
-   * [[TerminalColorScheme.Light]]. Returns `None` without writing when the TUI is not running.
-   * Returns `None` when no valid report arrives before `timeoutMillis` expires.
+   * Valid terminal reports are parsed as [[scalatui.terminal.TerminalColorScheme.Dark]] or
+   * [[scalatui.terminal.TerminalColorScheme.Light]]. Returns `None` without writing when the TUI is
+   * not running. Returns `None` when no valid report arrives before `timeoutMillis` expires.
    */
   def queryTerminalColorScheme(timeoutMillis: Long = 1000L): Option[TerminalColorScheme] =
     val query = registerPendingQuery(

@@ -466,6 +466,51 @@ class EditorSuite extends munit.FunSuite:
     )
     assertEquals(editor.cursor, EditorCursor(0, 2))
 
+  test("submit clears undo history"):
+    var submitted = ""
+    val editor    = Editor(options = EditorOptions(onSubmit = text => submitted = text))
+
+    assertEquals(
+      editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("a"))),
+      InputResult.Render
+    )
+    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Enter)), InputResult.Render)
+
+    assertEquals(submitted, "a")
+    assertEquals(editor.undo(), false)
+    assertEquals(editor.text, "a")
+
+  test("submit resets yank-pop chain"):
+    val editor = Editor("one two")
+
+    editor.handleInputResult(TerminalInput.Key(
+      TerminalKey.Character("w"),
+      KeyModifiers(ctrl = true)
+    ))
+    editor.handleInputResult(TerminalInput.Key(
+      TerminalKey.Character("a"),
+      KeyModifiers(ctrl = true)
+    ))
+    editor.handleInputResult(TerminalInput.Key(
+      TerminalKey.Character("k"),
+      KeyModifiers(ctrl = true)
+    ))
+    editor.handleInputResult(TerminalInput.Key(
+      TerminalKey.Character("y"),
+      KeyModifiers(ctrl = true)
+    ))
+    assertEquals(editor.text, "one ")
+
+    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Enter)), InputResult.Render)
+    assertEquals(
+      editor.handleInputResult(TerminalInput.Key(
+        TerminalKey.Character("y"),
+        KeyModifiers(alt = true)
+      )),
+      InputResult.NoRender
+    )
+    assertEquals(editor.text, "one ")
+
   test("submit-on-enter mode submits plain enter and inserts newline on shift enter"):
     var submitted = ""
     val editor    = Editor(options = EditorOptions(onSubmit = text => submitted = text))

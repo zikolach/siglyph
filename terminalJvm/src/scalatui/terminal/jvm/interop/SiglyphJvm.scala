@@ -11,9 +11,9 @@ import java.util.function.Consumer
  * JVM-only Java and Kotlin interop facade for basic terminal-backed siglyph apps.
  *
  * This facade is intentionally narrow. It covers the common JVM path: create a default
- * [[scalatui.core.TUI]] with [[scalatui.terminal.jvm.SttyTerminal]], create [[Text]] and [[Input]]
- * components, add components, set focus, run, request exit, and register input submit callbacks
- * through JDK functional interfaces.
+ * [[scalatui.core.TUI]] with [[scalatui.terminal.jvm.SttyTerminal]], create
+ * [[scalatui.components.Text]] and [[scalatui.components.Input]] components, add components, set
+ * focus, run, request exit, and register input submit callbacks through JDK functional interfaces.
  *
  * The Scala-first API remains the primary API for advanced options. This facade does not change
  * Scala Native artifacts and does not promise Java or Kotlin support for Scala Native modules.
