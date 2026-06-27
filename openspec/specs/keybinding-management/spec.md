@@ -31,7 +31,15 @@ The default keybinding definitions SHALL mirror current upstream `pi-tui` defaul
 
 #### Scenario: Input and selection defaults are present
 - **WHEN** default keybindings are resolved
-- **THEN** generic input/select commands include Shift+Enter for newline, Enter for submit, Tab for autocomplete, `Ctrl+C` for copy/cancel behavior, Up/Down/PageUp/PageDown for selection, Enter for confirm, and Escape or `Ctrl+C` for cancel
+- **THEN** generic input/select commands include Shift+Enter and representable `Ctrl+J` input for newline, Enter for submit, Tab for autocomplete, `Ctrl+C` for copy/cancel behavior, Up/Down/PageUp/PageDown for selection, Enter for confirm, and Escape or `Ctrl+C` for cancel
+
+#### Scenario: Ctrl J newline alias is typed when distinguishable
+- **WHEN** the runtime receives a typed Ctrl+J input event that is distinguishable from plain Enter
+- **THEN** the default keybinding manager matches it to `tui.input.newLine`
+
+#### Scenario: Bare line feed ambiguity is documented
+- **WHEN** a terminal emits a bare line-feed byte that the parser normalizes to plain Enter
+- **THEN** the implementation documents that this byte is treated as Enter unless a reliable typed Ctrl+J encoding is available
 
 ### Requirement: Custom keybinding overrides and conflict reporting
 Applications SHALL be able to replace default keys for registered commands and inspect conflicts among user-supplied key claims.
@@ -66,3 +74,4 @@ The keybinding manager SHALL match the first-class typed Insert key identity whe
 #### Scenario: Insert does not require unknown-key binding
 - **WHEN** an application wants to bind the Insert key
 - **THEN** it can use the typed Insert key identity instead of matching `TerminalKey.Unknown("insert")`
+
