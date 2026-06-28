@@ -32,3 +32,5 @@ private def describe(input: TerminalInput): String = input match
   case TerminalInput.RawChunk(chunk)                     =>
     s"raw chunk ${chunk.toArray.map(byte => f"0x${byte & 0xff}%02X").mkString(" ")}"
   case TerminalInput.RawEnd(termination)                 => s"raw end termination=$termination"
+  case TerminalInput.Mouse(action, row, col, modifiers)  =>
+    s"mouse action=$action row=$row col=$col modifiers=$modifiers"

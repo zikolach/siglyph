@@ -4,13 +4,16 @@ import scalatui.TestInputStreams
 
 import scalatui.ansi.Ansi
 import scalatui.autocomplete.*
-import scalatui.core.{CursorPlacement, InputResult, OverlayOptions, OverlaySize, TUI}
+import scalatui.core.{CursorPlacement, InputResult, OverlayOptions, OverlaySize, TUI, TUIOptions}
 import scalatui.syntax.Equality.*
 import scalatui.editing.EditorCursor
 import scalatui.terminal.{
   KeyDescriptor,
   KeybindingManager,
   KeyModifiers,
+  MouseAction,
+  MouseInputContext,
+  MouseWheelDirection,
   TerminalInput,
   TerminalInputBuffer,
   TerminalInputChunk,
@@ -295,6 +298,31 @@ class EditorSuite extends munit.FunSuite:
         assertEquals(editor.text, afterBackspace, s"$inserted mode=$mode")
       }
     }
+
+  private def wheel(direction: MouseWheelDirection): MouseInputContext =
+    MouseInputContext(
+      TerminalInput.Mouse(MouseAction.Wheel(direction), row = 0, col = 0),
+      boundsRow = 0,
+      boundsCol = 0,
+      boundsWidth = 20,
+      boundsHeight = 5,
+      localRow = 0,
+      localCol = 0
+    )
+
+  test("editor wheel uses page movement without mutating text"):
+    val editor = Editor((1 to 10).map(i => s"line$i").mkString("\n"))
+    editor.render(20)
+    editor.setCursor(EditorCursor(0, 0))
+    val before = editor.text
+
+    assertEquals(editor.handleMouse(wheel(MouseWheelDirection.Down)), InputResult.Render)
+    assertEquals(editor.cursor.line, 5)
+    assertEquals(editor.text, before)
+    assertEquals(editor.handleMouse(wheel(MouseWheelDirection.Up)), InputResult.Render)
+    assertEquals(editor.cursor.line, 0)
+    assertEquals(editor.handleMouse(wheel(MouseWheelDirection.Up)), InputResult.NoRender)
+    assertEquals(editor.text, before)
 
   test("insertAtCursor requests render when attached and preserves large paste markers"):
     val terminal = VirtualTerminal(80, 8)
@@ -778,6 +806,30 @@ class EditorSuite extends munit.FunSuite:
     terminal.sendInput(TerminalInput.Key(TerminalKey.Down))
     terminal.sendInput(TerminalInput.Key(TerminalKey.Enter))
 
+    assertEquals(editor.text, "/quit ")
+
+  test("autocomplete overlay wheel changes selected suggestion without changing editor text"):
+    val provider = SlashCommandAutocompleteProvider(Vector(
+      SlashCommand("help", Some("Show help")),
+      SlashCommand("quit", Some("Exit"))
+    ))
+    val terminal = VirtualTerminal(40, 8)
+    val editor   = Editor(options = EditorOptions(autocompleteProvider = Some(provider)))
+    val tui      = TUI(terminal, TUIOptions(mouseInput = true))
+    tui.addChild(editor)
+    tui.setFocus(editor)
+    tui.start()
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("/")))
+    val before = editor.text
+    terminal.sendMouse(TerminalInput.Mouse(
+      MouseAction.Wheel(MouseWheelDirection.Down),
+      row = 1,
+      col = 0
+    ))
+
+    assertEquals(editor.text, before)
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Enter))
     assertEquals(editor.text, "/quit ")
 
   test("forced autocomplete auto-applies a single suggestion when enabled"):

@@ -138,6 +138,7 @@ final class ComponentFrameBuilder(width: Int, startRow: Int = 0, startCol: Int =
   private val renderedLines            = Vector.newBuilder[String]
   private val renderedControls         = Vector.newBuilder[TerminalControlPlacement]
   private val renderedCursorPlacements = Vector.newBuilder[CursorPlacement]
+  private val nodes                    = Vector.newBuilder[LayoutNode]
   private var localRow                 = 0
 
   /** Append ordinary lines and advance the local row without adding semantic controls. */
@@ -152,25 +153,20 @@ final class ComponentFrameBuilder(width: Int, startRow: Int = 0, startCol: Int =
    * Validate and append a typed child frame, then rebase metadata only by accumulated local rows.
    */
   def addRender(frame: ComponentRender): Unit =
-    val childFrame = frame.validated(width)
-    renderedLines ++= childFrame.lines
-    childFrame.controls.foreach(placement =>
-      renderedControls += placement.translated(rowOffset = localRow)
-    )
-    childFrame.cursorPlacements.foreach(placement =>
-      renderedCursorPlacements += placement.translated(rowOffset = localRow)
-    )
-    localRow += childFrame.lines.length
+    appendValidated(frame.validated(width))
 
   /**
-   * Render and append a component, supplying its render origin when it supports that capability.
+   * Render and append a component, supplying its render origin and retaining its layout tree.
    */
   def addComponent(component: Component): Unit =
     component match
       case aware: RenderOriginAware =>
         aware.renderOrigin_=(Some(ComponentRenderOrigin(startRow + localRow, startCol)))
       case _                        => ()
-    addRender(component.render(width))
+    val frame     = component.renderFrame(width, startRow + localRow, startCol)
+    val validated = frame.render.validated(width)
+    nodes += frame.layout
+    appendValidated(validated)
 
   /**
    * Return accumulated ordinary lines and frame-relative metadata. Callers must still validate the
@@ -181,3 +177,25 @@ final class ComponentFrameBuilder(width: Int, startRow: Int = 0, startCol: Int =
     renderedControls.result(),
     renderedCursorPlacements.result()
   )
+
+  /** Return accumulated typed output and child layout nodes under `component`. */
+  def resultFrame(component: Component): RenderedFrame =
+    val render = result()
+    RenderedFrame(
+      render,
+      LayoutNode(
+        component,
+        LayoutBounds(startRow, startCol, math.max(0, width), render.lines.length),
+        nodes.result()
+      )
+    )
+
+  private def appendValidated(frame: ComponentRender): Unit =
+    renderedLines ++= frame.lines
+    frame.controls.foreach(placement =>
+      renderedControls += placement.translated(rowOffset = localRow)
+    )
+    frame.cursorPlacements.foreach(placement =>
+      renderedCursorPlacements += placement.translated(rowOffset = localRow)
+    )
+    localRow += frame.lines.length

@@ -1,10 +1,16 @@
 package scalatui.components
 
 import scalatui.ansi.Ansi
-import scalatui.core.{Component, ComponentRender, InputResult}
+import scalatui.core.{Component, ComponentRender, InputResult, MouseInputHandler}
 import scalatui.matching.FuzzyMatcher
 import scalatui.syntax.Equality.*
-import scalatui.terminal.{TerminalInput, TerminalKey}
+import scalatui.terminal.{
+  MouseAction,
+  MouseInputContext,
+  MouseWheelDirection,
+  TerminalInput,
+  TerminalKey
+}
 import scalatui.unicode.{TextCase, Unicode}
 
 final case class SelectItem(value: String, label: String, description: Option[String] = None)
@@ -13,7 +19,8 @@ final case class SelectItem(value: String, label: String, description: Option[St
 final class SelectList private (
     items: Vector[SelectItem],
     options: SelectListOptions
-) extends Component:
+) extends Component,
+      MouseInputHandler:
   def this(items: Vector[SelectItem]) = this(items, SelectListOptions())
 
   def this(items: Vector[SelectItem], maxVisible: Int) =
@@ -30,6 +37,11 @@ final class SelectList private (
   def selected: Option[SelectItem] = filteredItems(filterQuery).lift(selectedIndex)
 
   def query: String = pasteSession.fold(filterQuery)(_.query)
+
+  override def handleMouse(context: MouseInputContext): InputResult = context.input.action match
+    case MouseAction.Wheel(MouseWheelDirection.Up)   => moveSelectionResult(-1)
+    case MouseAction.Wheel(MouseWheelDirection.Down) => moveSelectionResult(1)
+    case _                                           => InputResult.Ignored
 
   override def handleInput(input: TerminalInput): Unit =
     handleInputResult(input)
@@ -90,6 +102,9 @@ final class SelectList private (
   /** Move selection up/down by logical items. */
   def moveSelectionBy(delta: Int): Unit = moveSelection(delta)
 
+  /** Move selection and return whether a render is needed. */
+  def moveSelectionByResult(delta: Int): InputResult = moveSelectionResult(delta)
+
   /** Move selection by a full page of visible rows, clamped to item bounds. */
   def moveSelectionByPage(pagesize: Int, direction: Int): Unit =
     if items.nonEmpty then moveSelectionBy(pagesize * direction)
@@ -133,12 +148,19 @@ final class SelectList private (
     else rows
 
   private def moveSelection(delta: Int): Unit =
+    moveSelectionResult(delta)
+    ()
+
+  private def moveSelectionResult(delta: Int): InputResult =
     val currentItems = filteredItems(filterQuery)
-    if currentItems.nonEmpty then
-      val before = currentItems.lift(selectedIndex)
+    if currentItems.isEmpty then InputResult.Ignored
+    else
+      val before      = currentItems.lift(selectedIndex)
+      val beforeIndex = selectedIndex
       selectedIndex = math.max(0, math.min(currentItems.length - 1, selectedIndex + delta))
       ensureVisible(currentItems.length)
       notifySelectionChange(before, currentItems.lift(selectedIndex))
+      if selectedIndex === beforeIndex then InputResult.NoRender else InputResult.Render
 
   private def ensureVisible(length: Int): Unit =
     scrollOffset = normalizedScrollOffset(length)

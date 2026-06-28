@@ -9,6 +9,7 @@ import scalatui.terminal.{
   TerminalColorProtocol,
   TerminalColorScheme,
   TerminalImageProtocol,
+  MouseInputContext,
   TerminalInput,
   TerminalInputChunk,
   TerminalKey,
@@ -47,10 +48,14 @@ enum TUIScreenMode derives CanEqual:
  *   Terminal screen buffer mode for this TUI lifecycle. The default [[TUIScreenMode.Normal]] keeps
  *   existing normal-screen behavior. [[TUIScreenMode.Alternate]] enters the terminal alternate
  *   screen on start and exits it during cleanup without changing the component render contract.
+ * @param mouseInput
+ *   Enable opt-in terminal mouse reporting for coordinate-aware mouse input. Disabled by default
+ *   because terminal mouse reporting can affect normal text selection.
  */
 final case class TUIOptions(
     hardwareCursorPositioning: Boolean = false,
-    screenMode: TUIScreenMode = TUIScreenMode.Normal
+    screenMode: TUIScreenMode = TUIScreenMode.Normal,
+    mouseInput: Boolean = false
 ) derives CanEqual
 
 /**
@@ -88,6 +93,8 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   private var nextQueryFlightId                       = 0L
   private var nextQuerySubscriberId                   = 0L
   private var previousFrame                           = Option.empty[TUI.PreparedFrame]
+  private var latestBaseLayout                        = Option.empty[LayoutNode]
+  private var latestOverlayLayouts                    = Vector.empty[TUI.OverlayLayout]
   private var previousWidth                           = 0
   private var previousHeight                          = 0
   private var cursorRow                               = 0
@@ -316,6 +323,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     }
     if shouldStart then
       try
+        Terminal.setMouseReporting(terminal, options.mouseInput)
         writeTerminal(terminal.start(
           input => safeRuntimeCallback(publishInput(input)),
           () => safeRuntimeCallback(publishResize())
@@ -397,11 +405,20 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   override def flushRender(): Unit = drainOrReturn()
 
   private def handleInput(input: TerminalInput): Unit =
-    if routeGlobalInputListeners(input) !== InputResult.Ignored then ()
+    if isMouseInputDisabled(input) then ()
+    else if routeGlobalInputListeners(input) !== InputResult.Ignored then ()
     else if isIgnoredKeyRelease(input) then ()
     else if handlesControlC && isCtrl(input, "c") then requestExit()
     else if exitsOnEscape && (input === TerminalInput.Key(TerminalKey.Escape)) then requestExit()
-    else inputTarget.map(_.handleInputResult(input)).foreach(handleInputResult)
+    else
+      input match
+        case mouse: TerminalInput.Mouse => routeMouseInput(mouse)
+        case _                          =>
+          inputTarget.map(_.handleInputResult(input)).foreach(handleInputResult)
+
+  private def isMouseInputDisabled(input: TerminalInput): Boolean = input match
+    case _: TerminalInput.Mouse => !options.mouseInput
+    case _                      => false
 
   private def subscribeQuery[A](
       getFlight: () => Option[TUI.QueryFlight[A]],
@@ -982,6 +999,39 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     handleInputResult(result)
     result
 
+  private def routeMouseInput(input: TerminalInput.Mouse): Unit =
+    val overlayResult = latestOverlayLayouts.reverseIterator
+      .filter(layout =>
+        overlayStack.exists(entry => (entry.id === layout.id) && isOverlayVisible(entry))
+      )
+      .map(layout => routeMouseInNode(input, layout.node))
+      .find(_ !== InputResult.Ignored)
+    val result        = overlayResult
+      .getOrElse(latestBaseLayout.map(routeMouseInNode(input, _)).getOrElse(InputResult.Ignored))
+    handleInputResult(result)
+
+  private def routeMouseInNode(input: TerminalInput.Mouse, node: LayoutNode): InputResult =
+    if !node.bounds.contains(input.row, input.col) then InputResult.Ignored
+    else
+      val childResult = node.children.reverseIterator
+        .map(routeMouseInNode(input, _))
+        .find(_ !== InputResult.Ignored)
+      childResult.getOrElse {
+        node.component match
+          case handler: MouseInputHandler =>
+            val bounds = node.bounds
+            handler.handleMouse(MouseInputContext(
+              input = input,
+              boundsRow = bounds.row,
+              boundsCol = bounds.col,
+              boundsWidth = bounds.width,
+              boundsHeight = bounds.height,
+              localRow = input.row - bounds.row,
+              localCol = input.col - bounds.col
+            ))
+          case _                          => InputResult.Ignored
+      }
+
   private def handleInputResult(result: InputResult): Unit = result match
     case InputResult.Ignored               => ()
     case InputResult.Handled(shouldRender) =>
@@ -999,23 +1049,39 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
       baseFrame: ComponentRender,
       width: Int,
       height: Int
-  ): ComponentRender =
+  ): (ComponentRender, Vector[TUI.OverlayLayout]) =
     val visible  = overlayStack.toVector.filter(isOverlayVisible)
     val rendered = visible
       .sortBy(_.focusOrder)
       .flatMap { entry =>
         val initialLayout = OverlayRenderer.resolve(entry.options, overlayHeight = 0, width, height)
-        val rawFrame      = entry.component.render(initialLayout.width).validated(initialLayout.width)
-        val clippedLines  = initialLayout.maxHeight.fold(rawFrame.lines)(rawFrame.lines.take)
-        val controls      = rawFrame.controls.filter(_.row < clippedLines.length)
-        val cursors       = rawFrame.cursorPlacements.filter(_.row < clippedLines.length)
+        val rawFrame      = entry.component.renderFrame(
+          initialLayout.width,
+          initialLayout.row,
+          initialLayout.col
+        )
+        val validated     = rawFrame.render.validated(initialLayout.width)
+        val clippedLines  = initialLayout.maxHeight.fold(validated.lines)(validated.lines.take)
+        val controls      = validated.controls.filter(_.row < clippedLines.length)
+        val cursors       = validated.cursorPlacements.filter(_.row < clippedLines.length)
         val clippedFrame  =
           ComponentRender(clippedLines, controls, cursors).validated(initialLayout.width)
         val layout        = OverlayRenderer.resolve(entry.options, clippedLines.length, width, height)
-        Option.when(clippedLines.nonEmpty)(clippedFrame -> layout)
+        Option.when(clippedLines.nonEmpty) {
+          val shifted = translateLayout(
+            rawFrame.layout,
+            rowDelta = layout.row - rawFrame.layout.bounds.row,
+            colDelta = layout.col - rawFrame.layout.bounds.col
+          )
+          val node    = shifted.copy(
+            bounds = LayoutBounds(layout.row, layout.col, layout.width, clippedLines.length)
+          )
+          (clippedFrame -> layout) -> TUI.OverlayLayout(entry.id, node)
+        }
       }
     latestOverlayVisibility = visible.nonEmpty
-    OverlayRenderer.composite(baseFrame, rendered, width, height)
+    val frame = OverlayRenderer.composite(baseFrame, rendered.map(_._1), width, height)
+    frame -> rendered.map(_._2)
 
   private def makeOverlayHandle(entry: TUI.OverlayEntry): OverlayHandle = new OverlayHandle:
     override def id: OverlayId = entry.id
@@ -1108,6 +1174,15 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   private def isOverlayComponent(component: Component): Boolean =
     overlayStack.exists(_.component eq component)
 
+  private def translateLayout(node: LayoutNode, rowDelta: Int, colDelta: Int): LayoutNode =
+    node.copy(
+      bounds = node.bounds.copy(
+        row = node.bounds.row + rowDelta,
+        col = node.bounds.col + colDelta
+      ),
+      children = node.children.map(translateLayout(_, rowDelta, colDelta))
+    )
+
   private def attachContext(component: Component): Unit = component match
     case contextual: ContextualComponent => contextual.tuiContext_=(Some(this))
     case _                               => ()
@@ -1154,6 +1229,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     attempt(writeTerminal(terminal.showCursor()))
     attempt(exitAlternateScreenIfNeeded())
     attempt(writeTerminal(terminal.stop()))
+    attempt(Terminal.setMouseReporting(terminal, enabled = false))
 
     val detachedCompletions = lifecycleLock.synchronized {
       postRestorationCutoff = true
@@ -1180,12 +1256,14 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     case _                                                                          => false
 
   private def renderNow(force: Boolean, clear: Boolean): Unit =
-    val generation = lifecycleLock.synchronized(resizeGeneration)
-    val width      = positiveDimension(terminal.columns)
-    val height     = positiveDimension(terminal.rows)
-    val rawFrame   = root.render(width)
-    val composed   = renderOverlays(rawFrame, width, height).validated(width)
-    val frame      = prepareFrame(composed, width)
+    val generation              = lifecycleLock.synchronized(resizeGeneration)
+    val width                   = positiveDimension(terminal.columns)
+    val height                  = positiveDimension(terminal.rows)
+    val baseFrame               = root.renderFrame(width)
+    val (composed, layouts)     = renderOverlays(baseFrame.render, width, height)
+    latestBaseLayout = Some(baseFrame.layout)
+    latestOverlayLayouts = layouts
+    val frame                   = prepareFrame(composed.validated(width), width)
 
     val currentWidth      = positiveDimension(terminal.columns)
     val currentHeight     = positiveDimension(terminal.rows)
@@ -1571,6 +1649,8 @@ object TUI:
       var hidden: Boolean,
       var focusOrder: Long
   )
+
+  private final case class OverlayLayout(id: OverlayId, node: LayoutNode)
 
   final case class RenderSanitization(
       lineIndex: Int,

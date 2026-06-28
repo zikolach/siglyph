@@ -9,6 +9,9 @@ import scalatui.core.InputResult
 import scalatui.terminal.{
   KeyEventType,
   KeyModifiers,
+  MouseAction,
+  MouseInputContext,
+  MouseWheelDirection,
   TerminalInput,
   TerminalInputChunk,
   TerminalKey,
@@ -38,6 +41,32 @@ class SelectListSuite extends munit.FunSuite:
     assertEquals(default.render(20).lines.map(Ansi.strip), Vector("> A"))
     assertEquals(limited.render(20).lines.length, 1)
     assertEquals(legacyFiltered.selected, None)
+
+  private def wheel(direction: MouseWheelDirection): MouseInputContext =
+    MouseInputContext(
+      TerminalInput.Mouse(MouseAction.Wheel(direction), row = 0, col = 0),
+      boundsRow = 0,
+      boundsCol = 0,
+      boundsWidth = 10,
+      boundsHeight = 3,
+      localRow = 0,
+      localCol = 0
+    )
+
+  test("select list handles wheel up and down with boundary no-render"):
+    val list = SelectList(Vector(SelectItem("a", "A"), SelectItem("b", "B")))
+
+    assertEquals(
+      list.handleMouse(wheel(MouseWheelDirection.Down)),
+      scalatui.core.InputResult.Render
+    )
+    assertEquals(list.selected.map(_.label), Some("B"))
+    assertEquals(
+      list.handleMouse(wheel(MouseWheelDirection.Down)),
+      scalatui.core.InputResult.NoRender
+    )
+    assertEquals(list.handleMouse(wheel(MouseWheelDirection.Up)), scalatui.core.InputResult.Render)
+    assertEquals(list.selected.map(_.label), Some("A"))
 
   test("select list applies theme hooks to selected rows width-safely"):
     val list = SelectList(

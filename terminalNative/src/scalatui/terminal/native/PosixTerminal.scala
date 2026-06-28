@@ -10,6 +10,7 @@ import scalatui.terminal.{
   TerminalInputDrainSupport,
   TerminalInput,
   TerminalInputChunk,
+  TerminalMouseProtocolSupport,
   TerminalInputBuffer,
   OrderedInputDelivery,
   TerminalProgressSupport,
@@ -42,6 +43,7 @@ final class PosixTerminal(
     initialRows: Int = PosixTerminal.envInt("LINES").getOrElse(24)
 ) extends Terminal,
       TerminalInputDrainSupport,
+      TerminalMouseProtocolSupport,
       KittyKeyboardProtocolTerminal,
       TerminalTitleSupport,
       TerminalProgressSupport:
@@ -62,9 +64,14 @@ final class PosixTerminal(
   private var inputCleanupPending                                           = false
   private var pasteCleanupPending                                           = false
   private var kittyCleanupPending                                           = false
+  private var mouseReportingEnabled                                         = false
+  private var mouseCleanupPending                                           = false
   private[native] var cleanupFailureForTesting: String => Option[Throwable] = _ => None
   private[native] var writeFailureForTesting: String => Option[Throwable]   = _ => None
   private val keyboardProtocolNegotiator                                    = KittyKeyboardProtocolNegotiator()
+
+  override def mouseReportingEnabled_=(enabled: Boolean): Unit =
+    mouseReportingEnabled = enabled
 
   override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit = synchronized {
     if running then throw IllegalStateException("PosixTerminal is already running")
@@ -99,6 +106,9 @@ final class PosixTerminal(
         enableRawMode()
         pasteCleanupPending = true
         write("\u001b[?2004h")
+        if mouseReportingEnabled then
+          mouseCleanupPending = true
+          write(Terminal.MouseProtocol.Enable)
         inputGeneration = inputDelivery.start(inputBuffer.clear())
         inputCleanupPending = true
         running = true
@@ -308,7 +318,8 @@ final class PosixTerminal(
       }
 
   private def hasCleanupObligations: Boolean =
-    inputCleanupPending || kittyCleanupPending || pasteCleanupPending || (savedState !== null)
+    inputCleanupPending || kittyCleanupPending || mouseCleanupPending || pasteCleanupPending ||
+      (savedState !== null)
 
   private def cleanup(): Option[Throwable] =
     var failure                                      = Option.empty[Throwable]
@@ -331,6 +342,11 @@ final class PosixTerminal(
         inputCleanupPending = false
       }
     if kittyCleanupPending then attempt("kitty")(disableKittyKeyboardProtocol())
+    if mouseCleanupPending then
+      attempt("mouse") {
+        write(Terminal.MouseProtocol.Disable)
+        mouseCleanupPending = false
+      }
     if pasteCleanupPending then
       attempt("paste") {
         write("\u001b[?2004l")

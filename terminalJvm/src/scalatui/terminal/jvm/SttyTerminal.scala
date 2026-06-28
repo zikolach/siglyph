@@ -8,6 +8,7 @@ import scalatui.terminal.{
   KittyKeyboardProtocolTerminal,
   StreamTerminal,
   Terminal,
+  TerminalMouseProtocolSupport,
   TerminalProgressSupport,
   TerminalTitleSupport
 }
@@ -35,6 +36,7 @@ final class SttyTerminal(
       initialRows = rowsOverride.orElse(StreamTerminal.envInt("LINES")).getOrElse(24)
     ),
       KittyKeyboardProtocolTerminal,
+      TerminalMouseProtocolSupport,
       TerminalTitleSupport,
       TerminalProgressSupport:
   @volatile private var savedState: Option[String]                       = None
@@ -52,7 +54,12 @@ final class SttyTerminal(
     rowsOverride.orElse(StreamTerminal.envInt("LINES")).getOrElse(24)
   private var resizeHandler: () => Unit                                  = () => ()
   private var resizeThread: Thread | Null                                = null
+  private var mouseReportingEnabled                                      = false
+  private var mouseCleanupPending                                        = false
   private val keyboardProtocolNegotiator                                 = KittyKeyboardProtocolNegotiator()
+
+  override def mouseReportingEnabled_=(enabled: Boolean): Unit =
+    mouseReportingEnabled = enabled
 
   override def start(onInput: scalatui.terminal.TerminalInput => Unit, onResize: () => Unit): Unit =
     synchronized {
@@ -81,6 +88,9 @@ final class SttyTerminal(
         runStty("raw -echo min 1 time 0")
         pasteCleanupPending = true
         write("\u001b[?2004h")
+        if mouseReportingEnabled then
+          mouseCleanupPending = true
+          write(Terminal.MouseProtocol.Enable)
         inputCleanupPending = true
         super.start(onInput, onResize)
         sttyRunning = true
@@ -182,7 +192,8 @@ final class SttyTerminal(
       }
 
   private def hasCleanupObligations: Boolean =
-    inputCleanupPending || kittyCleanupPending || pasteCleanupPending || savedState.nonEmpty
+    inputCleanupPending || kittyCleanupPending || mouseCleanupPending || pasteCleanupPending ||
+      savedState.nonEmpty
 
   private def cleanup(): Option[Throwable] =
     var failure                                      = Option.empty[Throwable]
@@ -196,6 +207,11 @@ final class SttyTerminal(
             case None        => failure = Some(error)
 
     if kittyCleanupPending then attempt("kitty") { disableKittyKeyboardProtocol() }
+    if mouseCleanupPending then
+      attempt("mouse") {
+        write(Terminal.MouseProtocol.Disable)
+        mouseCleanupPending = false
+      }
     if pasteCleanupPending then
       attempt("paste") {
         write("\u001b[?2004l")
