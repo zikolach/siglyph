@@ -9,6 +9,7 @@ import scalatui.terminal.{
   Terminal,
   TerminalInputDrainSupport,
   TerminalInput,
+  TerminalMouseProtocolSupport,
   TerminalInputBuffer,
   TerminalProgressSupport,
   TerminalTitleSupport
@@ -35,6 +36,7 @@ final class PosixTerminal(
     initialRows: Int = PosixTerminal.envInt("LINES").getOrElse(24)
 ) extends Terminal,
       TerminalInputDrainSupport,
+      TerminalMouseProtocolSupport,
       KittyKeyboardProtocolTerminal,
       TerminalTitleSupport,
       TerminalProgressSupport:
@@ -49,9 +51,13 @@ final class PosixTerminal(
   private var resizeThread: Thread | Null                   = null
   private var flushThread: Thread | Null                    = null
   private var savedState: Ptr[termios.termios]              = null
+  private var mouseReportingEnabled                         = false
   private val inputBuffer                                   = TerminalInputBuffer()
   private val inputLock                                     = Object()
   private val keyboardProtocolNegotiator                    = KittyKeyboardProtocolNegotiator()
+
+  override def mouseReportingEnabled_=(enabled: Boolean): Unit =
+    mouseReportingEnabled = enabled
 
   override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
     if !running then
@@ -65,6 +71,7 @@ final class PosixTerminal(
       try
         enableRawMode()
         write("\u001b[?2004h")
+        if mouseReportingEnabled then write(Terminal.MouseProtocol.Enable)
         running = true
         val thread  = Thread(() => readLoop(), "scala-tui-posix-terminal-input")
         val flusher = Thread(() => flushLoop(), "scala-tui-posix-terminal-flush")
@@ -78,6 +85,7 @@ final class PosixTerminal(
       catch
         case e: Throwable =>
           stopResizePolling()
+          if mouseReportingEnabled then write(Terminal.MouseProtocol.Disable)
           write("\u001b[?2004l")
           restoreMode()
           throw e
@@ -85,6 +93,7 @@ final class PosixTerminal(
   override def stop(): Unit =
     if running || savedState != null then
       disableKittyKeyboardProtocol()
+      if mouseReportingEnabled then write(Terminal.MouseProtocol.Disable)
       write("\u001b[?2004l")
       running = false
       stopResizePolling()

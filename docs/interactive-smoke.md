@@ -23,6 +23,7 @@ Expected behavior:
 - Verify autocomplete fuzzy ranking by typing partial command/path/tag text (for example `/hp` or `#dc`) and checking likely matches are ranked before looser matches when enabled in the demo.
 - In `examples/scala-cli/editor-autocomplete.scala`, which injects `EditorAutocompleteDebouncer.Delayed`, type additional characters quickly while autocomplete is visible and confirm stale work is cancelled/ignored: old suggestions remain visible while a refresh is pending, then are replaced or closed by the latest request.
 - With suggestions visible, `↑` / `↓` navigates, `Enter` or `Tab` accepts, and `Esc` cancels without changing editor text.
+- In an app/demo configured with `TUIOptions(mouseInput = true)`, scroll the mouse wheel over the action list, settings list, editor, and visible autocomplete suggestions. The item under the pointer moves while keyboard focus stays where it was unless a component explicitly changes focus.
 - `PageUp` / `PageDown` pages the cursor in wrapped multiline editor content.
 - `Ctrl+]` and `Ctrl+Alt+]` jump forward/backward to the next typed target character.
 - When the action list is focused, type to fuzzy-filter actions, use `↑` / `↓` to navigate, select `Tick loader` to advance the loader frame, and select `Cancel loader` to update the cancellable loader state.
@@ -57,7 +58,7 @@ Run the linked binary from Mill's output directory in an interactive terminal. O
 ./out/interactiveNativeDemo/nativeLink.dest/out --hardware-cursor
 ```
 
-Expected behavior matches the JVM multiline editor demo, including narrow-width and height resize redraw checks, using `PosixTerminal` instead of `SttyTerminal`.
+Expected behavior matches the JVM multiline editor demo, including opt-in mouse scroll checks, narrow-width and height resize redraw checks, using `PosixTerminal` instead of `SttyTerminal`.
 
 ## Lifecycle notes
 
@@ -68,4 +69,5 @@ Expected behavior matches the JVM multiline editor demo, including narrow-width 
 - `TUI.run()` wraps startup and waiting in `try/finally` so terminal state is restored when the run loop exits or fails after startup.
 - `TUI` sanitizes final over-wide output before writing to protect live sessions; component tests should still verify direct render-width contracts.
 - `TUIOptions(hardwareCursorPositioning = true)` is opt-in. The runtime strips cursor markers from final output in both modes, and when enabled it positions the hardware cursor from the marker that remains after overlay composition.
+- `TUIOptions(mouseInput = true)` is opt-in. It enables terminal mouse reporting during interactive runs and may affect normal terminal text selection while active.
 - Visible overlays are recomputed every render and composited as rectangular cells over base content; spaces in overlay output are literal replacement cells.

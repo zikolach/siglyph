@@ -5,6 +5,7 @@ import scalatui.core.{
   Component,
   ContextualComponent,
   InputResult,
+  MouseInputHandler,
   OverlayHandle,
   OverlayUnfocusOptions,
   OverlayOptions,
@@ -12,7 +13,13 @@ import scalatui.core.{
 }
 import scalatui.matching.FuzzyMatcher
 import scalatui.syntax.Equality.*
-import scalatui.terminal.{TerminalInput, TerminalKey}
+import scalatui.terminal.{
+  MouseAction,
+  MouseInputContext,
+  MouseWheelDirection,
+  TerminalInput,
+  TerminalKey
+}
 import scalatui.unicode.{TextCase, Unicode}
 
 /** Controller passed to application-provided settings submenu components. */
@@ -122,7 +129,8 @@ final class SettingsList(
     initialItems: Vector[SettingItem],
     options: SettingsListOptions = SettingsListOptions()
 ) extends Component,
-      ContextualComponent:
+      ContextualComponent,
+      MouseInputHandler:
   var onChange: (String, String) => Unit = (_, _) => ()
   var onCancel: () => Unit               = () => ()
 
@@ -157,6 +165,11 @@ final class SettingsList(
     clampSelection()
 
   override def handleInput(input: TerminalInput): Unit = handleInputResult(input)
+
+  override def handleMouse(context: MouseInputContext): InputResult = context.input.action match
+    case MouseAction.Wheel(MouseWheelDirection.Up)   => moveSelection(-1)
+    case MouseAction.Wheel(MouseWheelDirection.Down) => moveSelection(1)
+    case _                                           => InputResult.Ignored
 
   override def handleInputResult(input: TerminalInput): InputResult = input match
     case TerminalInput.Key(TerminalKey.Up, _)                                             => moveSelection(-1)
@@ -239,9 +252,10 @@ final class SettingsList(
     val entries = filteredEntries
     if entries.isEmpty then InputResult.Ignored
     else
+      val before = selectedIndex
       selectedIndex = math.max(0, math.min(entries.length - 1, selectedIndex + delta))
       ensureVisible(entries.length)
-      InputResult.Render
+      if selectedIndex === before then InputResult.NoRender else InputResult.Render
 
   private def activateSelected(): InputResult =
     selectedEntry match

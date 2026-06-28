@@ -120,6 +120,7 @@ trait RenderOriginAware:
  */
 final class ComponentFrameBuilder(width: Int, startRow: Int = 0, startCol: Int = 0):
   private val rendered = Vector.newBuilder[String]
+  private val nodes    = Vector.newBuilder[LayoutNode]
   private var row      = startRow
 
   /** Append already-rendered lines and advance the tracked row. */
@@ -138,8 +139,22 @@ final class ComponentFrameBuilder(width: Int, startRow: Int = 0, startCol: Int =
       case aware: RenderOriginAware =>
         aware.renderOrigin_=(Some(ComponentRenderOrigin(row, startCol)))
       case _                        => ()
-    val lines = component.render(width)
-    addLines(lines)
+    val frame = component.renderFrame(width, row, startCol)
+    rendered ++= frame.lines
+    nodes += frame.layout
+    row += frame.lines.length
 
   /** Return accumulated frame lines. */
   def result(): Vector[String] = rendered.result()
+
+  /** Return accumulated frame lines and child layout nodes under `component`. */
+  def resultFrame(component: Component): RenderedFrame =
+    val lines = rendered.result()
+    RenderedFrame(
+      lines,
+      LayoutNode(
+        component,
+        LayoutBounds(startRow, startCol, math.max(0, width), lines.length),
+        nodes.result()
+      )
+    )

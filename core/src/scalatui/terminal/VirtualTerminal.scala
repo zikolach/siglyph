@@ -5,6 +5,7 @@ import scala.collection.mutable.ArrayBuffer
 /** Test terminal that records writes and can deliver scripted input/resize events. */
 final class VirtualTerminal(initialColumns: Int = 80, initialRows: Int = 24)
     extends Terminal,
+      TerminalMouseProtocolSupport,
       TerminalTitleSupport,
       TerminalProgressSupport:
   private var inputHandler: TerminalInput => Unit = _ => ()
@@ -13,13 +14,19 @@ final class VirtualTerminal(initialColumns: Int = 80, initialRows: Int = 24)
   private var running                             = false
   private var currentColumns                      = initialColumns
   private var currentRows                         = initialRows
+  private var mouseReportingEnabled               = false
+
+  override def mouseReportingEnabled_=(enabled: Boolean): Unit =
+    mouseReportingEnabled = enabled
 
   override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
     inputHandler = onInput
     resizeHandler = onResize
     running = true
+    if mouseReportingEnabled then write(Terminal.MouseProtocol.Enable)
 
   override def stop(): Unit =
+    if mouseReportingEnabled then write(Terminal.MouseProtocol.Disable)
     running = false
     inputHandler = _ => ()
     resizeHandler = () => ()
@@ -51,6 +58,8 @@ final class VirtualTerminal(initialColumns: Int = 80, initialRows: Int = 24)
   def clearWrites(): Unit    = writesBuffer.clear()
 
   def sendInput(input: TerminalInput): Unit = inputHandler(input)
+
+  def sendMouse(input: TerminalInput.Mouse): Unit = sendInput(input)
 
   def resize(columns: Int, rows: Int): Unit =
     currentColumns = columns

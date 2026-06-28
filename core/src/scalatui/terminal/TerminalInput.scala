@@ -18,7 +18,55 @@ object TerminalInput:
       case _               => None
 
   final case class Paste(text: String) extends TerminalInput
-  final case class Raw(data: String)   extends TerminalInput
+
+  /** Parsed terminal mouse event using zero-based terminal cell coordinates. */
+  final case class Mouse(
+      action: MouseAction,
+      row: Int,
+      col: Int,
+      modifiers: KeyModifiers = KeyModifiers.empty
+  ) extends TerminalInput
+
+  final case class Raw(data: String) extends TerminalInput
+
+/** Mouse action reported by supported terminal mouse protocols. */
+sealed trait MouseAction derives CanEqual
+
+object MouseAction:
+  /** Mouse button press. */
+  final case class Press(button: MouseButton) extends MouseAction
+
+  /** Mouse button release. */
+  final case class Release(button: MouseButton) extends MouseAction
+
+  /** Mouse wheel movement. */
+  final case class Wheel(direction: MouseWheelDirection) extends MouseAction
+
+/** Mouse button identity parsed from terminal button codes. */
+sealed trait MouseButton derives CanEqual
+
+object MouseButton:
+  case object Left   extends MouseButton
+  case object Middle extends MouseButton
+  case object Right  extends MouseButton
+
+  /** Valid mouse button code without a named mapping. */
+  final case class Other(code: Int) extends MouseButton
+
+/** Mouse wheel direction parsed from terminal wheel reports. */
+enum MouseWheelDirection derives CanEqual:
+  case Up, Down, Left, Right
+
+/** Target-local context passed to components that opt into mouse handling. */
+final case class MouseInputContext(
+    input: TerminalInput.Mouse,
+    boundsRow: Int,
+    boundsCol: Int,
+    boundsWidth: Int,
+    boundsHeight: Int,
+    localRow: Int,
+    localCol: Int
+) derives CanEqual
 
 /** Key event kind reported by advanced keyboard protocols. */
 enum KeyEventType derives CanEqual:

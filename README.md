@@ -115,6 +115,14 @@ import scalatui.terminal.jvm.SttyTerminal
 
 The JVM interop facade gives Java and Kotlin call sites the same basic path without Scala default-argument methods or Scala function types. Scala, Java, and Kotlin versions of the basic example are in [`docs/jvm-language-examples.md`](docs/jvm-language-examples.md).
 
+## Mouse input
+
+Mouse input is disabled by default because terminal mouse reporting can capture normal text selection. Enable it with `TUIOptions(mouseInput = true)` when an application wants coordinate-aware mouse events.
+
+Supported reports are xterm SGR mouse press, release, and wheel events. Parsed `TerminalInput.Mouse` events use zero-based terminal cell `row` and `col` coordinates. Components receive routed mouse events only when they implement the mouse handling contract; global input listeners still see typed mouse input before component routing.
+
+Interactive JVM and Native backends enable normal mouse tracking (`CSI ? 1000 h`) and SGR coordinates (`CSI ? 1006 h`) only while mouse input is enabled, and disable both modes on stop.
+
 A multiline editor with slash, filesystem, attachment, fuzzy, and `#` trigger autocomplete:
 
 ```scala
