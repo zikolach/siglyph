@@ -242,6 +242,34 @@ class TUISuite extends munit.FunSuite:
     assertEquals(parent.events.map(_._1).toVector, Vector.empty)
     assert(focus.focused)
 
+  test("mouse routing maps terminal rows to frame rows when the frame starts below prior output"):
+    val terminal = VirtualTerminal(20, 10)
+    terminal.setCursorPosition(row = 4)
+    val target   = MouseLine("target")
+    val tui      = TUI(terminal, TUIOptions(mouseInput = true))
+    tui.addChild(target)
+
+    tui.start()
+    terminal.sendMouse(TerminalInput.Mouse(MouseAction.Press(MouseButton.Left), row = 4, col = 0))
+
+    assertEquals(target.events.map(_._1).toVector, Vector("target"))
+    assertEquals(target.events.head._2.boundsRow, 4)
+    assertEquals(target.events.head._2.localRow, 0)
+
+  test("mouse routing accounts for terminal scrolling during the initial frame render"):
+    val terminal = VirtualTerminal(20, 5)
+    terminal.setCursorPosition(row = 4)
+    val target   = MouseLine("target", Vector("one", "two", "three"))
+    val tui      = TUI(terminal, TUIOptions(mouseInput = true))
+    tui.addChild(target)
+
+    tui.start()
+    terminal.sendMouse(TerminalInput.Mouse(MouseAction.Press(MouseButton.Left), row = 4, col = 0))
+
+    assertEquals(target.events.map(_._1).toVector, Vector("target"))
+    assertEquals(target.events.head._2.boundsRow, 2)
+    assertEquals(target.events.head._2.localRow, 2)
+
   test("mouse routing falls back to ancestor when child ignores"):
     val terminal = VirtualTerminal(20, 5)
     val parent   = MouseLine("parent")

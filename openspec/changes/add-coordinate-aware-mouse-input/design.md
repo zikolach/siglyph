@@ -105,6 +105,9 @@ Alternatives considered:
 
 ### Decision 5: Mouse routing uses overlay z-order, then deepest base hit
 
+Mouse routing maps terminal mouse coordinates to the current TUI frame before hit testing. On mouse-enabled startup, the runtime queries the cursor position and records the visible frame start row. If the first frame scrolls the terminal viewport, the stored frame start row is adjusted by the number of rows scrolled. This preserves initial scrollback while keeping coordinate routing aligned with the visible frame.
+
+
 Routing order for mouse input is:
 1. Terminal protocol replies are consumed before user input routing.
 2. Global input listeners receive the typed `TerminalInput.Mouse` before component routing.
@@ -142,7 +145,7 @@ Alternatives considered:
 
 ## Risks / Trade-offs
 
-- Mouse mode can interfere with terminal text selection → Keep disabled by default and document how to opt in.
+- Mouse mode can interfere with terminal text selection and wheel scrollback → Keep disabled by default and document how to opt in.
 - SGR mouse support is terminal-dependent → Parse SGR reports when present and leave unsupported terminals on existing keyboard behavior.
 - Layout capture can diverge from final overlay composition if recorded before clipping → Record overlay bounds after clamping and clipping.
 - Existing custom containers may not provide nested layout → Default layout treats them as leaf nodes until they opt into layout-aware rendering.

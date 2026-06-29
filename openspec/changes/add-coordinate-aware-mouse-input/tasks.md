@@ -46,3 +46,10 @@
 - [x] 6.3 Update interactive smoke documentation with JVM and Native mouse scroll checks.
 - [x] 6.4 Update porting notes to state that mouse input is a siglyph extension beyond upstream `pi-tui`.
 - [x] 6.5 Run `mill __.compile`, `mill core.test`, `mill scalafmtCheck`, `mill scalafixCheck`, and `openspec validate --all --strict`.
+
+## 7. Mouse Demo Hardening
+
+- [x] 7.1 Track mouse-enabled TUI frame origin with cursor-position reports so hit testing aligns when previous terminal output exists.
+- [x] 7.2 Account for terminal scrolling during the initial mouse-enabled frame render.
+- [x] 7.3 Add focused tests for shifted and scrolled mouse frame origins.
+- [x] 7.4 Document that terminal wheel scrollback is captured while mouse reporting is enabled.

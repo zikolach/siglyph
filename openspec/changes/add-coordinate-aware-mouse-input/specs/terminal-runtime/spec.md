@@ -59,3 +59,22 @@ The virtual terminal backend SHALL support tests that enable mouse input, feed t
 #### Scenario: Virtual terminal drives mouse routing
 - **WHEN** a test sends a mouse event to the virtual terminal after rendering a frame
 - **THEN** the test can observe which component handled the routed event
+
+
+### Requirement: Mouse frame origin tracking
+The terminal runtime SHALL track the visible origin of mouse-enabled TUI frames without clearing terminal scrollback on initial render.
+
+#### Scenario: Cursor position seeds mouse frame origin
+- **WHEN** a mouse-enabled interactive TUI starts
+- **THEN** the runtime queries the terminal cursor position before the first frame render and uses the response to map mouse coordinates to retained frame rows
+
+#### Scenario: Missing cursor position does not guess routing offset
+- **WHEN** the terminal does not provide a usable cursor-position report before rendering
+- **THEN** coordinate-aware component mouse routing is ignored until a frame origin is known
+
+### Requirement: Mouse reporting captures terminal wheel scrollback
+Interactive terminal mouse reporting SHALL document that wheel events are delivered to the application rather than normal terminal scrollback while mouse input is enabled.
+
+#### Scenario: Unhandled wheel cannot be passed back
+- **WHEN** a wheel event is delivered to the application by terminal mouse reporting and no component handles it
+- **THEN** the runtime preserves focus and does not attempt to pass that event back to terminal scrollback

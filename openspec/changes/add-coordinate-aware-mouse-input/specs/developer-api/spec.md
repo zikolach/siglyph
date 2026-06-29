@@ -34,7 +34,7 @@ The public component API SHALL expose a backend-independent way for components t
 - **THEN** it is not treated as a mouse input target during coordinate routing
 
 ### Requirement: Mouse input documentation
-Mouse input public APIs SHALL include Scaladoc and project documentation covering opt-in behavior, coordinate base, terminal support scope, and text-selection caveats.
+Mouse input public APIs SHALL include Scaladoc and project documentation covering opt-in behavior, coordinate base, terminal support scope, text-selection caveats, and wheel scrollback capture.
 
 #### Scenario: Scaladoc documents coordinate base
 - **WHEN** a developer reads Scaladoc for mouse input types
@@ -42,7 +42,7 @@ Mouse input public APIs SHALL include Scaladoc and project documentation coverin
 
 #### Scenario: Documentation explains opt-in caveat
 - **WHEN** a developer reads project documentation for mouse input
-- **THEN** it explains that mouse reporting is disabled by default because it can affect normal terminal text selection
+- **THEN** it explains that mouse reporting is disabled by default because it can affect normal terminal text selection and wheel scrollback
 
 ### Requirement: Mouse input adds no runtime dependencies
 The coordinate-aware mouse input change SHALL NOT add new third-party runtime dependencies.
