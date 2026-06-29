@@ -26,5 +26,7 @@ private def describe(input: TerminalInput): String = input match
   case TerminalInput.KeyEvent(key, modifiers, eventType) =>
     s"key=$key modifiers=$modifiers event=$eventType"
   case TerminalInput.Paste(text)                         => s"paste ${text.length} chars: ${text.take(80)}"
+  case TerminalInput.Mouse(action, row, col, modifiers)  =>
+    s"mouse action=$action row=$row col=$col modifiers=$modifiers"
   case TerminalInput.Raw(data)                           =>
     s"raw ${data.toCharArray.map(ch => f"U+${ch.toInt}%04X").mkString(" ")}"

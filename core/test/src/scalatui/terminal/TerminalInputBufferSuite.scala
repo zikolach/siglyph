@@ -20,10 +20,24 @@ class TerminalInputBufferSuite extends munit.FunSuite:
     assertEquals(buffer.process("lo\n"), Vector.empty)
     assertEquals(buffer.process("world\u001b[201~"), Vector(TerminalInput.Paste("hello\nworld")))
 
+  test("buffers split SGR mouse report"):
+    val buffer = TerminalInputBuffer()
+    assertEquals(buffer.process("\u001b[<64;"), Vector.empty)
+    assertEquals(buffer.process("10;5"), Vector.empty)
+    assertEquals(
+      buffer.process("M"),
+      Vector(TerminalInput.Mouse(MouseAction.Wheel(MouseWheelDirection.Up), row = 4, col = 9))
+    )
+
   test("flush emits incomplete escape as raw"):
     val buffer = TerminalInputBuffer()
     assertEquals(buffer.process("\u001b[1;"), Vector.empty)
     assertEquals(buffer.flush(), Vector(TerminalInput.Raw("\u001b[1;")))
+
+  test("flush emits incomplete SGR mouse report as raw"):
+    val buffer = TerminalInputBuffer()
+    assertEquals(buffer.process("\u001b[<64;10;"), Vector.empty)
+    assertEquals(buffer.flush(), Vector(TerminalInput.Raw("\u001b[<64;10;")))
 
   test("flush emits incomplete bracketed paste as raw"):
     val buffer = TerminalInputBuffer()

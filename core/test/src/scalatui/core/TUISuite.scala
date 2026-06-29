@@ -16,6 +16,10 @@ import scalatui.terminal.{
   ImageRenderOptions,
   KeyEventType,
   KeyModifiers,
+  MouseAction,
+  MouseButton,
+  MouseInputContext,
+  MouseWheelDirection,
   RgbColor,
   TerminalCapabilities,
   Terminal,
@@ -33,6 +37,33 @@ import java.util.concurrent.atomic.AtomicReference
 class TUISuite extends munit.FunSuite:
   final class MutableLine(var value: String) extends Component:
     override def render(width: Int): Vector[String] = Vector(value)
+
+  final class MouseLine(
+      name: String,
+      lines: Vector[String] = Vector("line"),
+      result: InputResult = InputResult.Render
+  ) extends Component,
+        MouseInputHandler:
+    val events                                                        = scala.collection.mutable.ArrayBuffer.empty[(String, MouseInputContext)]
+    override def render(width: Int): Vector[String]                   = lines
+    override def handleMouse(context: MouseInputContext): InputResult =
+      events += name -> context
+      result
+
+  final class IgnoringMouseLine(name: String, lines: Vector[String] = Vector("line"))
+      extends Component,
+        MouseInputHandler:
+    val events                                                        = scala.collection.mutable.ArrayBuffer.empty[String]
+    override def render(width: Int): Vector[String]                   = lines
+    override def handleMouse(context: MouseInputContext): InputResult =
+      events += name
+      InputResult.Ignored
+
+  final class FocusableLine extends Component, Focusable:
+    private var isFocused                           = false
+    override def focused: Boolean                   = isFocused
+    override def focused_=(value: Boolean): Unit    = isFocused = value
+    override def render(width: Int): Vector[String] = Vector(if focused then "focused" else "plain")
 
   final class QueryFailingTerminal(failingWrite: String) extends Terminal:
     override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit = ()
@@ -73,6 +104,33 @@ class TUISuite extends munit.FunSuite:
     override def clearFromCursor(): Unit  = ()
     override def clearScreen(): Unit      = ()
 
+  final class StartupFailingMouseTerminal extends Terminal,
+        scalatui.terminal.TerminalMouseProtocolSupport:
+    private var mouseReportingEnabled = false
+    val writes                        = scala.collection.mutable.ArrayBuffer.empty[String]
+    var stopCalls                     = 0
+
+    override def mouseReportingEnabled_=(enabled: Boolean): Unit =
+      mouseReportingEnabled = enabled
+
+    override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
+      if mouseReportingEnabled then write(Terminal.MouseProtocol.Enable)
+      throw RuntimeException("start failed")
+
+    override def stop(): Unit =
+      stopCalls += 1
+      if mouseReportingEnabled then write(Terminal.MouseProtocol.Disable)
+
+    override def write(data: String): Unit = writes += data
+    override def columns: Int              = 20
+    override def rows: Int                 = 5
+    override def moveBy(lines: Int): Unit  = ()
+    override def hideCursor(): Unit        = ()
+    override def showCursor(): Unit        = ()
+    override def clearLine(): Unit         = ()
+    override def clearFromCursor(): Unit   = ()
+    override def clearScreen(): Unit       = ()
+
   final class DrainingTerminal extends Terminal, TerminalInputDrainSupport:
     var drainCalls     = 0
     var stopCalls      = 0
@@ -112,6 +170,211 @@ class TUISuite extends munit.FunSuite:
     assert(output.contains("hello" + TUI.LineReset))
     assert(output.contains(TUI.SyncEnd))
     assert(!output.contains("\u001b[2J\u001b[H\u001b[3J"), output)
+
+  test("mouse reporting is disabled by default"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal)
+
+    tui.start()
+    tui.stop()
+
+    assert(!terminal.output.contains(Terminal.MouseProtocol.Enable), terminal.output)
+    assert(!terminal.output.contains(Terminal.MouseProtocol.Disable), terminal.output)
+
+  test("mouse input is ignored when mouse option is disabled"):
+    val terminal = VirtualTerminal(20, 5)
+    val target   = MouseLine("target")
+    var observed = false
+    val tui      = TUI(terminal)
+    tui.addChild(target)
+    tui.addInputListener {
+      case _: TerminalInput.Mouse =>
+        observed = true
+        InputResult.Render
+      case _                      => InputResult.Ignored
+    }
+
+    tui.start()
+    terminal.sendMouse(TerminalInput.Mouse(MouseAction.Press(MouseButton.Left), row = 0, col = 0))
+
+    assert(!observed)
+    assertEquals(target.events.toVector, Vector.empty)
+
+  test("mouse reporting option enables on start and disables on stop"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal, TUIOptions(mouseInput = true))
+
+    tui.start()
+    tui.stop()
+
+    assert(terminal.output.contains(Terminal.MouseProtocol.Enable), terminal.output)
+    assert(terminal.output.contains(Terminal.MouseProtocol.Disable), terminal.output)
+
+  test("mouse reporting startup failure disables reporting"):
+    val terminal = StartupFailingMouseTerminal()
+    val tui      = TUI(terminal, TUIOptions(mouseInput = true))
+
+    intercept[RuntimeException](tui.start())
+
+    assert(terminal.writes.contains(Terminal.MouseProtocol.Enable), terminal.writes.toVector)
+    assert(terminal.writes.contains(Terminal.MouseProtocol.Disable), terminal.writes.toVector)
+    assertEquals(terminal.stopCalls, 1)
+
+  test("mouse routing tries deepest child before ancestor and preserves focus"):
+    val terminal = VirtualTerminal(20, 5)
+    val parent   = MouseLine("parent", result = InputResult.Render)
+    val child    = MouseLine("child")
+    val focus    = FocusableLine()
+    val nested   = Container()
+    nested.addChild(child)
+    val root     = Container()
+    root.addChild(parent)
+    root.addChild(nested)
+    val tui      = TUI(terminal, TUIOptions(mouseInput = true))
+    tui.addChild(root)
+    tui.addChild(focus)
+    tui.setFocus(focus)
+
+    tui.start()
+    terminal.sendMouse(TerminalInput.Mouse(MouseAction.Press(MouseButton.Left), row = 1, col = 0))
+
+    assertEquals(child.events.map(_._1).toVector, Vector("child"))
+    assertEquals(parent.events.map(_._1).toVector, Vector.empty)
+    assert(focus.focused)
+
+  test("mouse routing maps terminal rows to frame rows when the frame starts below prior output"):
+    val terminal = VirtualTerminal(20, 10)
+    terminal.setCursorPosition(row = 4)
+    val target   = MouseLine("target")
+    val tui      = TUI(terminal, TUIOptions(mouseInput = true))
+    tui.addChild(target)
+
+    tui.start()
+    terminal.sendMouse(TerminalInput.Mouse(MouseAction.Press(MouseButton.Left), row = 4, col = 0))
+
+    assertEquals(target.events.map(_._1).toVector, Vector("target"))
+    assertEquals(target.events.head._2.boundsRow, 4)
+    assertEquals(target.events.head._2.localRow, 0)
+
+  test("mouse routing accounts for terminal scrolling during the initial frame render"):
+    val terminal = VirtualTerminal(20, 5)
+    terminal.setCursorPosition(row = 4)
+    val target   = MouseLine("target", Vector("one", "two", "three"))
+    val tui      = TUI(terminal, TUIOptions(mouseInput = true))
+    tui.addChild(target)
+
+    tui.start()
+    terminal.sendMouse(TerminalInput.Mouse(MouseAction.Press(MouseButton.Left), row = 4, col = 0))
+
+    assertEquals(target.events.map(_._1).toVector, Vector("target"))
+    assertEquals(target.events.head._2.boundsRow, 2)
+    assertEquals(target.events.head._2.localRow, 2)
+
+  test("mouse routing falls back to ancestor when child ignores"):
+    val terminal = VirtualTerminal(20, 5)
+    val parent   = MouseLine("parent")
+    val child    = IgnoringMouseLine("child")
+    val nested   = new Component with MouseInputHandler:
+      override def render(width: Int): Vector[String]                         = Vector("nested")
+      override def renderFrame(width: Int, row: Int, col: Int): RenderedFrame =
+        RenderedFrame(
+          Vector("nested"),
+          LayoutNode(
+            this,
+            LayoutBounds(row, col, width, 1),
+            Vector(
+              LayoutNode(child, LayoutBounds(row, col, width, 1))
+            )
+          )
+        )
+      override def handleMouse(context: MouseInputContext): InputResult       =
+        parent.handleMouse(context)
+    val tui      = TUI(terminal, TUIOptions(mouseInput = true))
+    tui.addChild(nested)
+
+    tui.start()
+    terminal.sendMouse(TerminalInput.Mouse(MouseAction.Press(MouseButton.Left), row = 0, col = 0))
+
+    assertEquals(child.events.toVector, Vector("child"))
+    assertEquals(parent.events.map(_._1).toVector, Vector("parent"))
+
+  test("mouse routing uses top overlay then lower visible overlay before base"):
+    val terminal = VirtualTerminal(20, 5)
+    val base     = MouseLine("base", Vector("base"))
+    val lower    = MouseLine("lower", Vector("lower"))
+    val top      = MouseLine("top", Vector("top"))
+    val tui      = TUI(terminal, TUIOptions(mouseInput = true))
+    tui.addChild(base)
+    tui.showOverlay(
+      lower,
+      OverlayOptions(row = Some(OverlaySize.Absolute(0)), col = Some(OverlaySize.Absolute(0)))
+    )
+    tui.showOverlay(
+      top,
+      OverlayOptions(row = Some(OverlaySize.Absolute(0)), col = Some(OverlaySize.Absolute(0)))
+    )
+
+    tui.start()
+    terminal.sendMouse(TerminalInput.Mouse(MouseAction.Press(MouseButton.Left), row = 0, col = 0))
+
+    assertEquals(top.events.map(_._1).toVector, Vector("top"))
+    assertEquals(lower.events.map(_._1).toVector, Vector.empty)
+    assertEquals(base.events.map(_._1).toVector, Vector.empty)
+
+  test("mouse routing falls back to lower overlay and skips hidden overlay"):
+    val terminal = VirtualTerminal(20, 5)
+    val lower    = MouseLine("lower", Vector("lower"))
+    val hidden   = MouseLine("hidden", Vector("hidden"))
+    val tui      = TUI(terminal, TUIOptions(mouseInput = true))
+    tui.addChild(MutableLine("base"))
+    tui.showOverlay(
+      lower,
+      OverlayOptions(row = Some(OverlaySize.Absolute(0)), col = Some(OverlaySize.Absolute(0)))
+    )
+    val handle   = tui.showOverlay(
+      hidden,
+      OverlayOptions(row = Some(OverlaySize.Absolute(0)), col = Some(OverlaySize.Absolute(0)))
+    )
+    handle.setHidden(true)
+
+    tui.start()
+    terminal.sendMouse(TerminalInput.Mouse(MouseAction.Press(MouseButton.Left), row = 0, col = 0))
+
+    assertEquals(hidden.events.map(_._1).toVector, Vector.empty)
+    assertEquals(lower.events.map(_._1).toVector, Vector("lower"))
+
+  test("mouse routing ignores events before retained layout and unhandled targets"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal, TUIOptions(mouseInput = true))
+    val focus    = FocusableLine()
+    tui.addChild(focus)
+    tui.setFocus(focus)
+
+    terminal.sendMouse(TerminalInput.Mouse(MouseAction.Press(MouseButton.Left), row = 0, col = 0))
+    assert(focus.focused)
+
+  test("overlay mouse bounds use clamped and clipped layout"):
+    val terminal = VirtualTerminal(10, 3)
+    val overlay  = MouseLine("overlay", Vector("a", "b", "c", "d"))
+    val tui      = TUI(terminal, TUIOptions(mouseInput = true))
+    tui.addChild(MutableLine("base"))
+    tui.showOverlay(
+      overlay,
+      OverlayOptions(
+        width = Some(OverlaySize.Absolute(4)),
+        maxHeight = Some(OverlaySize.Absolute(2)),
+        row = Some(OverlaySize.Absolute(99)),
+        col = Some(OverlaySize.Absolute(99))
+      )
+    )
+
+    tui.start()
+    terminal.sendMouse(TerminalInput.Mouse(MouseAction.Press(MouseButton.Left), row = 1, col = 6))
+    terminal.sendMouse(TerminalInput.Mouse(MouseAction.Press(MouseButton.Left), row = 3, col = 6))
+
+    assertEquals(overlay.events.map(_._2.boundsRow).toVector, Vector(1))
+    assertEquals(overlay.events.map(_._2.boundsCol).toVector, Vector(6))
+    assertEquals(overlay.events.map(_._2.boundsHeight).toVector, Vector(2))
 
   test("hardware cursor positioning is disabled by default and strips markers"):
     val terminal = VirtualTerminal(20, 5)

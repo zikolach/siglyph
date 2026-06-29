@@ -8,6 +8,7 @@ import scalatui.terminal.{
   KittyKeyboardProtocolTerminal,
   StreamTerminal,
   Terminal,
+  TerminalMouseProtocolSupport,
   TerminalProgressSupport,
   TerminalTitleSupport
 }
@@ -29,6 +30,7 @@ final class SttyTerminal(
       initialRows = rowsOverride.orElse(StreamTerminal.envInt("LINES")).getOrElse(24)
     ),
       KittyKeyboardProtocolTerminal,
+      TerminalMouseProtocolSupport,
       TerminalTitleSupport,
       TerminalProgressSupport:
   @volatile private var savedState: Option[String] = None
@@ -40,7 +42,11 @@ final class SttyTerminal(
     rowsOverride.orElse(StreamTerminal.envInt("LINES")).getOrElse(24)
   private var resizeHandler: () => Unit            = () => ()
   private var resizeThread: Thread | Null          = null
+  private var mouseReportingEnabled                = false
   private val keyboardProtocolNegotiator           = KittyKeyboardProtocolNegotiator()
+
+  override def mouseReportingEnabled_=(enabled: Boolean): Unit =
+    mouseReportingEnabled = enabled
 
   override def start(onInput: scalatui.terminal.TerminalInput => Unit, onResize: () => Unit): Unit =
     if savedState.isEmpty then
@@ -54,11 +60,13 @@ final class SttyTerminal(
         refreshSize(notify = false)
         runStty("raw -echo min 1 time 0")
         write("\u001b[?2004h")
+        if mouseReportingEnabled then write(Terminal.MouseProtocol.Enable)
         super.start(onInput, onResize)
         startResizePolling()
       catch
         case e: Throwable =>
           stopResizePolling()
+          if mouseReportingEnabled then write(Terminal.MouseProtocol.Disable)
           write("\u001b[?2004l")
           savedState.foreach(state => scala.util.Try(runStty(state)))
           savedState = None
@@ -69,6 +77,7 @@ final class SttyTerminal(
     if savedState.isEmpty then super.stop()
     else
       disableKittyKeyboardProtocol()
+      if mouseReportingEnabled then write(Terminal.MouseProtocol.Disable)
       write("\u001b[?2004l")
       super.stop()
       savedState.foreach(state => scala.util.Try(runStty(state)))

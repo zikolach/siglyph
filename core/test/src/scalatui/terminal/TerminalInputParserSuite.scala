@@ -108,6 +108,67 @@ class TerminalInputParserSuite extends munit.FunSuite:
       Vector(TerminalInput.Paste("hello\nworld"))
     )
 
+  test("parses SGR mouse press release wheel and modifiers"):
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[<0;3;2M"),
+      TerminalInput.Mouse(MouseAction.Press(MouseButton.Left), row = 1, col = 2)
+    )
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[<0;3;2m"),
+      TerminalInput.Mouse(MouseAction.Release(MouseButton.Left), row = 1, col = 2)
+    )
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[<64;3;2M"),
+      TerminalInput.Mouse(MouseAction.Wheel(MouseWheelDirection.Up), row = 1, col = 2)
+    )
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[<65;3;2M"),
+      TerminalInput.Mouse(MouseAction.Wheel(MouseWheelDirection.Down), row = 1, col = 2)
+    )
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[<66;3;2M"),
+      TerminalInput.Mouse(MouseAction.Wheel(MouseWheelDirection.Left), row = 1, col = 2)
+    )
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[<67;3;2M"),
+      TerminalInput.Mouse(MouseAction.Wheel(MouseWheelDirection.Right), row = 1, col = 2)
+    )
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[<28;1;1M"),
+      TerminalInput.Mouse(
+        MouseAction.Press(MouseButton.Left),
+        row = 0,
+        col = 0,
+        modifiers = KeyModifiers(ctrl = true, shift = true, alt = true)
+      )
+    )
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[<3;1;1M"),
+      TerminalInput.Mouse(MouseAction.Press(MouseButton.Other(3)), row = 0, col = 0)
+    )
+
+  test("parses SGR mouse invalid coordinates as raw input"):
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[<0;0;2M"),
+      TerminalInput.Raw("\u001b[<0;0;2M")
+    )
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[<0;3;0M"),
+      TerminalInput.Raw("\u001b[<0;3;0M")
+    )
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[<999999999999999999999;1;1M"),
+      TerminalInput.Raw("\u001b[<999999999999999999999;1;1M")
+    )
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[<0;999999999999999999999;1M"),
+      TerminalInput.Raw("\u001b[<0;999999999999999999999;1M")
+    )
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[<0;1;999999999999999999999M"),
+      TerminalInput.Raw("\u001b[<0;1;999999999999999999999M")
+    )
+
   test("parses page navigation keys"):
     assertEquals(TerminalInputParser.parseOne("\u001b[5~"), TerminalInput.Key(TerminalKey.PageUp))
     assertEquals(TerminalInputParser.parseOne("\u001b[6~"), TerminalInput.Key(TerminalKey.PageDown))

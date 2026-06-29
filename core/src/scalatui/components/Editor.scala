@@ -10,6 +10,9 @@ import scalatui.terminal.{
   KeybindingCommand,
   KeybindingManager,
   KeyModifiers,
+  MouseAction,
+  MouseInputContext,
+  MouseWheelDirection,
   TerminalInput,
   TerminalKey
 }
@@ -33,7 +36,8 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     extends Component,
       Focusable,
       ContextualComponent,
-      RenderOriginAware:
+      RenderOriginAware,
+      MouseInputHandler:
   private var buffer                                             = EditorBuffer(initialText)
   private var isFocused                                          = false
   private var context                                            = Option.empty[TUIContext]
@@ -204,6 +208,13 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
 
   override def handleInputResult(input: TerminalInput): InputResult =
     synchronized(handleInputLocked(input))
+
+  override def handleMouse(context: MouseInputContext): InputResult = synchronized {
+    context.input.action match
+      case MouseAction.Wheel(MouseWheelDirection.Up)   => pageScroll(-1)
+      case MouseAction.Wheel(MouseWheelDirection.Down) => pageScroll(1)
+      case _                                           => InputResult.Ignored
+  }
 
   override def render(width: Int): Vector[String] = synchronized {
     val layout = EditorLayout.fromBuffer(buffer, width)
@@ -883,8 +894,24 @@ object Editor:
       )
     }
 
-  final class AutocompleteOverlay(owner: Editor, list: SelectList) extends Component:
+  final class AutocompleteOverlay(owner: Editor, list: SelectList) extends Component,
+        MouseInputHandler:
     override def render(width: Int): Vector[String] = owner.renderCurrentAutocompleteOverlay(width)
+
+    override def handleMouse(context: MouseInputContext): InputResult = owner.synchronized {
+      context.input.action match
+        case MouseAction.Wheel(MouseWheelDirection.Up)   =>
+          val result = list.moveSelectionByResult(-1)
+          if result === InputResult.Render then
+            owner.refreshAutocompleteOverlayPlacement(requestRender = true)
+          result
+        case MouseAction.Wheel(MouseWheelDirection.Down) =>
+          val result = list.moveSelectionByResult(1)
+          if result === InputResult.Render then
+            owner.refreshAutocompleteOverlayPlacement(requestRender = true)
+          result
+        case _                                           => InputResult.Ignored
+    }
 
     override def handleInputResult(input: TerminalInput): InputResult = owner.synchronized {
       owner.handleAutocompleteInput(input)
