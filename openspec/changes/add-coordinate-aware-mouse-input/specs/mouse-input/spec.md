@@ -38,7 +38,7 @@ The public mouse action model SHALL define the complete action set as `Press(but
 - **THEN** the emitted mouse event uses `Other(code)` with the original button code
 
 ### Requirement: Coordinate-aware mouse routing
-The TUI runtime SHALL route mouse events by coordinates using the latest retained rendered bounds tree.
+The TUI runtime SHALL route mouse events by coordinates using the latest retained rendered bounds tree and the visible terminal origin of the current TUI frame.
 
 #### Scenario: Deepest child under pointer receives mouse
 - **WHEN** a mouse event falls inside a nested child component that opts into mouse handling
@@ -51,6 +51,14 @@ The TUI runtime SHALL route mouse events by coordinates using the latest retaine
 #### Scenario: Missing layout ignores mouse
 - **WHEN** a mouse event arrives before any frame has been rendered
 - **THEN** the runtime ignores component mouse routing and preserves focus
+
+#### Scenario: Frame below previous terminal output routes by visible cells
+- **WHEN** a mouse-enabled TUI starts below previous terminal output and renders without clearing scrollback
+- **THEN** the runtime maps terminal mouse coordinates to the visible TUI frame before hit testing retained component bounds
+
+#### Scenario: Initial render scrolling is accounted for
+- **WHEN** the first rendered frame scrolls the terminal viewport while preserving scrollback
+- **THEN** the runtime maps mouse coordinates to the retained frame rows that remain visible after scrolling
 
 ### Requirement: Overlay-aware mouse routing
 The TUI runtime SHALL route mouse events through visible overlays before base components, using topmost visual order first.

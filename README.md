@@ -95,15 +95,16 @@ Scala JVM applications usually start with `siglyph-core` and `siglyph-terminal-j
 
 ## Try with Scala CLI
 
-Single-file demos live in [`examples/scala-cli/`](examples/scala-cli/) and are intended for copy/paste or GitHub Gist use. For example:
+Single-file demos live in [`examples/scala-cli/`](examples/scala-cli/) and are intended for local Scala CLI runs. For example:
 
 ```bash
 ./examples/scala-cli/markdown.scala
 ./examples/scala-cli/image.scala /path/to/image.png
 ./examples/scala-cli/alternate-screen-maven.scala
+./examples/scala-cli/mouse.scala
 ```
 
-They reference Maven Central dependencies, so they can run without cloning or GitHub Packages credentials. The alternate-screen Sonatype Central explorer uses the full alternate-screen height, shows built-in loader states and published dates, and copies selected build snippets through terminal clipboard escape sequences with an inline `Copied!` badge.
+The released examples reference Maven Central dependencies, so they can run without cloning or GitHub Packages credentials. The unreleased mouse example references local `0.4.0-SNAPSHOT` artifacts; run `./scripts/publish-local-snapshot.sh` from the repository root before running it. The alternate-screen Sonatype Central explorer uses the full alternate-screen height, shows built-in loader states and published dates, and copies selected build snippets through terminal clipboard escape sequences with an inline `Copied!` badge.
 
 ## Quick example
 
@@ -201,11 +202,11 @@ The JVM interop facade gives Java and Kotlin call sites the same basic path with
 
 ## Mouse input
 
-Mouse input is disabled by default because terminal mouse reporting can capture normal text selection. Enable it with `TUIOptions(mouseInput = true)` when an application wants coordinate-aware mouse events.
+Mouse input is disabled by default because terminal mouse reporting can capture normal text selection and wheel scrollback. Enable it with `TUIOptions(mouseInput = true)` when an application wants coordinate-aware mouse events.
 
 Supported reports are xterm SGR mouse press, release, and wheel events. Parsed `TerminalInput.Mouse` events use zero-based terminal cell `row` and `col` coordinates. Components receive routed mouse events only when they implement the mouse handling contract; global input listeners still see typed mouse input before component routing.
 
-Interactive JVM and Native backends enable normal mouse tracking (`CSI ? 1000 h`) and SGR coordinates (`CSI ? 1006 h`) only while mouse input is enabled, and disable both modes on stop.
+Interactive JVM and Native backends enable normal mouse tracking (`CSI ? 1000 h`) and SGR coordinates (`CSI ? 1006 h`) only while mouse input is enabled, and disable both modes on stop. While those terminal modes are active, wheel events are delivered to the application rather than normal terminal scrollback; unhandled wheel events cannot be passed back to the terminal reliably.
 
 A multiline editor with slash, filesystem, attachment, fuzzy, and `#` trigger autocomplete:
 
