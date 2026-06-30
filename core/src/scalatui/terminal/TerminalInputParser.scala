@@ -112,11 +112,12 @@ object TerminalInputParser:
     case other => TerminalKey.Unknown(other)
 
   private def functionKey(number: Int): Option[TerminalKey] = number match
-    case 2 => Some(TerminalKey.Insert)
-    case 3 => Some(TerminalKey.Delete)
-    case 5 => Some(TerminalKey.PageUp)
-    case 6 => Some(TerminalKey.PageDown)
-    case _ => None
+    case 2  => Some(TerminalKey.Insert)
+    case 3  => Some(TerminalKey.Delete)
+    case 5  => Some(TerminalKey.PageUp)
+    case 6  => Some(TerminalKey.PageDown)
+    case 13 => Some(TerminalKey.Enter)
+    case _  => None
 
   private def codePointKey(codePoint: Int): TerminalKey = codePoint match
     case 9              => TerminalKey.Tab

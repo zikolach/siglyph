@@ -537,7 +537,10 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
       fullRender(frame, width, height, clear = shouldClear)
     else if widthChanged || heightChanged then
       clearRequested = false
-      fullRender(frame, width, height, clear = true)
+      partialRender(frame, firstChanged = 0)
+      previousLines = newLines
+      previousWidth = width
+      previousHeight = height
     else
       clearRequested = false
       val firstChanged = firstChangedLine(previousLines, newLines)

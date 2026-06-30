@@ -86,6 +86,32 @@ class TerminalInputParserSuite extends munit.FunSuite:
     assertEquals(negotiator.receiveResponse("\u001b[?3u", nowMillis = 3002), true)
     assertEquals(negotiator.state, KittyKeyboardProtocolState.Active(3))
 
+  test("parses modified enter encodings"):
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[13;2~"),
+      TerminalInput.Key(TerminalKey.Enter, KeyModifiers(shift = true))
+    )
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[13;3~"),
+      TerminalInput.Key(TerminalKey.Enter, KeyModifiers(alt = true))
+    )
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[13;2u"),
+      TerminalInput.Key(TerminalKey.Enter, KeyModifiers(shift = true))
+    )
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[27;2;13~"),
+      TerminalInput.Key(TerminalKey.Enter, KeyModifiers(shift = true))
+    )
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[13;3u"),
+      TerminalInput.Key(TerminalKey.Enter, KeyModifiers(alt = true))
+    )
+    assertEquals(
+      TerminalInputParser.parseOne("\u001b[27;3;13~"),
+      TerminalInput.Key(TerminalKey.Enter, KeyModifiers(alt = true))
+    )
+
   test("parses xterm modifyOtherKeys"):
     assertEquals(
       TerminalInputParser.parseOne("\u001b[27;3;120~"),
