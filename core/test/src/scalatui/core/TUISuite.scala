@@ -209,6 +209,26 @@ class TUISuite extends munit.FunSuite:
     assert(output.contains("\u001b[J"), output)
     assert(output.contains("hello" + TUI.LineReset), output)
 
+  test("width change redraws with autowrap disabled to avoid resize reflow"):
+    val terminal = VirtualTerminal(5, 5)
+    val tui      = TUI(terminal)
+    tui.addChild(MutableLine("abcde"))
+    tui.start()
+
+    val initialOutput = terminal.output
+    assert(initialOutput.contains(TUI.AutoWrapOff + "abcde" + TUI.LineReset), initialOutput)
+    assert(initialOutput.endsWith(TUI.SyncEnd + TUI.AutoWrapOn), initialOutput)
+    terminal.clearWrites()
+
+    terminal.resize(3, 5)
+
+    val output = terminal.output
+    assertNoResizeForbiddenSequences(output)
+    assert(output.startsWith(TUI.SyncStart + TUI.AutoWrapOff), output)
+    assert(output.contains("\u001b[J"), output)
+    assert(output.contains("abc" + Ansi.Reset + TUI.LineReset), output)
+    assert(output.endsWith(TUI.SyncEnd + TUI.AutoWrapOn), output)
+
   test("over-wide lines are sanitized instead of failing"):
     val terminal = VirtualTerminal(3, 5)
     val tui      = TUI(terminal)
