@@ -140,7 +140,7 @@ object TerminalInputParser:
     case 0 => MouseButton.Left
     case 1 => MouseButton.Middle
     case 2 => MouseButton.Right
-    case _ => MouseButton.Other(code)
+    case _ => MouseButton.Other(code & 3)
 
   private def wheelDirection(code: Int): MouseWheelDirection = code match
     case 0 => MouseWheelDirection.Up

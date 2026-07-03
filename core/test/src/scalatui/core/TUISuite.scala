@@ -24,6 +24,7 @@ import scalatui.terminal.{
   Terminal,
   TerminalColorProtocol,
   TerminalColorScheme,
+  TerminalCursorProtocol,
   TerminalImageProtocol,
   TerminalInputDrainSupport,
   TerminalInput,
@@ -288,6 +289,50 @@ class TUISuite extends munit.FunSuite:
     override def clearLine(): Unit         = ()
     override def clearFromCursor(): Unit   = ()
     override def clearScreen(): Unit       = ()
+
+  final class CursorQuerySwitchingTerminal extends Terminal,
+        scalatui.terminal.TerminalMouseProtocolSupport:
+    private var inputHandler: TerminalInput => Unit = _ => ()
+    private var resizeHandler: () => Unit           = () => ()
+    private var mouseReportingEnabled               = false
+    var repliesToCursorQueries                      = true
+    var cursorRow                                   = 0
+    val writes                                      = scala.collection.mutable.ArrayBuffer.empty[String]
+
+    override def mouseReportingEnabled_=(enabled: Boolean): Unit =
+      mouseReportingEnabled = enabled
+
+    override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
+      inputHandler = onInput
+      resizeHandler = onResize
+      if mouseReportingEnabled then write(Terminal.MouseProtocol.Enable)
+
+    override def stop(): Unit =
+      if mouseReportingEnabled then write(Terminal.MouseProtocol.Disable)
+      inputHandler = _ => ()
+      resizeHandler = () => ()
+
+    override def write(data: String): Unit =
+      writes += data
+      if repliesToCursorQueries && data.contains(TerminalCursorProtocol.CursorPositionQuery) then
+        val response = s"\u001b[${cursorRow + 1};1R"
+        scalatui.terminal.TerminalInputBuffer()
+          .process(scalatui.terminal.TerminalInputChunk(
+            response.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+          ))
+          .foreach(inputHandler)
+
+    override def columns: Int             = 20
+    override def rows: Int                = 10
+    override def moveBy(lines: Int): Unit = ()
+    override def hideCursor(): Unit       = ()
+    override def showCursor(): Unit       = ()
+    override def clearLine(): Unit        = ()
+    override def clearFromCursor(): Unit  = ()
+    override def clearScreen(): Unit      = ()
+
+    def sendMouse(input: TerminalInput.Mouse): Unit = inputHandler(input)
+    def sendResize(): Unit                          = resizeHandler()
 
   final class DrainingTerminal extends Terminal, TerminalInputDrainSupport:
     var drainCalls     = 0
@@ -622,6 +667,27 @@ class TUISuite extends munit.FunSuite:
     assertEquals(target.events.map(_._1).toVector, Vector("target"))
     assertEquals(target.events.head._2.boundsRow, 2)
     assertEquals(target.events.head._2.localRow, 2)
+
+  test("mouse routing clears stale frame origin when cursor-position query times out"):
+    val terminal = CursorQuerySwitchingTerminal()
+    val target   = MouseLine("target")
+    val tui      = TUI(terminal, TUIOptions(mouseInput = true))
+    tui.addChild(target)
+
+    terminal.cursorRow = 4
+    terminal.repliesToCursorQueries = true
+    tui.start()
+    terminal.sendMouse(TerminalInput.Mouse(MouseAction.Press(MouseButton.Left), row = 4, col = 0))
+    assertEquals(target.events.map(_._1).toVector, Vector("target"))
+    tui.stop()
+
+    target.events.clear()
+    terminal.repliesToCursorQueries = false
+    tui.start()
+    terminal.sendMouse(TerminalInput.Mouse(MouseAction.Press(MouseButton.Left), row = 4, col = 0))
+    tui.stop()
+
+    assertEquals(target.events.toVector, Vector.empty)
 
   test("mouse routing falls back to ancestor when child ignores"):
     val terminal = VirtualTerminal(20, 5)

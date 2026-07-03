@@ -48,7 +48,12 @@ trait TerminalTitleSupport:
 
 /** Optional terminal capability for backends that own mouse reporting lifecycle. */
 trait TerminalMouseProtocolSupport:
-  /** Configure whether start/stop should enable and disable terminal mouse reporting. */
+  /**
+   * Configure whether backend start/stop should enable and disable terminal mouse reporting.
+   *
+   * This records lifecycle intent. It does not immediately write terminal protocol sequences for an
+   * already running backend.
+   */
   def mouseReportingEnabled_=(enabled: Boolean): Unit
 
 /** Optional terminal capability for backends that can set terminal progress state. */
@@ -88,7 +93,12 @@ object Terminal:
       true
     case _                            => false
 
-  /** Configure terminal mouse reporting when the backend owns that lifecycle. */
+  /**
+   * Configure terminal mouse reporting for backend lifecycle start/stop.
+   *
+   * This records lifecycle intent on supporting backends. It does not immediately write terminal
+   * protocol sequences for an already running backend.
+   */
   def setMouseReporting(terminal: Terminal, enabled: Boolean): Boolean = terminal match
     case mouse: TerminalMouseProtocolSupport =>
       mouse.mouseReportingEnabled_=(enabled)
