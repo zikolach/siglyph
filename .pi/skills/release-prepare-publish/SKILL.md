@@ -62,12 +62,18 @@ Before changing files:
    ```
 5. Read current release and publishing files:
    ```bash
-   docs/publishing.md
-   .github/workflows/publish.yml
-   .github/workflows/publish-central.yml
-   .github/workflows/ci.yml
-   build.mill
-   CHANGELOG.md
+   files=(
+     docs/publishing.md
+     .github/workflows/publish.yml
+     .github/workflows/publish-central.yml
+     .github/workflows/ci.yml
+     build.mill
+     CHANGELOG.md
+   )
+   for file in "${files[@]}"; do
+     printf '\n--- %s ---\n' "$file"
+     sed -n '1,260p' "$file"
+   done
    ```
 
 ## Prepare the release PR
