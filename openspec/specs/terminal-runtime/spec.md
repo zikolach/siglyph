@@ -151,19 +151,19 @@ The TUI runtime SHALL clamp terminal render dimensions to positive minimums befo
 - **THEN** the TUI tracks at least one row for redraw and viewport decisions
 
 ### Requirement: Height-aware resize redraws
-The TUI runtime SHALL track both terminal width and terminal height changes across renders and SHALL repaint the existing TUI frame region without clearing terminal scrollback.
+The TUI runtime SHALL track both terminal width and terminal height changes across renders and SHALL repaint after dimension changes using pi-tui-style full clear output without entering alternate-screen mode.
 
-#### Scenario: Width resize redraws frame in place
+#### Scenario: Width resize redraws with full clear
 - **WHEN** terminal width changes after a previous render
-- **THEN** the TUI redraws from the previous frame start, clears below that point, and writes the new frame without emitting clear-scrollback sequences
+- **THEN** the TUI emits synchronized output with autowrap disabled, clears the viewport and scrollback with `CSI 2 J`, `CSI H`, and `CSI 3 J`, and writes the recomputed frame
 
-#### Scenario: Height resize redraws frame in place
+#### Scenario: Height resize redraws with full clear
 - **WHEN** terminal height changes after a previous render
-- **THEN** the TUI redraws from the previous frame start, clears below that point, and writes the new frame without moving the TUI to the top of the terminal viewport
+- **THEN** the TUI emits synchronized output with autowrap disabled, clears the viewport and scrollback with `CSI 2 J`, `CSI H`, and `CSI 3 J`, and writes the recomputed frame
 
-#### Scenario: Resize with overlay preserves scrollback
+#### Scenario: Resize with overlay recomputes layout
 - **WHEN** terminal dimensions change while an autocomplete overlay is visible
-- **THEN** the overlay is re-resolved and composited without clearing previous terminal output above the TUI frame
+- **THEN** the overlay is re-resolved and composited into the full-clear resize redraw without entering alternate-screen mode
 
 ### Requirement: Runtime sanitizes over-wide output
 The TUI runtime SHALL sanitize final rendered non-image lines before writing to the terminal so normal interactive rendering does not throw because a line exceeds terminal width.

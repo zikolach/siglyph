@@ -7,13 +7,13 @@
 
 ## 2. Resize Rendering Coverage
 
-- [x] 2.1 Add TUI resize tests proving width changes do not emit full-screen clear, scrollback-clear, or alternate-screen sequences.
-- [x] 2.2 Add TUI resize tests proving height changes do not emit full-screen clear, scrollback-clear, or alternate-screen sequences.
-- [x] 2.3 Add or update overlay resize coverage to verify resize redraw keeps overlay composition without clearing output above the TUI frame.
+- [x] 2.1 Add TUI resize tests proving width changes emit pi-tui-style full clear output and avoid alternate-screen mode.
+- [x] 2.2 Add TUI resize tests proving height changes emit pi-tui-style full clear output and avoid alternate-screen mode.
+- [x] 2.3 Add or update overlay resize coverage to verify resize redraw recomputes overlay composition with pi-tui-style full clear output.
 
 ## 3. Resize Rendering Implementation
 
-- [x] 3.1 Update the TUI resize render path to redraw from the known frame origin without using the full-screen clear branch.
+- [x] 3.1 Update the TUI resize render path to use the full-screen clear branch on dimension changes.
 - [x] 3.2 Preserve normal first render and non-resize differential rendering behavior.
 - [x] 3.3 Preserve explicit terminal clear operations as separate opt-in backend behavior.
 
