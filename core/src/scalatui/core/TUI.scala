@@ -43,6 +43,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   private var exitRequested                           = false
   private var renderRequested                         = false
   private var clearRequested                          = false
+  private var autoWrapRestoreNeeded                   = false
   private var sanitizationCount                       = 0
   private var lastSanitization                        = Option.empty[TUI.RenderSanitization]
   private var runtimeFailure                          = Option.empty[Throwable]
@@ -273,10 +274,12 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
           terminal.write(TerminalColorProtocol.DisableColorSchemeNotifications)
         Terminal.drainInput(terminal)
       finally
-        try terminal.showCursor()
+        try restoreAutoWrapIfNeeded()
         finally
-          try terminal.stop()
-          finally lifecycleLock.notifyAll()
+          try terminal.showCursor()
+          finally
+            try terminal.stop()
+            finally lifecycleLock.notifyAll()
   }
 
   override def requestRender(force: Boolean = false): Unit = lifecycleLock.synchronized {
@@ -562,7 +565,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     builder.append(frame.lines.mkString("\r\n"))
     appendHardwareCursorMove(builder, frame)
     appendRenderEnd(builder)
-    terminal.write(builder.result())
+    writeRenderBuffer(builder.result())
     previousLines = frame.lines
     previousWidth = width
     previousHeight = height
@@ -576,8 +579,18 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     builder.append(frame.lines.drop(firstChanged).mkString("\r\n"))
     appendHardwareCursorMove(builder, frame)
     appendRenderEnd(builder)
-    terminal.write(builder.result())
+    writeRenderBuffer(builder.result())
     cursorRow = finalCursorRow(frame)
+
+  private def writeRenderBuffer(buffer: String): Unit =
+    autoWrapRestoreNeeded = true
+    terminal.write(buffer)
+    autoWrapRestoreNeeded = false
+
+  private def restoreAutoWrapIfNeeded(): Unit =
+    if autoWrapRestoreNeeded then
+      autoWrapRestoreNeeded = false
+      terminal.write(AutoWrapOn)
 
   private def appendRenderStart(builder: StringBuilder): Unit =
     builder.append(SyncStart)
