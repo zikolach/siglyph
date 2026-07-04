@@ -121,7 +121,7 @@ Before changing files:
 12. Use tracked-file searches to verify no stale current-release dependency examples remain:
    ```bash
    git grep -nE 'io\.github\.zikolach.*siglyph.*(:|% ")[0-9]+\.[0-9]+\.[0-9]+(-SNAPSHOT)?' -- README.md examples docs demo asciinemaDemo interactiveDemo interactiveJvmDemo interactiveNativeDemo keyTester || true
-   git grep -nE 'PREVIOUS_VERSION|SNAPSHOT' -- README.md examples docs demo asciinemaDemo interactiveDemo interactiveJvmDemo interactiveNativeDemo keyTester || true
+   git grep -nE 'PREVIOUS_VERSION' -- README.md examples docs demo asciinemaDemo interactiveDemo interactiveJvmDemo interactiveNativeDemo keyTester || true
    ```
    Replace `PREVIOUS_VERSION` with the previous released version string, for example `0.2.7`. Every user-facing published siglyph coordinate found by the first search must use `X.Y.Z`, except historical release notes and documented dry-run examples.
 
