@@ -11,6 +11,7 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 - Fixed terminal resize redraws so TUI frames repaint without clearing the full screen or terminal scrollback. #20
 - Fixed modified Enter handling by parsing tilde-form sequences such as `ESC[13;2~` and `ESC[13;3~`. #20
+- Fixed resize redraws for full-width terminal lines by disabling autowrap during frame painting and restoring it during cleanup. #22
 
 ## [0.2.6] - 2026-06-27
 
