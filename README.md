@@ -28,10 +28,10 @@ Published artifacts are available on Maven Central. GitHub Packages and GitHub R
 
 ```scala
 libraryDependencies ++= Seq(
-  "io.github.zikolach" %% "siglyph-core" % "0.2.0",
-  "io.github.zikolach" %% "siglyph-terminal-jvm" % "0.2.0",
-  "io.github.zikolach" %% "siglyph-markdown" % "0.2.0",
-  "io.github.zikolach" %% "siglyph-image" % "0.2.0"
+  "io.github.zikolach" %% "siglyph-core" % "0.2.7",
+  "io.github.zikolach" %% "siglyph-terminal-jvm" % "0.2.7",
+  "io.github.zikolach" %% "siglyph-markdown" % "0.2.7",
+  "io.github.zikolach" %% "siglyph-image" % "0.2.7"
 )
 ```
 
@@ -42,10 +42,10 @@ object app extends ScalaModule {
   def scalaVersion = "3.7.4"
 
   def mvnDeps = Seq(
-    mvn"io.github.zikolach::siglyph-core::0.2.0",
-    mvn"io.github.zikolach::siglyph-terminal-jvm::0.2.0",
-    mvn"io.github.zikolach::siglyph-markdown::0.2.0",
-    mvn"io.github.zikolach::siglyph-image::0.2.0"
+    mvn"io.github.zikolach::siglyph-core::0.2.7",
+    mvn"io.github.zikolach::siglyph-terminal-jvm::0.2.7",
+    mvn"io.github.zikolach::siglyph-markdown::0.2.7",
+    mvn"io.github.zikolach::siglyph-image::0.2.7"
   )
 }
 ```
