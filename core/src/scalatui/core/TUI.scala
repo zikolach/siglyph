@@ -43,6 +43,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   private var exitRequested                           = false
   private var renderRequested                         = false
   private var clearRequested                          = false
+  private var autoWrapRestoreNeeded                   = false
   private var sanitizationCount                       = 0
   private var lastSanitization                        = Option.empty[TUI.RenderSanitization]
   private var runtimeFailure                          = Option.empty[Throwable]
@@ -273,10 +274,12 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
           terminal.write(TerminalColorProtocol.DisableColorSchemeNotifications)
         Terminal.drainInput(terminal)
       finally
-        try terminal.showCursor()
+        try restoreAutoWrapIfNeeded()
         finally
-          try terminal.stop()
-          finally lifecycleLock.notifyAll()
+          try terminal.showCursor()
+          finally
+            try terminal.stop()
+            finally lifecycleLock.notifyAll()
   }
 
   override def requestRender(force: Boolean = false): Unit = lifecycleLock.synchronized {
@@ -557,12 +560,12 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
       clear: Boolean
   ): Unit =
     val builder = StringBuilder()
-    builder.append(SyncStart)
+    appendRenderStart(builder)
     if clear then builder.append("\u001b[2J\u001b[H\u001b[3J")
     builder.append(frame.lines.mkString("\r\n"))
     appendHardwareCursorMove(builder, frame)
-    builder.append(SyncEnd)
-    terminal.write(builder.result())
+    appendRenderEnd(builder)
+    writeRenderBuffer(builder.result())
     previousLines = frame.lines
     previousWidth = width
     previousHeight = height
@@ -570,14 +573,36 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
 
   private def partialRender(frame: CursorMarker.ScanResult, firstChanged: Int): Unit =
     val builder = StringBuilder()
-    builder.append(SyncStart)
+    appendRenderStart(builder)
     appendVerticalMove(builder, fromRow = cursorRow, toRow = firstChanged)
     builder.append("\r\u001b[J")
     builder.append(frame.lines.drop(firstChanged).mkString("\r\n"))
     appendHardwareCursorMove(builder, frame)
-    builder.append(SyncEnd)
-    terminal.write(builder.result())
+    appendRenderEnd(builder)
+    writeRenderBuffer(builder.result())
     cursorRow = finalCursorRow(frame)
+
+  private def writeRenderBuffer(buffer: String): Unit =
+    autoWrapRestoreNeeded = true
+    terminal.write(buffer)
+    autoWrapRestoreNeeded = false
+
+  private def restoreAutoWrapIfNeeded(): Unit =
+    if autoWrapRestoreNeeded then
+      autoWrapRestoreNeeded = false
+      terminal.write(AutoWrapOn)
+
+  private def appendRenderStart(builder: StringBuilder): Unit =
+    builder.append(SyncStart)
+    // Full-width terminal lines can be marked as soft-wrapped by real terminal emulators. Those
+    // soft-wrap markers may be reflowed on resize, invalidating the logical cursorRow used by the
+    // differential redraw path. Disable autowrap only while painting frames so full-width content
+    // remains a single physical row, then restore the usual terminal mode after synchronized output.
+    builder.append(AutoWrapOff)
+
+  private def appendRenderEnd(builder: StringBuilder): Unit =
+    builder.append(SyncEnd)
+    builder.append(AutoWrapOn)
 
   private def positionHardwareCursorOnly(position: Option[CursorMarker.Position]): Unit =
     if options.hardwareCursorPositioning then
@@ -690,10 +715,14 @@ object TUI:
       sanitized: String
   ) derives CanEqual
 
-  val SyncStart: String = "\u001b[?2026h"
-  val SyncEnd: String   = "\u001b[?2026l"
-  val LineReset: String = "\u001b[0m\u001b]8;;\u0007"
+  val SyncStart: String   = "\u001b[?2026h"
+  val SyncEnd: String     = "\u001b[?2026l"
+  val AutoWrapOff: String = "\u001b[?7l"
+  val AutoWrapOn: String  = "\u001b[?7h"
+  val LineReset: String   = "\u001b[0m\u001b]8;;\u0007"
 
-private val SyncStart = TUI.SyncStart
-private val SyncEnd   = TUI.SyncEnd
-private val LineReset = TUI.LineReset
+private val SyncStart   = TUI.SyncStart
+private val SyncEnd     = TUI.SyncEnd
+private val AutoWrapOff = TUI.AutoWrapOff
+private val AutoWrapOn  = TUI.AutoWrapOn
+private val LineReset   = TUI.LineReset

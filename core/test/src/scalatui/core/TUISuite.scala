@@ -73,6 +73,33 @@ class TUISuite extends munit.FunSuite:
     override def clearFromCursor(): Unit  = ()
     override def clearScreen(): Unit      = ()
 
+  final class PartialAutoWrapRenderFailingTerminal extends Terminal:
+    val writes                     = scala.collection.mutable.ArrayBuffer.empty[String]
+    @volatile var showCursorCalled = false
+    @volatile var stopCalled       = false
+    private var failedRenderWrite  = false
+
+    override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit = ()
+
+    override def stop(): Unit = stopCalled = true
+
+    override def write(data: String): Unit =
+      if data.contains(TUI.AutoWrapOff) && !failedRenderWrite then
+        failedRenderWrite = true
+        writes += TUI.AutoWrapOff
+        throw RuntimeException("render write failed")
+      writes += data
+
+    override def columns: Int = 20
+    override def rows: Int    = 5
+
+    override def moveBy(lines: Int): Unit = ()
+    override def hideCursor(): Unit       = ()
+    override def showCursor(): Unit       = showCursorCalled = true
+    override def clearLine(): Unit        = ()
+    override def clearFromCursor(): Unit  = ()
+    override def clearScreen(): Unit      = ()
+
   final class DrainingTerminal extends Terminal, TerminalInputDrainSupport:
     var drainCalls     = 0
     var stopCalls      = 0
@@ -112,6 +139,19 @@ class TUISuite extends munit.FunSuite:
     assert(output.contains("hello" + TUI.LineReset))
     assert(output.contains(TUI.SyncEnd))
     assert(!output.contains("\u001b[2J\u001b[H\u001b[3J"), output)
+
+  test("render write failure restores autowrap during cleanup"):
+    val terminal = PartialAutoWrapRenderFailingTerminal()
+    val tui      = TUI(terminal)
+    tui.addChild(MutableLine("hello"))
+
+    val failure = intercept[RuntimeException](tui.start())
+
+    assertEquals(failure.getMessage, "render write failed")
+    assert(terminal.writes.contains(TUI.AutoWrapOff), terminal.writes.toVector)
+    assert(terminal.writes.contains(TUI.AutoWrapOn), terminal.writes.toVector)
+    assert(terminal.showCursorCalled)
+    assert(terminal.stopCalled)
 
   test("hardware cursor positioning is disabled by default and strips markers"):
     val terminal = VirtualTerminal(20, 5)
@@ -208,6 +248,26 @@ class TUISuite extends munit.FunSuite:
     assertNoResizeForbiddenSequences(output)
     assert(output.contains("\u001b[J"), output)
     assert(output.contains("hello" + TUI.LineReset), output)
+
+  test("width change redraws with autowrap disabled to avoid resize reflow"):
+    val terminal = VirtualTerminal(5, 5)
+    val tui      = TUI(terminal)
+    tui.addChild(MutableLine("abcde"))
+    tui.start()
+
+    val initialOutput = terminal.output
+    assert(initialOutput.contains(TUI.AutoWrapOff + "abcde" + TUI.LineReset), initialOutput)
+    assert(initialOutput.endsWith(TUI.SyncEnd + TUI.AutoWrapOn), initialOutput)
+    terminal.clearWrites()
+
+    terminal.resize(3, 5)
+
+    val output = terminal.output
+    assertNoResizeForbiddenSequences(output)
+    assert(output.startsWith(TUI.SyncStart + TUI.AutoWrapOff), output)
+    assert(output.contains("\u001b[J"), output)
+    assert(output.contains("abc" + Ansi.Reset + TUI.LineReset), output)
+    assert(output.endsWith(TUI.SyncEnd + TUI.AutoWrapOn), output)
 
   test("over-wide lines are sanitized instead of failing"):
     val terminal = VirtualTerminal(3, 5)
