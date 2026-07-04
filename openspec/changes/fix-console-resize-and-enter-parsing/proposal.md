@@ -1,13 +1,13 @@
 ## Why
 
-Siglyph currently emits full-screen clear output on terminal resize and does not parse two modified Enter encodings used by downstream console integrations. This blocks scrollback-style console users that need resize-safe rendering and typed Shift+Enter / Alt+Enter input from common terminal encodings.
+Siglyph needs resize rendering that matches upstream pi-tui behavior and does not leave duplicated frame output after terminal font-size or geometry changes. It also does not parse two modified Enter encodings used by downstream console integrations.
 
 ## What Changes
 
-- Strengthen resize rendering requirements so dimension changes redraw the existing frame region without `CSI 2 J`, `CSI 3 J`, or alternate-screen behavior.
+- Strengthen resize rendering requirements so dimension changes use pi-tui-style full clear redraw with `CSI 2 J`, `CSI H`, and `CSI 3 J` while avoiding alternate-screen mode.
 - Add parser requirements for modified Enter tilde encodings `ESC[13;2~` and `ESC[13;3~`.
 - Preserve existing CSI-u and modifyOtherKeys modified Enter parsing behavior.
-- Add tests that prove resize output avoids full-screen and scrollback clear sequences.
+- Add tests that prove resize output uses pi-tui-style full clear redraw and avoids alternate-screen mode.
 - Add parser tests that prove the new modified Enter encodings normalize to typed `TerminalInput.KeyEvent` values.
 - No runtime dependencies are added.
 

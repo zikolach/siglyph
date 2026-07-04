@@ -34,6 +34,9 @@ class TUISuite extends munit.FunSuite:
   final class MutableLine(var value: String) extends Component:
     override def render(width: Int): Vector[String] = Vector(value)
 
+  final class MutableFrame(var values: Vector[String]) extends Component:
+    override def render(width: Int): Vector[String] = values
+
   final class QueryFailingTerminal(failingWrite: String) extends Terminal:
     override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit = ()
 
@@ -235,7 +238,7 @@ class TUISuite extends munit.FunSuite:
     assert(output.contains("changed" + TUI.LineReset), output)
     assert(!output.contains("first" + TUI.LineReset), output)
 
-  test("width change redraws without full-screen clear"):
+  test("width change uses pi-tui full clear redraw"):
     val terminal = VirtualTerminal(20, 5)
     val tui      = TUI(terminal)
     tui.addChild(MutableLine("hello"))
@@ -245,8 +248,11 @@ class TUISuite extends munit.FunSuite:
     terminal.resize(30, 5)
 
     val output = terminal.output
-    assertNoResizeForbiddenSequences(output)
-    assert(output.contains("\u001b[J"), output)
+    assertNoAlternateScreen(output)
+    assert(
+      output.startsWith(TUI.SyncStart + TUI.AutoWrapOff + "\u001b[2J\u001b[H\u001b[3J"),
+      output
+    )
     assert(output.contains("hello" + TUI.LineReset), output)
 
   test("width change redraws with autowrap disabled to avoid resize reflow"):
@@ -263,11 +269,35 @@ class TUISuite extends munit.FunSuite:
     terminal.resize(3, 5)
 
     val output = terminal.output
-    assertNoResizeForbiddenSequences(output)
-    assert(output.startsWith(TUI.SyncStart + TUI.AutoWrapOff), output)
-    assert(output.contains("\u001b[J"), output)
+    assertNoAlternateScreen(output)
+    assert(
+      output.startsWith(TUI.SyncStart + TUI.AutoWrapOff + "\u001b[2J\u001b[H\u001b[3J"),
+      output
+    )
     assert(output.contains("abc" + Ansi.Reset + TUI.LineReset), output)
     assert(output.endsWith(TUI.SyncEnd + TUI.AutoWrapOn), output)
+
+  test("font-size-like resize uses pi-tui full clear redraw"):
+    val terminal = VirtualTerminal(8, 4)
+    val tui      = TUI(terminal)
+    tui.addChild(MutableFrame(Vector("abcdefgh", "ijklmnop", "qrstuvwx")))
+    tui.start()
+
+    val initialOutput = terminal.output
+    assert(initialOutput.contains("abcdefgh" + TUI.LineReset), initialOutput)
+    terminal.clearWrites()
+
+    terminal.resize(5, 2)
+
+    val output = terminal.output
+    assertNoAlternateScreen(output)
+    assert(
+      output.startsWith(TUI.SyncStart + TUI.AutoWrapOff + "\u001b[2J\u001b[H\u001b[3J"),
+      output
+    )
+    assert(output.contains("abcde" + Ansi.Reset + TUI.LineReset), output)
+    assert(output.contains("ijklm" + Ansi.Reset + TUI.LineReset), output)
+    assert(output.contains("qrstu" + Ansi.Reset + TUI.LineReset), output)
 
   test("over-wide lines are sanitized instead of failing"):
     val terminal = VirtualTerminal(3, 5)
@@ -280,7 +310,7 @@ class TUISuite extends munit.FunSuite:
     assertEquals(tui.sanitizedLineCount, 1)
     assertEquals(tui.lastSanitizedLine.map(_.originalWidth), Some(4))
 
-  test("height change redraws without full-screen clear"):
+  test("height change uses pi-tui full clear redraw"):
     val terminal = VirtualTerminal(20, 5)
     val tui      = TUI(terminal)
     tui.addChild(MutableLine("hello"))
@@ -290,8 +320,11 @@ class TUISuite extends munit.FunSuite:
     terminal.resize(20, 3)
 
     val output = terminal.output
-    assertNoResizeForbiddenSequences(output)
-    assert(output.contains("\u001b[J"), output)
+    assertNoAlternateScreen(output)
+    assert(
+      output.startsWith(TUI.SyncStart + TUI.AutoWrapOff + "\u001b[2J\u001b[H\u001b[3J"),
+      output
+    )
     assert(output.contains("hello" + TUI.LineReset), output)
 
   test("zero terminal dimensions are clamped before component rendering"):
@@ -331,7 +364,7 @@ class TUISuite extends munit.FunSuite:
     assert(visibleOutputLines(terminal.output).forall(Ansi.visibleWidth(_) <= 1), terminal.output)
     assertEquals(tui.sanitizedLineCount, 1)
 
-  test("shrinking terminal to one column repaints width-safe output without full-screen clear"):
+  test("shrinking terminal to one column repaints width-safe output with pi-tui full clear"):
     val terminal = VirtualTerminal(4, 5)
     val tui      = TUI(terminal)
     tui.addChild(MutableLine("界ab"))
@@ -340,7 +373,11 @@ class TUISuite extends munit.FunSuite:
 
     terminal.resize(1, 5)
 
-    assertNoResizeForbiddenSequences(terminal.output)
+    assertNoAlternateScreen(terminal.output)
+    assert(
+      terminal.output.startsWith(TUI.SyncStart + TUI.AutoWrapOff + "\u001b[2J\u001b[H\u001b[3J"),
+      terminal.output
+    )
     assert(visibleOutputLines(terminal.output).forall(Ansi.visibleWidth(_) <= 1), terminal.output)
     assertEquals(tui.sanitizedLineCount, 1)
 
@@ -902,9 +939,7 @@ class TUISuite extends munit.FunSuite:
   private def visibleOutputLines(output: String): Vector[String] =
     Ansi.strip(output).replace("\r\n", "\n").replace('\r', '\n').split("\n", -1).toVector
 
-  private def assertNoResizeForbiddenSequences(output: String): Unit =
-    assert(!output.contains("\u001b[2J"), output)
-    assert(!output.contains("\u001b[3J"), output)
+  private def assertNoAlternateScreen(output: String): Unit =
     assert(!output.contains("\u001b[?1049h"), output)
     assert(!output.contains("\u001b[?1049l"), output)
 
@@ -1092,7 +1127,7 @@ class TUISuite extends munit.FunSuite:
     assertEquals(firstHits, 1)
     assertEquals(baseFocused, true)
 
-  test("overlay layout is recomputed after resize without full-screen clear"):
+  test("overlay layout is recomputed after resize with pi-tui full clear"):
     val terminal = VirtualTerminal(20, 4)
     val tui      = TUI(terminal)
     tui.addChild(MutableLine("base"))
@@ -1105,5 +1140,9 @@ class TUISuite extends munit.FunSuite:
 
     terminal.resize(2, 2)
 
-    assertNoResizeForbiddenSequences(terminal.output)
+    assertNoAlternateScreen(terminal.output)
+    assert(
+      terminal.output.startsWith(TUI.SyncStart + TUI.AutoWrapOff + "\u001b[2J\u001b[H\u001b[3J"),
+      terminal.output
+    )
     assert(visibleOutputLines(terminal.output).exists(_.contains("wi")), terminal.output)

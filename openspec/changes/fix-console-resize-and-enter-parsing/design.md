@@ -1,13 +1,13 @@
 ## Context
 
-Siglyph's terminal runtime already has scrollback-preserving resize requirements, but the current renderer path still emits a full-screen clear sequence during width or height resize. Downstream console integrations need terminal resize to redraw the owned frame region without clearing previous shell scrollback.
+Siglyph uses upstream pi-tui as the primary behavior reference. Manual terminal font-size resize testing showed that scrollback-preserving in-place resize redraws can leave duplicated frame output in normal terminal screen mode. Resize redraw should match pi-tui by clearing the viewport and scrollback before writing the recomputed frame.
 
 The terminal input parser already handles CSI-u modified Enter sequences and modifyOtherKeys forms such as `ESC[27;2;13~` and `ESC[27;3;13~`. It does not parse xterm-style tilde modified Enter forms `ESC[13;2~` and `ESC[13;3~`, so those sequences reach applications as raw input.
 
 ## Goals / Non-Goals
 
 **Goals:**
-- Redraw TUI frames after terminal width or height changes without emitting full-screen clear or scrollback-clear sequences.
+- Redraw TUI frames after terminal width or height changes using pi-tui-style full clear output.
 - Preserve existing differential-renderer behavior for normal non-resize updates.
 - Parse `ESC[13;2~` as `TerminalKey.Enter` with Shift.
 - Parse `ESC[13;3~` as `TerminalKey.Enter` with Alt.
@@ -22,20 +22,21 @@ The terminal input parser already handles CSI-u modified Enter sequences and mod
 
 ## Decisions
 
-### 1. Redraw from the known frame origin on resize
+### 1. Use pi-tui-style full clear redraw on resize
 
-On dimension changes, the renderer should reuse the known frame start row when available, move to that frame origin, clear only from that point downward, and write the newly composed frame. This keeps resize redraws full-frame relative to the TUI region without clearing shell scrollback above the frame.
+On dimension changes, the renderer should use the same clear sequence as upstream pi-tui: `CSI 2 J`, `CSI H`, and `CSI 3 J`, then write the recomputed frame. This avoids stale frame copies after terminal font-size changes and keeps resize behavior aligned with pi-tui.
 
 Alternatives considered:
-- Keep using full-screen clear on resize. Rejected because it violates the existing scrollback-preserving runtime contract.
+- Redraw from a known frame origin with clear-below output. Rejected because terminal font-size reflow can move visible frame content and leave duplicate output.
+- Restore a saved cursor position before clearing. Rejected because it can move the viewport into older scrollback and hide duplicates rather than removing them.
 - Treat resize as a normal partial render. Rejected because wrapping and overlay placement can change across the whole frame.
 
-### 2. Keep clear-screen operations explicit and opt-in
+### 2. Avoid alternate-screen mode
 
-The resize path must not call the full-screen clear branch. Any existing explicit clear operation should remain separate from automatic resize rendering so tests can distinguish intentional full-screen operations from resize redraws.
+The resize path should not enter alternate-screen mode. It should remain in the normal terminal screen and use pi-tui-style full clear output for resize redraw.
 
 Alternatives considered:
-- Remove clear-screen support from terminal backends. Rejected because the terminal abstraction still exposes clear operations for applications that explicitly choose them.
+- Switch interactive sessions to alternate-screen mode. Rejected because this changes the default runtime model and is larger than the resize fix.
 
 ### 3. Extend modified-function parsing for Enter only
 
@@ -47,16 +48,16 @@ Alternatives considered:
 
 ## Risks / Trade-offs
 
-- Resize redraw may still overwrite lines below the previous frame start if an application writes outside the TUI owner while the TUI is running → Document and test only the runtime-owned frame contract.
-- Frame origin may be unknown if cursor-position queries are unavailable → Fall back to current scrollback-preserving first-render behavior and avoid full-screen clear in automatic resize paths.
+- Full clear resize redraw can remove terminal scrollback entries according to terminal emulator behavior → Accept this for pi-tui parity and reliable resize repainting.
+- Full clear resize redraw can move the viewport to the current frame → Test that resize redraw avoids alternate-screen mode and recomputes frame content.
 - Terminal encodings differ across emulators → Keep all currently supported modified Enter fixtures and add the two missing tilde fixtures rather than replacing existing parsing.
 
 ## Migration Plan
 
 1. Add parser tests for `ESC[13;2~` and `ESC[13;3~`.
-2. Add renderer tests proving width and height resize do not emit `CSI 2 J`, `CSI 3 J`, or alternate-screen sequences.
+2. Add renderer tests proving width and height resize emit pi-tui-style full clear output and avoid alternate-screen mode.
 3. Update `TerminalInputParser` to normalize the two tilde modified Enter encodings.
-4. Update resize rendering to redraw the TUI frame region without full-screen clear output.
+4. Update resize rendering to use full clear output on dimension changes.
 5. Run focused core tests and OpenSpec validation.
 
 ## Open Questions
