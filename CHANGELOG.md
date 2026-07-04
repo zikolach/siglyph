@@ -7,6 +7,8 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-07-04
+
 ### Fixed
 
 - Fixed terminal resize redraws so TUI frames repaint without clearing the full screen or terminal scrollback. #20
@@ -152,7 +154,8 @@ and this project uses semantic versioning while it remains pre-1.0.
 - GitHub Actions CI, jar packaging, GitHub Packages publishing, and GitHub
   release artifacts.
 
-[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.2.6...HEAD
+[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.2.7...HEAD
+[0.2.7]: https://github.com/zikolach/siglyph/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/zikolach/siglyph/compare/v0.2.4...v0.2.6
 [0.2.4]: https://github.com/zikolach/siglyph/releases/tag/v0.2.4
 [0.2.3]: https://github.com/zikolach/siglyph/releases/tag/v0.2.3
