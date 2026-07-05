@@ -620,8 +620,8 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
 
   private def exitAlternateScreenIfNeeded(): Unit =
     if alternateScreenEntered then
-      alternateScreenEntered = false
-      terminal.write(AlternateScreenExit)
+      try terminal.write(AlternateScreenExit)
+      finally alternateScreenEntered = false
 
   private def clearSequence: String =
     if alternateScreenEntered then AlternateScreenClear else NormalScreenClear
