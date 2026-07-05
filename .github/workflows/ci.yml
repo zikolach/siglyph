@@ -63,6 +63,8 @@ jobs:
             terminalNative \
             markdown \
             image \
+            extras \
+            extrasNative \
             demo \
             keyTester \
             interactiveDemo \

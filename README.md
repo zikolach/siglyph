@@ -50,6 +50,16 @@ object app extends ScalaModule {
 }
 ```
 
+For a release that includes `siglyph-extras`, add it with that published version:
+
+```scala
+"io.github.zikolach" %% "siglyph-extras" % "VERSION"
+```
+
+```scala
+mvn"io.github.zikolach::siglyph-extras::VERSION"
+```
+
 ### Maven for Java and Kotlin JVM apps
 
 Replace `VERSION` with a published release that includes the JVM interop facade.
@@ -158,11 +168,35 @@ import scalatui.terminal.jvm.SttyTerminal
       tui.run()
 ```
 
-## Markdown and image helpers
+## Optional helper modules
 
 Markdown rendering stays in `siglyph-markdown`. The baseline renderer is dependency-free and supports theme hooks, readable link fallback, OSC 8 links when `TerminalCapabilities.hyperlinks` is true, parser adapters, optional fenced-code highlighter hooks, normalized list markers by default, and opt-in source list marker preservation with `MarkdownRenderOptions(preserveSourceListMarkers = true)`. Task-list markers render as visible text; they are not interactive checkboxes.
 
 Image rendering stays in `siglyph-image`. `ImageSource.fromFile(path)` loads supported PNG, JPEG, GIF, and WebP files into base64 data, MIME type, and dimensions for the existing `Image` component contract. Unsupported terminals render readable fallback text. The `Image` component uses runtime cell-size replies by default; pass `ImageRenderOptions(cellDimensionsSource = ImageCellDimensionsSource.Fixed, cellDimensions = ...)` for deterministic fixed sizing. `examples/scala-cli/image.scala` is the quickest visual smoke test for protocol rendering, fallback behavior, runtime cell-size sizing in supported versions, and row reservation (see `examples/scala-cli/README.md` for running it against local sources from this checkout).
+
+Expandable helpers stay in `siglyph-extras`. The module depends only on `siglyph-core` and provides reusable compact/detail widgets without terminal backend, Markdown, image, demo, agent-session, LLM message, tool execution, extension runtime, model-selection, or message-history APIs.
+
+```scala
+import scalatui.extras.*
+
+val details = ExpandableText(
+  collapsedText = "Build finished",
+  expandedText = "Build finished with 14 tests and no failures",
+  paddingX = 1
+)
+
+val section = ExpandableSection(
+  title = "Output",
+  collapsedBody = "2 lines hidden",
+  expandedBody = "line 1\nline 2",
+  hintText = Some("Ctrl+O toggles details")
+)
+
+val controller = ExpansionController()
+controller.register(details)
+controller.register(section)
+controller.setExpanded(true)
+```
 
 ## Terminal integration helpers
 
@@ -224,7 +258,7 @@ Interactive demo controls are also summarized in [`docs/interactive-smoke.md`](d
 - **Keybindings:** shared `KeybindingManager` with configurable editor/input/select command bindings. Typed key events can distinguish press, repeat, release, and the Insert key when terminals report that metadata.
 - **Autocomplete:** slash commands, dependency-free filesystem path and `@` attachment completions, application-owned natural triggers such as `#`, optional fuzzy ranking, cancellable async providers, injectable debounce scheduling, and opt-in forced single-result auto-apply.
 - **Terminals:** JVM `stty` backend, Scala Native POSIX backend, stream and virtual test backends, optional title/progress helpers, optional input drain support, runtime-owned background color and color-scheme queries, conservative Kitty keyboard protocol hooks, and readable fallback behavior when advanced metadata is unavailable.
-- **Optional modules:** dependency-free Markdown rendering with theme/link/highlighter/parser hooks, plus terminal image protocol helpers with file loading, header dimension sniffing, and cell-size bounding helpers.
+- **Optional modules:** dependency-free Markdown rendering with theme/link/highlighter/parser hooks, terminal image protocol helpers with file loading and cell-size bounding helpers, and reusable extras widgets for expandable text, sections, and shared expansion state.
 
 ## Repository structure
 
@@ -234,6 +268,7 @@ terminalJvm/             JVM Unix/stty backend
 terminalNative/          Scala Native POSIX backend
 markdown/                Markdown parser/renderer module
 image/                   Image component module
+extras/                  Optional reusable helper widgets
 demo/                    non-interactive stream-render demo
 asciinemaDemo/           deterministic asciinema recording scenarios
 interactiveDemo/         shared interactive demo UI/logic
