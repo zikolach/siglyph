@@ -50,15 +50,10 @@ object app extends ScalaModule {
 }
 ```
 
-For a release that includes `siglyph-extras`, add it with that published version:
+To include optional `siglyph-extras`, add it to your dependency list for the published version you want to use:
 
-```scala
-"io.github.zikolach" %% "siglyph-extras" % "VERSION"
-```
-
-```scala
-mvn"io.github.zikolach::siglyph-extras::VERSION"
-```
+- **SBT:** `"io.github.zikolach" %% "siglyph-extras" % "VERSION"`
+- **Mill:** `mvn"io.github.zikolach::siglyph-extras::VERSION"`
 
 ### Maven for Java and Kotlin JVM apps
 
