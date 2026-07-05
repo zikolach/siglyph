@@ -37,6 +37,30 @@ class TUISuite extends munit.FunSuite:
   final class MutableFrame(var values: Vector[String]) extends Component:
     override def render(width: Int): Vector[String] = values
 
+  final class ImmediateResizeOnStartTerminal extends Terminal:
+    private val writesBuffer = scala.collection.mutable.ArrayBuffer.empty[String]
+
+    override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit = onResize()
+
+    override def stop(): Unit = ()
+
+    override def write(data: String): Unit = writesBuffer += data
+
+    override def columns: Int = 20
+    override def rows: Int    = 5
+
+    override def moveBy(lines: Int): Unit =
+      if lines > 0 then write(s"[${lines}B")
+      else if lines < 0 then write(s"[${-lines}A")
+
+    override def hideCursor(): Unit      = write("[?25l")
+    override def showCursor(): Unit      = write("[?25h")
+    override def clearLine(): Unit       = write("[K")
+    override def clearFromCursor(): Unit = write("[J")
+    override def clearScreen(): Unit     = write("[2J[H")
+
+    def output: String = writesBuffer.mkString
+
   final class QueryFailingTerminal(failingWrite: String) extends Terminal:
     override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit = ()
 
@@ -171,6 +195,18 @@ class TUISuite extends munit.FunSuite:
       output.contains(TUI.SyncStart + TUI.AutoWrapOff + TUI.AlternateScreenClear),
       output
     )
+    assert(output.contains("hello" + TUI.LineReset), output)
+
+  test("alternate-screen mode enters before resize callback render during terminal start"):
+    val terminal = ImmediateResizeOnStartTerminal()
+    val tui      = TUI(terminal, TUIOptions(screenMode = TUIScreenMode.Alternate))
+    tui.addChild(MutableLine("hello"))
+
+    tui.start()
+
+    val output = terminal.output
+    assert(output.startsWith(TUI.AlternateScreenEnter), output)
+    assert(output.indexOf(TUI.AlternateScreenEnter) < output.indexOf(TUI.SyncStart), output)
     assert(output.contains("hello" + TUI.LineReset), output)
 
   test("alternate-screen mode exits on stop without cursor parking"):

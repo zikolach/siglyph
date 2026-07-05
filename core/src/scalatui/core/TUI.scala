@@ -246,6 +246,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     }
     if shouldStart then
       try
+        enterAlternateScreenIfConfigured()
         terminal.start(
           input => safeRuntimeCallback(handleInput(input)),
           () =>
@@ -254,7 +255,6 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
               flushRender()
             }
         )
-        enterAlternateScreenIfConfigured()
         if terminalColorSchemeNotificationsEnabled then
           terminal.write(TerminalColorProtocol.EnableColorSchemeNotifications)
         TerminalImageProtocol.resetCellDimensions()
