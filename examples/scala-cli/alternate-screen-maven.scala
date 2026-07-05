@@ -519,8 +519,8 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
 
   private def mainPaneRows(targetRows: Int, naturalRows: Int): Int =
     val fixedRows = 9
-    val fillRows  = if targetRows > fixedRows then targetRows - fixedRows else 1
-    math.max(naturalRows, fillRows).max(9)
+    val fillRows  = math.max(1, targetRows - fixedRows)
+    fillRows
 
   private def compactRender(width: Int): Vector[String] =
     Vector(
