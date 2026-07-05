@@ -245,16 +245,34 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         true
     }
     if shouldStart then
+      var startupCallbacksReady                          = false
+      var startupInputs                                  = Vector.empty[TerminalInput]
+      var startupResizeRequested                         = false
+      def deferOrHandleInput(input: TerminalInput): Unit =
+        safeRuntimeCallback {
+          val shouldHandle = lifecycleLock.synchronized {
+            if startupCallbacksReady then true
+            else
+              startupInputs = startupInputs :+ input
+              false
+          }
+          if shouldHandle then handleInput(input)
+        }
+      def deferOrHandleResize(): Unit                    =
+        safeRuntimeCallback {
+          val shouldHandle = lifecycleLock.synchronized {
+            if startupCallbacksReady then true
+            else
+              startupResizeRequested = true
+              false
+          }
+          if shouldHandle then
+            requestRender()
+            flushRender()
+        }
       try
+        terminal.start(deferOrHandleInput, () => deferOrHandleResize())
         enterAlternateScreenIfConfigured()
-        terminal.start(
-          input => safeRuntimeCallback(handleInput(input)),
-          () =>
-            safeRuntimeCallback {
-              requestRender()
-              flushRender()
-            }
-        )
         if terminalColorSchemeNotificationsEnabled then
           terminal.write(TerminalColorProtocol.EnableColorSchemeNotifications)
         TerminalImageProtocol.resetCellDimensions()
@@ -262,6 +280,20 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         terminal.write(TerminalImageProtocol.QueryCellDimensions)
         requestRenderInternal(force = true, clear = isAlternateScreenMode)
         flushRender()
+        val (deferredInputs, deferredResizeRequested) = lifecycleLock.synchronized {
+          startupCallbacksReady = true
+          val inputs = startupInputs
+          val resize = startupResizeRequested
+          startupInputs = Vector.empty
+          startupResizeRequested = false
+          inputs -> resize
+        }
+        deferredInputs.foreach(input => safeRuntimeCallback(handleInput(input)))
+        if deferredResizeRequested then
+          safeRuntimeCallback {
+            requestRender()
+            flushRender()
+          }
       catch
         case e: Throwable =>
           stop()

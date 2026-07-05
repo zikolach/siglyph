@@ -61,6 +61,29 @@ class TUISuite extends munit.FunSuite:
 
     def output: String = writesBuffer.mkString
 
+  final class StartFailingTerminal extends Terminal:
+    private val writesBuffer = scala.collection.mutable.ArrayBuffer.empty[String]
+    var stopCalled           = false
+
+    override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
+      throw RuntimeException("start failed")
+
+    override def stop(): Unit = stopCalled = true
+
+    override def write(data: String): Unit = writesBuffer += data
+
+    override def columns: Int = 20
+    override def rows: Int    = 5
+
+    override def moveBy(lines: Int): Unit = ()
+    override def hideCursor(): Unit       = write("[?25l")
+    override def showCursor(): Unit       = write("[?25h")
+    override def clearLine(): Unit        = ()
+    override def clearFromCursor(): Unit  = ()
+    override def clearScreen(): Unit      = write("[2J[H")
+
+    def output: String = writesBuffer.mkString
+
   final class QueryFailingTerminal(failingWrite: String) extends Terminal:
     override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit = ()
 
@@ -208,6 +231,17 @@ class TUISuite extends munit.FunSuite:
     assert(output.startsWith(TUI.AlternateScreenEnter), output)
     assert(output.indexOf(TUI.AlternateScreenEnter) < output.indexOf(TUI.SyncStart), output)
     assert(output.contains("hello" + TUI.LineReset), output)
+
+  test("alternate-screen mode does not enter when terminal start fails"):
+    val terminal = StartFailingTerminal()
+    val tui      = TUI(terminal, TUIOptions(screenMode = TUIScreenMode.Alternate))
+    tui.addChild(MutableLine("hello"))
+
+    interceptMessage[RuntimeException]("start failed"):
+      tui.start()
+
+    assert(!terminal.output.contains(TUI.AlternateScreenEnter), terminal.output)
+    assert(terminal.stopCalled)
 
   test("alternate-screen mode exits on stop without cursor parking"):
     val terminal = VirtualTerminal(20, 5)

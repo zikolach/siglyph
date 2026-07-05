@@ -120,11 +120,17 @@ final class SonatypeCentralClient:
         )},${jsonString(s"name:${artifact.artifact}")}]}"""
     post[Vector[String]](SonatypeCentralClient.VersionsUrl, body)
       .map { values =>
+        val latestVersion  = artifact.latestVersion
+        val latestDetails  = componentDetails(artifact, latestVersion).toOption
+        val versionDetails = values.filter(_.nonEmpty).take(12).map { version =>
+          val details =
+            if version === latestVersion then latestDetails
+            else componentDetails(artifact, version).toOption
+          VersionInfo(version, details.flatMap(details => formatDate(details.publishedEpochMillis)))
+        }
         VersionLookup(
-          versions = values.filter(_.nonEmpty).take(12).map(version =>
-            VersionInfo(version, publishedDate(artifact, version).toOption.flatten)
-          ),
-          metadata = metadata(artifact).toOption.getOrElse(ArtifactMetadata.Empty)
+          versions = versionDetails,
+          metadata = latestDetails.map(metadataFromDetails).getOrElse(ArtifactMetadata.Empty)
         )
       }
 
@@ -139,15 +145,10 @@ final class SonatypeCentralClient:
       packaging = component.packaging
     )
 
-  private def publishedDate(artifact: Artifact, version: String): Either[String, Option[String]] =
-    componentDetails(artifact, version).map(details => formatDate(details.publishedEpochMillis))
-
-  private def metadata(artifact: Artifact): Either[String, ArtifactMetadata] =
-    componentDetails(artifact, artifact.latestVersion).map(details =>
-      ArtifactMetadata(
-        homepage = details.url.filter(_.nonEmpty),
-        scm = details.scmUrl.filter(_.nonEmpty)
-      )
+  private def metadataFromDetails(details: SonatypeComponentDetails): ArtifactMetadata =
+    ArtifactMetadata(
+      homepage = details.url.filter(_.nonEmpty),
+      scm = details.scmUrl.filter(_.nonEmpty)
     )
 
   private def componentDetails(
