@@ -92,9 +92,10 @@ Single-file demos live in [`examples/scala-cli/`](examples/scala-cli/) and are i
 ```bash
 ./examples/scala-cli/markdown.scala
 ./examples/scala-cli/image.scala /path/to/image.png
+./examples/scala-cli/alternate-screen-maven.scala
 ```
 
-They reference Maven Central dependencies, so they can run without cloning or GitHub Packages credentials.
+They reference Maven Central dependencies, so they can run without cloning or GitHub Packages credentials. The alternate-screen Maven Central explorer uses local source directives until alternate-screen mode is available in a published release.
 
 ## Quick example
 

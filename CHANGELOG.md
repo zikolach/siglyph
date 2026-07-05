@@ -10,6 +10,7 @@ and this project uses semantic versioning while it remains pre-1.0.
 ### Added
 
 - Added opt-in alternate-screen TUI runtime mode while keeping normal-screen mode as the default.
+- Added a Scala CLI Maven Central explorer demo that showcases alternate-screen mode.
 
 ## [0.3.0] - 2026-07-05
 
