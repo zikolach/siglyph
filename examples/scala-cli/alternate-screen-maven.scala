@@ -419,60 +419,89 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
     copiedSnippetIndex = None
 
   private def updateArtifactList(): Unit =
-    artifactList =
-      if artifacts.isEmpty then None
-      else
-        val list = SelectList(
-          artifacts.zipWithIndex.map { case (artifact, index) =>
-            val date        = artifact.latestPublished.fold("")(published => s"  $published")
-            val description = Option.when(artifact.description.nonEmpty)(artifact.description)
-            SelectItem(
-              value = index.toString,
-              label = s"${artifact.module}  ${artifact.latestVersion}$date",
-              description = description
-            )
-          },
-          selectOptions(maxVisible = 20, showDescriptions = true)
-        )
-        list.onSelect = _ => loadVersionsForSelection()
-        list.onSelectionChange = _ =>
-          resetVersionSelection()
-          message = "Press Enter to inspect versions for the selected artifact."
-        Some(list)
+    artifactList = makeArtifactList(maxVisible = 20, selectedIndex = 0)
 
   private def updateVersionList(): Unit =
-    versionList =
-      if versions.isEmpty then None
-      else
-        val list = SelectList(
-          versions.zipWithIndex.map { case (version, index) =>
-            SelectItem(value = index.toString, label = version.label)
-          },
-          selectOptions(maxVisible = 8, showDescriptions = false)
-        )
-        list.onSelect = _ => openBuildToolStep()
-        list.onSelectionChange = _ =>
-          buildToolList = None
-          copiedSnippetIndex = None
-        Some(list)
+    versionList = makeVersionList(maxVisible = 8, selectedIndex = 0)
 
   private def updateBuildToolList(selectedIndex: Int): Unit =
-    val snippets = buildSnippets
     buildToolList =
-      if snippets.isEmpty then None
-      else
-        val list = SelectList(
-          snippets.zipWithIndex.map { case (snippet, index) =>
-            val copied = copiedSnippetIndex.contains(index)
-            val badge  = if copied then "  [32mCopied![0m" else ""
-            SelectItem(value = index.toString, label = s"${snippet.label}: ${snippet.value}$badge")
-          },
-          selectOptions(maxVisible = snippets.size, showDescriptions = false)
-        )
-        list.moveSelectionBy(selectedIndex)
-        list.onSelect = _ => copySelectedSnippet()
-        list.onSelectionChange = _ => copiedSnippetIndex = None
-        Some(list)
+      makeBuildToolList(maxVisible = buildSnippets.size, selectedIndex = selectedIndex)
+
+  private def makeArtifactList(maxVisible: Int, selectedIndex: Int): Option[SelectList] =
+    if artifacts.isEmpty then None
+    else
+      val list = SelectList(
+        artifacts.zipWithIndex.map { case (artifact, index) =>
+          val date        = artifact.latestPublished.fold("")(published => s"  $published")
+          val description = Option.when(artifact.description.nonEmpty)(artifact.description)
+          SelectItem(
+            value = index.toString,
+            label = s"${artifact.module}  ${artifact.latestVersion}$date",
+            description = description
+          )
+        },
+        selectOptions(maxVisible = maxVisible, showDescriptions = true)
+      )
+      list.moveSelectionBy(selectedIndex)
+      list.onSelect = _ => loadVersionsForSelection()
+      list.onSelectionChange = _ =>
+        resetVersionSelection()
+        message = "Press Enter to inspect versions for the selected artifact."
+      Some(list)
+
+  private def makeVersionList(maxVisible: Int, selectedIndex: Int): Option[SelectList] =
+    if versions.isEmpty then None
+    else
+      val list = SelectList(
+        versions.zipWithIndex.map { case (version, index) =>
+          SelectItem(value = index.toString, label = version.label)
+        },
+        selectOptions(maxVisible = maxVisible, showDescriptions = false)
+      )
+      list.moveSelectionBy(selectedIndex)
+      list.onSelect = _ => openBuildToolStep()
+      list.onSelectionChange = _ =>
+        buildToolList = None
+        copiedSnippetIndex = None
+      Some(list)
+
+  private def makeBuildToolList(maxVisible: Int, selectedIndex: Int): Option[SelectList] =
+    val snippets = buildSnippets
+    if snippets.isEmpty then None
+    else
+      val list = SelectList(
+        snippets.zipWithIndex.map { case (snippet, index) =>
+          val copied = copiedSnippetIndex.contains(index)
+          val badge  = if copied then "  [32mCopied![0m" else ""
+          SelectItem(value = index.toString, label = s"${snippet.label}: ${snippet.value}$badge")
+        },
+        selectOptions(maxVisible = maxVisible, showDescriptions = false)
+      )
+      list.moveSelectionBy(selectedIndex)
+      list.onSelect = _ => copySelectedSnippet()
+      list.onSelectionChange = _ => copiedSnippetIndex = None
+      Some(list)
+
+  private def configureListsForLayout(contentRows: Int): Unit =
+    val artifactSelected = selectedIndex(artifactList)
+    artifactList = makeArtifactList(maxVisible = contentRows, selectedIndex = artifactSelected)
+
+    val summaryRows     = selectedArtifact.map(_ => artifactSummaryLineCount).getOrElse(1)
+    val detailAvailable = math.max(1, contentRows - summaryRows)
+    val versionSelected = selectedIndex(versionList)
+    val snippetSelected = selectedIndex(buildToolList)
+
+    if step === ExplorerStep.BuildTool then
+      val buildRows   = math.min(buildSnippets.size, math.max(1, detailAvailable - 4))
+      val versionRows = math.max(1, detailAvailable - buildRows - 3)
+      versionList = makeVersionList(maxVisible = versionRows, selectedIndex = versionSelected)
+      buildToolList = makeBuildToolList(maxVisible = buildRows, selectedIndex = snippetSelected)
+    else
+      versionList = makeVersionList(
+        maxVisible = math.max(1, detailAvailable - 1),
+        selectedIndex = versionSelected
+      )
 
   private def selectOptions(maxVisible: Int, showDescriptions: Boolean): SelectListOptions =
     SelectListOptions(
@@ -490,10 +519,11 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
     val paneInner       = math.max(0, width - 7)
     val leftWidth       = paneInner / 2
     val rightWidth      = paneInner - leftWidth
+    val targetRows      = math.max(1, tui.terminal.rows)
+    val contentRowCount = mainPaneRows(targetRows)
+    configureListsForLayout(contentRowCount)
     val leftRows        = artifactRows(leftWidth)
     val rightRows       = detailRows(rightWidth)
-    val targetRows      = math.max(1, tui.terminal.rows)
-    val contentRowCount = mainPaneRows(targetRows, math.max(leftRows.size, rightRows.size))
     val lines           = Vector.newBuilder[String]
 
     lines += border("┌", "─", "┐", width)
@@ -517,10 +547,9 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
     lines += border("└", "─", "┘", width)
     lines.result()
 
-  private def mainPaneRows(targetRows: Int, naturalRows: Int): Int =
+  private def mainPaneRows(targetRows: Int): Int =
     val fixedRows = 9
-    val fillRows  = math.max(1, targetRows - fixedRows)
-    fillRows
+    math.max(1, targetRows - fixedRows)
 
   private def compactRender(width: Int): Vector[String] =
     Vector(
@@ -561,6 +590,9 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
       fit(s"Package:  ${artifact.packaging}", width)
     ) ++ artifactMetadata.homepageLink.map(link => fit(s"Homepage: $link", width)).toVector ++
       Vector("")
+
+  private def artifactSummaryLineCount: Int =
+    5 + artifactMetadata.homepageLink.fold(0)(_ => 1)
 
   private def versionRows(width: Int): Vector[String] = versionState match
     case LoadState.Idle    => Vector("Press Enter to load versions.")
