@@ -52,7 +52,9 @@ final case class SonatypeLatestVersion(
 
 final case class SonatypeComponentDetails(
     version: String = "",
-    publishedEpochMillis: Long = 0L
+    publishedEpochMillis: Long = 0L,
+    url: Option[String] = None,
+    scmUrl: Option[String] = None
 ) derives CanEqual
 
 given JsonValueCodec[SonatypeComponentsResponse] = JsonCodecMaker.make
@@ -75,6 +77,15 @@ final case class Artifact(
 
 final case class VersionInfo(version: String, published: Option[String]) derives CanEqual:
   def label: String = published.fold(version)(date => s"$version  $date")
+
+final case class ArtifactMetadata(homepage: Option[String], scm: Option[String]) derives CanEqual:
+  def homepageLink: Option[String] = homepage.orElse(scm)
+
+object ArtifactMetadata:
+  val Empty: ArtifactMetadata = ArtifactMetadata(None, None)
+
+final case class VersionLookup(versions: Vector[VersionInfo], metadata: ArtifactMetadata)
+    derives CanEqual
 
 final case class BuildSnippet(label: String, value: String) derives CanEqual
 
@@ -102,15 +113,20 @@ final class SonatypeCentralClient:
           artifact.group.nonEmpty && artifact.artifact.nonEmpty
         ))
 
-  def versions(artifact: Artifact): Either[String, Vector[VersionInfo]] =
+  def versions(artifact: Artifact): Either[String, VersionLookup] =
     val body =
       s"""{"sortField":"normalizedVersion","sortDirection":"desc","filter":[${jsonString(
           s"namespace:${artifact.group}"
         )},${jsonString(s"name:${artifact.artifact}")}]}"""
     post[Vector[String]](SonatypeCentralClient.VersionsUrl, body)
-      .map(_.filter(_.nonEmpty).take(12).map(version =>
-        VersionInfo(version, publishedDate(artifact, version).toOption.flatten)
-      ))
+      .map { values =>
+        VersionLookup(
+          versions = values.filter(_.nonEmpty).take(12).map(version =>
+            VersionInfo(version, publishedDate(artifact, version).toOption.flatten)
+          ),
+          metadata = metadata(artifact).toOption.getOrElse(ArtifactMetadata.Empty)
+        )
+      }
 
   private def toArtifact(component: SonatypeComponent): Artifact =
     Artifact(
@@ -124,12 +140,26 @@ final class SonatypeCentralClient:
     )
 
   private def publishedDate(artifact: Artifact, version: String): Either[String, Option[String]] =
+    componentDetails(artifact, version).map(details => formatDate(details.publishedEpochMillis))
+
+  private def metadata(artifact: Artifact): Either[String, ArtifactMetadata] =
+    componentDetails(artifact, artifact.latestVersion).map(details =>
+      ArtifactMetadata(
+        homepage = details.url.filter(_.nonEmpty),
+        scm = details.scmUrl.filter(_.nonEmpty)
+      )
+    )
+
+  private def componentDetails(
+      artifact: Artifact,
+      version: String
+  ): Either[String, SonatypeComponentDetails] =
     val entity = s"pkg:maven/${artifact.group}/${artifact.artifact}@$version"
     val url    = SonatypeCentralClient.DetailsUrl + "?id=" + URLEncoder.encode(
       entity,
       StandardCharsets.UTF_8
     )
-    get[SonatypeComponentDetails](url).map(details => formatDate(details.publishedEpochMillis))
+    get[SonatypeComponentDetails](url)
 
   private def post[A: JsonValueCodec](url: String, body: String): Either[String, A] =
     val request = HttpRequest.newBuilder(URI.create(url))
@@ -212,6 +242,7 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
   private var artifactList       = Option.empty[SelectList]
   private var versionList        = Option.empty[SelectList]
   private var buildToolList      = Option.empty[SelectList]
+  private var artifactMetadata   = ArtifactMetadata.Empty
   private var searchState        = LoadState.Idle
   private var versionState       = LoadState.Idle
   private var message            = "Press Enter to search Sonatype Central. Esc exits cleanly."
@@ -301,16 +332,18 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
         message = s"Loading versions for ${artifact.artifact}..."
         startLoading("Loading versions and dates...")
         runAsync(client.versions(artifact)) {
-          case Right(values) =>
-            versions = values
+          case Right(lookup) =>
+            versions = lookup.versions
+            artifactMetadata = lookup.metadata
             updateVersionList()
             buildToolList = None
             copiedSnippetIndex = None
             versionState = LoadState.Ready
-            if values.isEmpty then message = "No versions returned for this artifact."
+            if lookup.versions.isEmpty then message = "No versions returned for this artifact."
             else
               enterStep(ExplorerStep.Versions)
-              message = s"Loaded ${values.size} versions. Press Enter to choose a build tool."
+              message =
+                s"Loaded ${lookup.versions.size} versions. Press Enter to choose a build tool."
           case Left(error)   =>
             resetVersionSelection()
             versionState = LoadState.Failed
@@ -380,6 +413,7 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
     versions = Vector.empty
     versionList = None
     buildToolList = None
+    artifactMetadata = ArtifactMetadata.Empty
     versionState = LoadState.Idle
     copiedSnippetIndex = None
 
@@ -523,9 +557,9 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
         s"Latest:   ${artifact.latestVersion}${artifact.latestPublished.fold("")(d => s"  $d")}",
         width
       ),
-      fit(s"Package:  ${artifact.packaging}", width),
-      ""
-    )
+      fit(s"Package:  ${artifact.packaging}", width)
+    ) ++ artifactMetadata.homepageLink.map(link => fit(s"Homepage: $link", width)).toVector ++
+      Vector("")
 
   private def versionRows(width: Int): Vector[String] = versionState match
     case LoadState.Idle    => Vector("Press Enter to load versions.")
