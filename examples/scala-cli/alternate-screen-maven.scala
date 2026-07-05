@@ -199,17 +199,17 @@ final class MavenExplorer(tui: TUI, executor: ExecutorService) extends Component
   private val loader    =
     Loader(LoaderOptions(message = "Loading...", leadingBlankLine = false, paddingX = 0))
 
-  private var query           = "siglyph"
-  private var step            = ExplorerStep.Search
-  private var artifactIndex   = 0
-  private var versionIndex    = 0
-  private var snippetIndex    = 0
-  private var artifacts       = Vector.empty[Artifact]
-  private var versions        = Vector.empty[VersionInfo]
-  private var searchState     = LoadState.Idle
-  private var versionState    = LoadState.Idle
-  private var message         = "Press Enter to search Sonatype Central. Esc exits cleanly."
-  private var selectedSnippet = Option.empty[BuildSnippet]
+  private var query              = "siglyph"
+  private var step               = ExplorerStep.Search
+  private var artifactIndex      = 0
+  private var versionIndex       = 0
+  private var snippetIndex       = 0
+  private var artifacts          = Vector.empty[Artifact]
+  private var versions           = Vector.empty[VersionInfo]
+  private var searchState        = LoadState.Idle
+  private var versionState       = LoadState.Idle
+  private var message            = "Press Enter to search Sonatype Central. Esc exits cleanly."
+  private var copiedSnippetIndex = Option.empty[Int]
 
   override def render(width: Int): Vector[String] = stateLock.synchronized {
     val w = math.max(1, width)
@@ -270,7 +270,10 @@ final class MavenExplorer(tui: TUI, executor: ExecutorService) extends Component
       if versions.nonEmpty then versionIndex = clamp(versionIndex + delta, versions.size)
     case ExplorerStep.BuildTool =>
       val snippets = buildSnippets
-      if snippets.nonEmpty then snippetIndex = clamp(snippetIndex + delta, snippets.size)
+      if snippets.nonEmpty then
+        val nextIndex = clamp(snippetIndex + delta, snippets.size)
+        if nextIndex !== snippetIndex then copiedSnippetIndex = None
+        snippetIndex = nextIndex
 
   private def runSearch(): Unit =
     val requestedQuery = query
@@ -333,10 +336,10 @@ final class MavenExplorer(tui: TUI, executor: ExecutorService) extends Component
 
   private def copySelectedSnippet(): Unit =
     buildSnippets.lift(snippetIndex).foreach { snippet =>
-      selectedSnippet = Some(snippet)
       TerminalClipboard.copy(tui.terminal, snippet.value) match
         case Right(())   =>
-          message = s"Copied ${snippet.label} coordinate to the terminal clipboard."
+          copiedSnippetIndex = Some(snippetIndex)
+          message = "Esc exits and restores the normal screen."
         case Left(error) =>
           message = s"Selected ${snippet.label}, but copy failed: $error"
     }
@@ -346,7 +349,7 @@ final class MavenExplorer(tui: TUI, executor: ExecutorService) extends Component
     versionIndex = 0
     snippetIndex = 0
     versionState = LoadState.Idle
-    selectedSnippet = None
+    copiedSnippetIndex = None
 
   // ----- Rendering -----
 
@@ -376,17 +379,13 @@ final class MavenExplorer(tui: TUI, executor: ExecutorService) extends Component
     }
 
     lines += border("├", "─", "┤", width)
-    lines += framed(
-      selectedSnippet.fold("Selected: (none yet)")(snippet => s"Selected: ${snippet.value}"),
-      width
-    )
     lines += framed(message, width)
     lines += framed(helpText, width)
     lines += border("└", "─", "┘", width)
     lines.result()
 
   private def mainPaneRows(targetRows: Int, naturalRows: Int): Int =
-    val fixedRows = 10
+    val fixedRows = 9
     val fillRows  = if targetRows > fixedRows then targetRows - fixedRows else 1
     math.max(naturalRows, fillRows).max(9)
 
@@ -452,8 +451,19 @@ final class MavenExplorer(tui: TUI, executor: ExecutorService) extends Component
     else
       Vector("", "Build tool:") ++ buildSnippets.zipWithIndex.map { case (snippet, index) =>
         val marker = if index === snippetIndex then "›" else " "
-        fit(s"$marker ${snippet.label}: ${snippet.value}", width)
+        snippetLine(marker, snippet, index, width)
       }
+
+  private def snippetLine(marker: String, snippet: BuildSnippet, index: Int, width: Int): String =
+    val prefix = s"$marker ${snippet.label}: "
+    copiedSnippetIndex match
+      case Some(copiedIndex) if copiedIndex === index =>
+        val badge      = "\u001b[32mCopied!\u001b[0m"
+        val valueWidth =
+          math.max(0, width - Ansi.visibleWidth(prefix) - Ansi.visibleWidth(badge) - 1)
+        fit(prefix + Ansi.truncateToWidth(snippet.value, valueWidth, "…") + " " + badge, width)
+      case _                                          =>
+        fit(prefix + snippet.value, width)
 
   // ----- Derived state -----
 
@@ -476,8 +486,9 @@ final class MavenExplorer(tui: TUI, executor: ExecutorService) extends Component
         BuildSnippet("Maven", s"${artifact.group}:${artifact.artifact}:$version")
       )
 
-  private def headerText: String =
-    s"Step: ${stepLabel}    Search: $query${if step === ExplorerStep.Search then "_" else ""}"
+  private def headerText: String = step match
+    case ExplorerStep.Search => s"Search: ${query}_"
+    case _                   => s"${stepLabel} · Query: $query"
 
   private def stepLabel: String = step match
     case ExplorerStep.Search    => "1 Search"
