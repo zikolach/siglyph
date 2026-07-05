@@ -9,7 +9,7 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ### Added
 
-- Added optional `siglyph-extras` JVM and Scala Native artifacts with expandable text, expandable section, and expansion controller helpers.
+- Added optional `siglyph-extras` JVM and Scala Native artifacts with expandable text, expandable section, and expansion controller helpers. #27
 
 ### Fixed
 
