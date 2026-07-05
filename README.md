@@ -95,7 +95,7 @@ Single-file demos live in [`examples/scala-cli/`](examples/scala-cli/) and are i
 ./examples/scala-cli/alternate-screen-maven.scala
 ```
 
-They reference Maven Central dependencies, so they can run without cloning or GitHub Packages credentials. The alternate-screen Sonatype Central explorer uses local source directives until alternate-screen mode is available in a published release.
+They reference Maven Central dependencies, so they can run without cloning or GitHub Packages credentials. The alternate-screen Sonatype Central explorer shows published dates, copies selected build snippets through terminal clipboard escape sequences, and uses local source directives until alternate-screen mode is available in a published release.
 
 ## Quick example
 
