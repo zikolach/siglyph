@@ -16,10 +16,13 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Base64
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 import com.github.plokhotnyuk.jsoniter_scala.core.*
 import com.github.plokhotnyuk.jsoniter_scala.macros.*
 import scalatui.ansi.Ansi
+import scalatui.components.{Loader, LoaderOptions}
 import scalatui.core.*
 import scalatui.syntax.Equality.*
 import scalatui.terminal.*
@@ -190,28 +193,31 @@ object TerminalClipboard:
 
 // ----- Explorer component -----
 
-final class MavenExplorer(tui: TUI) extends Component:
-  private val client = SonatypeCentralClient()
+final class MavenExplorer(tui: TUI, executor: ExecutorService) extends Component:
+  private val client    = SonatypeCentralClient()
+  private val stateLock = Object()
+  private val loader    =
+    Loader(LoaderOptions(message = "Loading...", leadingBlankLine = false, paddingX = 0))
 
-  private var query             = "siglyph"
-  private var step              = ExplorerStep.Search
-  private var artifactIndex     = 0
-  private var versionIndex      = 0
-  private var snippetIndex      = 0
-  private var artifacts         = Vector.empty[Artifact]
-  private var versions          = Vector.empty[VersionInfo]
-  private var searchState       = LoadState.Idle
-  private var versionState      = LoadState.Idle
-  private var message           = "Press Enter to search Sonatype Central. Esc exits cleanly."
-  private var selectedSnippet   = Option.empty[BuildSnippet]
-  private var clipboardAttempts = 0
+  private var query           = "siglyph"
+  private var step            = ExplorerStep.Search
+  private var artifactIndex   = 0
+  private var versionIndex    = 0
+  private var snippetIndex    = 0
+  private var artifacts       = Vector.empty[Artifact]
+  private var versions        = Vector.empty[VersionInfo]
+  private var searchState     = LoadState.Idle
+  private var versionState    = LoadState.Idle
+  private var message         = "Press Enter to search Sonatype Central. Esc exits cleanly."
+  private var selectedSnippet = Option.empty[BuildSnippet]
 
-  override def render(width: Int): Vector[String] =
+  override def render(width: Int): Vector[String] = stateLock.synchronized {
     val w = math.max(1, width)
     if w < 32 then compactRender(w)
     else fullRender(w)
+  }
 
-  override def handleInputResult(input: TerminalInput): InputResult =
+  override def handleInputResult(input: TerminalInput): InputResult = stateLock.synchronized {
     input match
       case TerminalInput.Key(TerminalKey.Character("c"), modifiers) if modifiers.ctrl  =>
         InputResult.Exit
@@ -239,6 +245,7 @@ final class MavenExplorer(tui: TUI) extends Component:
         InputResult.Render
       case _                                                                           =>
         InputResult.Render
+  }
 
   private def advance(): Unit = step match
     case ExplorerStep.Search    => runSearch()
@@ -266,10 +273,11 @@ final class MavenExplorer(tui: TUI) extends Component:
       if snippets.nonEmpty then snippetIndex = clamp(snippetIndex + delta, snippets.size)
 
   private def runSearch(): Unit =
+    val requestedQuery = query
     searchState = LoadState.Loading
     versionState = LoadState.Idle
     message = "Searching Sonatype Central..."
-    client.search(query) match
+    runAsync(client.search(requestedQuery)) {
       case Right(results) =>
         artifacts = results
         artifactIndex = 0
@@ -284,13 +292,14 @@ final class MavenExplorer(tui: TUI) extends Component:
         resetVersionSelection()
         searchState = LoadState.Failed
         message = s"Search failed: $error"
+    }
 
   private def loadVersionsForSelection(): Unit =
     selectedArtifact match
       case Some(artifact) =>
         versionState = LoadState.Loading
         message = s"Loading versions for ${artifact.artifact}..."
-        client.versions(artifact) match
+        runAsync(client.versions(artifact)) {
           case Right(values) =>
             versions = values
             versionIndex = 0
@@ -304,7 +313,16 @@ final class MavenExplorer(tui: TUI) extends Component:
             resetVersionSelection()
             versionState = LoadState.Failed
             message = s"Version lookup failed: $error"
+        }
       case None           => message = "Select an artifact first."
+
+  private def runAsync[A](work: => A)(complete: A => Unit): Unit =
+    executor.execute { () =>
+      val result = work
+      stateLock.synchronized(complete(result))
+      tui.requestRender()
+      tui.flushRender()
+    }
 
   private def openBuildToolStep(): Unit =
     if versions.nonEmpty then
@@ -315,7 +333,6 @@ final class MavenExplorer(tui: TUI) extends Component:
 
   private def copySelectedSnippet(): Unit =
     buildSnippets.lift(snippetIndex).foreach { snippet =>
-      clipboardAttempts += 1
       selectedSnippet = Some(snippet)
       TerminalClipboard.copy(tui.terminal, snippet.value) match
         case Right(())   =>
@@ -339,7 +356,8 @@ final class MavenExplorer(tui: TUI) extends Component:
     val rightWidth      = paneInner - leftWidth
     val leftRows        = artifactRows(leftWidth)
     val rightRows       = detailRows(rightWidth)
-    val contentRowCount = math.max(leftRows.size, rightRows.size).max(9)
+    val targetRows      = math.max(1, tui.terminal.rows)
+    val contentRowCount = mainPaneRows(targetRows, math.max(leftRows.size, rightRows.size))
     val lines           = Vector.newBuilder[String]
 
     lines += border("┌", "─", "┐", width)
@@ -358,11 +376,19 @@ final class MavenExplorer(tui: TUI) extends Component:
     }
 
     lines += border("├", "─", "┤", width)
-    selectedSnippet.foreach(snippet => lines += framed(s"Selected: ${snippet.value}", width))
+    lines += framed(
+      selectedSnippet.fold("Selected: (none yet)")(snippet => s"Selected: ${snippet.value}"),
+      width
+    )
     lines += framed(message, width)
     lines += framed(helpText, width)
     lines += border("└", "─", "┘", width)
     lines.result()
+
+  private def mainPaneRows(targetRows: Int, naturalRows: Int): Int =
+    val fixedRows = 10
+    val fillRows  = if targetRows > fixedRows then targetRows - fixedRows else 1
+    math.max(naturalRows, fillRows).max(9)
 
   private def compactRender(width: Int): Vector[String] =
     Vector(
@@ -373,7 +399,7 @@ final class MavenExplorer(tui: TUI) extends Component:
     )
 
   private def artifactRows(width: Int): Vector[String] =
-    if artifacts.isEmpty then emptyArtifactRows
+    if artifacts.isEmpty then emptyArtifactRows(width)
     else
       artifacts.zipWithIndex.map { case (artifact, index) =>
         val marker = if step === ExplorerStep.Artifacts && index === artifactIndex then "›" else " "
@@ -381,11 +407,16 @@ final class MavenExplorer(tui: TUI) extends Component:
         fit(s"$marker ${artifact.module}  ${artifact.latestVersion}$date", width)
       }
 
-  private def emptyArtifactRows: Vector[String] = searchState match
+  private def emptyArtifactRows(width: Int): Vector[String] = searchState match
     case LoadState.Idle    => Vector("Default query: siglyph", "Type another query or press Enter.")
-    case LoadState.Loading => Vector("Searching...")
+    case LoadState.Loading => loadingRows("Searching Sonatype Central...", width)
     case LoadState.Failed  => Vector("Search failed.")
     case LoadState.Ready   => Vector("No results.")
+
+  private def loadingRows(text: String, width: Int): Vector[String] =
+    loader.setMessage(text)
+    loader.start()
+    loader.render(width).map(line => fit(line, width))
 
   private def detailRows(width: Int): Vector[String] = selectedArtifact match
     case None           => Vector("Search first, then select an artifact.")
@@ -406,7 +437,7 @@ final class MavenExplorer(tui: TUI) extends Component:
 
   private def versionRows(width: Int): Vector[String] = versionState match
     case LoadState.Idle    => Vector("Press Enter to load versions.")
-    case LoadState.Loading => Vector("Loading versions and dates...")
+    case LoadState.Loading => loadingRows("Loading versions and dates...", width)
     case LoadState.Failed  => Vector("Version lookup failed.")
     case LoadState.Ready   =>
       if versions.isEmpty then Vector("No versions returned.")
@@ -479,9 +510,15 @@ final class MavenExplorer(tui: TUI) extends Component:
     math.max(0, math.min(value, math.max(0, size - 1)))
 
 @main def mavenCentralTelescope(): Unit =
+  val executor = Executors.newSingleThreadExecutor { runnable =>
+    val thread = Thread(runnable, "siglyph-sonatype-demo")
+    thread.setDaemon(true)
+    thread
+  }
   val tui      = TUI(SttyTerminal(), TUIOptions(screenMode = TUIScreenMode.Alternate))
-  val explorer = MavenExplorer(tui)
+  val explorer = MavenExplorer(tui, executor)
   tui.addChild(explorer)
   tui.setFocus(explorer)
   tui.exitsOnEscape = true
-  tui.run()
+  try tui.run()
+  finally executor.shutdownNow()
