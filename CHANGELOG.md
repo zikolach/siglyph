@@ -7,6 +7,10 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Added
+
+- Added opt-in alternate-screen TUI runtime mode while keeping normal-screen mode as the default.
+
 ## [0.3.0] - 2026-07-05
 
 ### Added

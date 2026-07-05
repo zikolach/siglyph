@@ -142,6 +142,79 @@ class TUISuite extends munit.FunSuite:
     assert(output.contains("hello" + TUI.LineReset))
     assert(output.contains(TUI.SyncEnd))
     assert(!output.contains("\u001b[2J\u001b[H\u001b[3J"), output)
+    assertNoAlternateScreen(output)
+
+  test("default mode stop does not emit alternate screen"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal)
+    tui.addChild(MutableLine("hello"))
+    tui.start()
+    terminal.clearWrites()
+
+    tui.stop()
+
+    val output = terminal.output
+    assertNoAlternateScreen(output)
+    assert(output.contains("\r\n\u001b[?25h"), output)
+
+  test("alternate-screen mode enters before first rendered frame"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal, TUIOptions(screenMode = TUIScreenMode.Alternate))
+    tui.addChild(MutableLine("hello"))
+
+    tui.start()
+
+    val output = terminal.output
+    assert(output.startsWith(TUI.AlternateScreenEnter), output)
+    assert(output.indexOf(TUI.AlternateScreenEnter) < output.indexOf(TUI.SyncStart), output)
+    assert(
+      output.contains(TUI.SyncStart + TUI.AutoWrapOff + TUI.AlternateScreenClear),
+      output
+    )
+    assert(output.contains("hello" + TUI.LineReset), output)
+
+  test("alternate-screen mode exits on stop without cursor parking"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal, TUIOptions(screenMode = TUIScreenMode.Alternate))
+    tui.addChild(MutableFrame(Vector("first", "second")))
+    tui.start()
+    terminal.clearWrites()
+
+    tui.stop()
+
+    val output = terminal.output
+    assert(output.contains("\u001b[?25h"), output)
+    assert(output.contains(TUI.AlternateScreenExit), output)
+    assertEquals(countOccurrences(output, TUI.AlternateScreenExit), 1)
+    assert(!output.contains("\r\n"), output)
+
+  test("alternate-screen mode stop is idempotent"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal, TUIOptions(screenMode = TUIScreenMode.Alternate))
+    tui.addChild(MutableLine("hello"))
+    tui.start()
+    terminal.clearWrites()
+
+    tui.stop()
+    tui.stop()
+
+    assertEquals(countOccurrences(terminal.output, TUI.AlternateScreenExit), 1)
+
+  test("alternate-screen render write failure restores terminal state"):
+    val terminal = PartialAutoWrapRenderFailingTerminal()
+    val tui      = TUI(terminal, TUIOptions(screenMode = TUIScreenMode.Alternate))
+    tui.addChild(MutableLine("hello"))
+
+    val failure = intercept[RuntimeException](tui.start())
+
+    val output = terminal.writes.mkString
+    assertEquals(failure.getMessage, "render write failed")
+    assert(output.contains(TUI.AlternateScreenEnter), output)
+    assert(output.contains(TUI.AutoWrapOff), output)
+    assert(output.contains(TUI.AutoWrapOn), output)
+    assert(output.contains(TUI.AlternateScreenExit), output)
+    assert(terminal.showCursorCalled)
+    assert(terminal.stopCalled)
 
   test("render write failure restores autowrap during cleanup"):
     val terminal = PartialAutoWrapRenderFailingTerminal()
@@ -298,6 +371,24 @@ class TUISuite extends munit.FunSuite:
     assert(output.contains("abcde" + Ansi.Reset + TUI.LineReset), output)
     assert(output.contains("ijklm" + Ansi.Reset + TUI.LineReset), output)
     assert(output.contains("qrstu" + Ansi.Reset + TUI.LineReset), output)
+
+  test("alternate-screen resize redraw clears viewport without scrollback clear"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal, TUIOptions(screenMode = TUIScreenMode.Alternate))
+    tui.addChild(MutableLine("hello"))
+    tui.start()
+    terminal.clearWrites()
+
+    terminal.resize(30, 5)
+
+    val output = terminal.output
+    assert(!output.contains(TUI.AlternateScreenEnter), output)
+    assert(!output.contains("\u001b[3J"), output)
+    assert(
+      output.startsWith(TUI.SyncStart + TUI.AutoWrapOff + TUI.AlternateScreenClear),
+      output
+    )
+    assert(output.contains("hello" + TUI.LineReset), output)
 
   test("over-wide lines are sanitized instead of failing"):
     val terminal = VirtualTerminal(3, 5)
@@ -940,8 +1031,12 @@ class TUISuite extends munit.FunSuite:
     Ansi.strip(output).replace("\r\n", "\n").replace('\r', '\n').split("\n", -1).toVector
 
   private def assertNoAlternateScreen(output: String): Unit =
-    assert(!output.contains("\u001b[?1049h"), output)
-    assert(!output.contains("\u001b[?1049l"), output)
+    assert(!output.contains(TUI.AlternateScreenEnter), output)
+    assert(!output.contains(TUI.AlternateScreenExit), output)
+
+  private def countOccurrences(value: String, needle: String): Int =
+    if needle.isEmpty then 0
+    else value.sliding(needle.length).count(_ == needle)
 
   private def awaitOutput(terminal: VirtualTerminal, expected: String): Unit =
     val deadline = System.currentTimeMillis() + 1000L

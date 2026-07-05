@@ -118,6 +118,19 @@ import scalatui.terminal.jvm.SttyTerminal
   tui.run()
 ```
 
+By default, `TUI` runs in normal-screen mode. Frames are written to the normal terminal screen, and existing applications can keep constructing `TUI(SttyTerminal())` without entering alternate screen. Resize redraws in normal-screen mode clear the viewport, home the cursor, and clear scrollback to avoid stale frame cells.
+
+Applications that need a full-screen terminal experience can opt into alternate-screen mode:
+
+```scala
+import scalatui.core.{TUI, TUIOptions, TUIScreenMode}
+import scalatui.terminal.jvm.SttyTerminal
+
+val tui = TUI(SttyTerminal(), TUIOptions(screenMode = TUIScreenMode.Alternate))
+```
+
+Alternate-screen mode enters the terminal alternate screen when the TUI starts and exits it during cleanup. It prevents TUI frames from being appended to normal shell scrollback while the TUI is running. It keeps the existing `Component.render(width): Vector[String]` contract. Alternate-screen mode does not provide temporary modal sessions, a full-screen editor, or height-aware component rendering.
+
 The JVM interop facade gives Java and Kotlin call sites the same basic path without Scala default-argument methods or Scala function types. Scala, Java, and Kotlin versions of the basic example are in [`docs/jvm-language-examples.md`](docs/jvm-language-examples.md).
 
 A multiline editor with slash, filesystem, attachment, fuzzy, and `#` trigger autocomplete:
