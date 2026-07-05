@@ -224,6 +224,32 @@ object TerminalClipboard:
     catch
       case error: Exception => Left(error.getMessage.nn)
 
+final class SynchronizedTerminal(delegate: Terminal) extends Terminal:
+  private val outputLock = Object()
+
+  override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
+    outputLock.synchronized(delegate.start(onInput, onResize))
+
+  override def stop(): Unit = outputLock.synchronized(delegate.stop())
+
+  override def write(data: String): Unit = outputLock.synchronized(delegate.write(data))
+
+  override def columns: Int = outputLock.synchronized(delegate.columns)
+
+  override def rows: Int = outputLock.synchronized(delegate.rows)
+
+  override def moveBy(lines: Int): Unit = outputLock.synchronized(delegate.moveBy(lines))
+
+  override def hideCursor(): Unit = outputLock.synchronized(delegate.hideCursor())
+
+  override def showCursor(): Unit = outputLock.synchronized(delegate.showCursor())
+
+  override def clearLine(): Unit = outputLock.synchronized(delegate.clearLine())
+
+  override def clearFromCursor(): Unit = outputLock.synchronized(delegate.clearFromCursor())
+
+  override def clearScreen(): Unit = outputLock.synchronized(delegate.clearScreen())
+
 // ----- Explorer component -----
 
 final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends Component:
@@ -680,7 +706,8 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
       thread
     }
   )
-  val tui      = TUI(SttyTerminal(), TUIOptions(screenMode = TUIScreenMode.Alternate))
+  val terminal = SynchronizedTerminal(SttyTerminal())
+  val tui      = TUI(terminal, TUIOptions(screenMode = TUIScreenMode.Alternate))
   val explorer = MavenExplorer(tui, executor)
   tui.addChild(explorer)
   tui.setFocus(explorer)
