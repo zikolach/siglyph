@@ -42,7 +42,7 @@ final class ExpansionController(initiallyExpanded: Boolean = false):
     if state === expanded then false
     else
       state = expanded
-      registered.foreach(_.setExpanded(expanded))
+      registered.toVector.foreach(_.setExpanded(expanded))
       true
 
   /** Toggle the state and apply it to registered expandables. */

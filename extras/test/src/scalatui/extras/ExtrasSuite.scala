@@ -110,6 +110,19 @@ class ExtrasSuite extends munit.FunSuite:
     assertEquals(ctl.setExpanded(false), true)
     assertEquals(second.states, Vector(true, false, true))
 
+  test("expansion controller snapshots registered expandables before state callbacks"):
+    val controller = ExpansionController()
+    val second     = RecordingExpandable()
+    val first      = new Expandable:
+      override def setExpanded(expanded: Boolean): Unit =
+        controller.unregister(second)
+
+    controller.register(first)
+    controller.register(second)
+
+    assertEquals(controller.setExpanded(true), true)
+    assertEquals(second.states, Vector(false, true))
+
   test("extras compile without importing terminal, markdown, image, demo, or agent APIs"):
     val text: scalatui.core.Component    = ExpandableText("collapsed", "expanded")
     val section: scalatui.core.Component = ExpandableSection("title", "collapsed", "expanded")
