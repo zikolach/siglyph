@@ -171,6 +171,10 @@ class TerminalInputParserSuite extends munit.FunSuite:
       TerminalInput.Key(TerminalKey.Character("l"), KeyModifiers(ctrl = true))
     )
     assertEquals(
+      TerminalInputParser.parseOne("\u000f"),
+      TerminalInput.Key(TerminalKey.Character("o"), KeyModifiers(ctrl = true))
+    )
+    assertEquals(
       TerminalInputParser.parseOne("\u0014"),
       TerminalInput.Key(TerminalKey.Character("t"), KeyModifiers(ctrl = true))
     )

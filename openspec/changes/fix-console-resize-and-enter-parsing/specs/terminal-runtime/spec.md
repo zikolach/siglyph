@@ -15,6 +15,14 @@ The TUI runtime SHALL track both terminal width and terminal height changes acro
 - **WHEN** terminal dimensions change while an autocomplete overlay is visible
 - **THEN** the overlay is re-resolved and composited into the full-clear resize redraw without entering alternate-screen mode
 
+
+### Requirement: Control-key normalization
+The terminal input parser SHALL normalize supported raw ASCII control bytes into typed key events with control modifiers.
+
+#### Scenario: Ctrl O raw control byte parses to typed key
+- **WHEN** the input parser receives raw byte `0x0f`
+- **THEN** it emits `TerminalKey.Character("o")` with Ctrl modifier state
+
 ## ADDED Requirements
 
 ### Requirement: Modified Enter tilde sequence parsing

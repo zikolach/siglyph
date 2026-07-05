@@ -62,7 +62,7 @@ private def runScalafmt(check: Boolean): Unit =
 
 private def runScalafix(): Unit =
   runShell("""
-    sources="core/src core/test terminalJvm/src terminalNative/src markdown/src markdown/test image/src image/test demo/src asciinemaDemo/src keyTester/src interactiveDemo/src interactiveJvmDemo/src interactiveNativeDemo/src scripts/GenerateUnicodeTables.scala"
+    sources="core/src core/test terminalJvm/src terminalNative/src markdown/src markdown/test image/src image/test extras/src extras/test demo/src asciinemaDemo/src keyTester/src interactiveDemo/src interactiveJvmDemo/src interactiveNativeDemo/src scripts/GenerateUnicodeTables.scala"
     if command -v scalafix >/dev/null 2>&1; then
       exec scalafix --syntactic --check --scala-version 3.7.4 --files $sources
     fi
@@ -140,6 +140,22 @@ object image extends SiglyphPublishModule {
     def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
     def testFramework = "munit.Framework"
   }
+}
+
+object extras extends SiglyphPublishModule {
+  def artifactName = "siglyph-extras"
+  def moduleDeps   = Seq(core)
+
+  object test extends ScalaTests {
+    def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
+    def testFramework = "munit.Framework"
+  }
+}
+
+object extrasNative extends SiglyphNativePublishModule {
+  def artifactName = "siglyph-extras"
+  def moduleDeps   = Seq(coreNative)
+  def sources      = Task.Sources(workspaceRoot / "extras" / "src")
 }
 
 object demo extends SiglyphModule {

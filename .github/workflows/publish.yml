@@ -80,6 +80,8 @@ jobs:
           cp out/terminalNative/jar.dest/out.jar "release-artifacts/siglyph-terminal-native_native0.5_3-${version}.jar"
           cp out/markdown/jar.dest/out.jar "release-artifacts/siglyph-markdown_3-${version}.jar"
           cp out/image/jar.dest/out.jar "release-artifacts/siglyph-image_3-${version}.jar"
+          cp out/extras/jar.dest/out.jar "release-artifacts/siglyph-extras_3-${version}.jar"
+          cp out/extrasNative/jar.dest/out.jar "release-artifacts/siglyph-extras_native0.5_3-${version}.jar"
           ls -lh release-artifacts
 
       - name: Create GitHub release
@@ -113,7 +115,8 @@ jobs:
             "io.github.zikolach" %% "siglyph-core" % "${version}",
             "io.github.zikolach" %% "siglyph-terminal-jvm" % "${version}",
             "io.github.zikolach" %% "siglyph-markdown" % "${version}",
-            "io.github.zikolach" %% "siglyph-image" % "${version}"
+            "io.github.zikolach" %% "siglyph-image" % "${version}",
+            "io.github.zikolach" %% "siglyph-extras" % "${version}"
           )
           \`\`\`
 
@@ -131,12 +134,13 @@ jobs:
               mvn"io.github.zikolach::siglyph-core::${version}",
               mvn"io.github.zikolach::siglyph-terminal-jvm::${version}",
               mvn"io.github.zikolach::siglyph-markdown::${version}",
-              mvn"io.github.zikolach::siglyph-image::${version}"
+              mvn"io.github.zikolach::siglyph-image::${version}",
+              mvn"io.github.zikolach::siglyph-extras::${version}"
             )
           }
           \`\`\`
 
-          Scala Native artifacts are also published for \`siglyph-core\` and \`siglyph-terminal-native\`.
+          Scala Native artifacts are also published for \`siglyph-core\`, \`siglyph-terminal-native\`, and \`siglyph-extras\`.
 
           ## Mill Scala Native
 
@@ -151,7 +155,8 @@ jobs:
 
             def mvnDeps = Seq(
               mvn"io.github.zikolach::siglyph-core::${version}",
-              mvn"io.github.zikolach::siglyph-terminal-native::${version}"
+              mvn"io.github.zikolach::siglyph-terminal-native::${version}",
+              mvn"io.github.zikolach::siglyph-extras::${version}"
             )
           }
           \`\`\`

@@ -216,8 +216,10 @@ The GitHub release must include these assets:
 - `siglyph-core_native0.5_3-X.Y.Z.jar`
 - `siglyph-image_3-X.Y.Z.jar`
 - `siglyph-markdown_3-X.Y.Z.jar`
+- `siglyph-extras_3-X.Y.Z.jar`
 - `siglyph-terminal-jvm_3-X.Y.Z.jar`
 - `siglyph-terminal-native_native0.5_3-X.Y.Z.jar`
+- `siglyph-extras_native0.5_3-X.Y.Z.jar`
 
 Verify Maven Central availability before declaring the release complete:
 
@@ -227,8 +229,10 @@ for artifact in \
   siglyph-terminal-jvm_3 \
   siglyph-markdown_3 \
   siglyph-image_3 \
+  siglyph-extras_3 \
   siglyph-core_native0.5_3 \
-  siglyph-terminal-native_native0.5_3
+  siglyph-terminal-native_native0.5_3 \
+  siglyph-extras_native0.5_3
 do
   url="https://repo1.maven.org/maven2/io/github/zikolach/${artifact}/X.Y.Z/${artifact}-X.Y.Z.pom"
   code=$(curl -s -o /dev/null -w '%{http_code}' "$url")

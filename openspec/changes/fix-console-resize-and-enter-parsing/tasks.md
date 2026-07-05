@@ -22,3 +22,10 @@
 - [x] 4.1 Run `mill core.test.testOnly scalatui.terminal.TerminalInputParserSuite`.
 - [x] 4.2 Run `mill core.test.testOnly scalatui.core.TUISuite`.
 - [x] 4.3 Run `openspec validate fix-console-resize-and-enter-parsing --type change --strict`.
+
+## 5. Ctrl+O Control-Key Parser Follow-up
+
+- [x] 5.1 Add parser regression coverage for raw Ctrl+O byte `0x0f` producing `TerminalKey.Character("o")` with Ctrl modifier state.
+- [x] 5.2 Update `TerminalInputParser` so raw Ctrl+O emits a typed key event instead of raw input.
+- [x] 5.3 Run focused parser validation and strict OpenSpec validation.
+- [x] 5.4 Publish the updated `0.2.7-SNAPSHOT` Siglyph artifacts locally for Sigma integration.

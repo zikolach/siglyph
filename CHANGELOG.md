@@ -7,6 +7,10 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Added
+
+- Added optional `siglyph-extras` JVM and Scala Native artifacts with expandable text, expandable section, and expansion controller helpers. #27
+
 ### Fixed
 
 - Fixed terminal resize redraws to match upstream pi-tui full-clear behavior, including screen clear, cursor home, and scrollback clear, while still avoiding alternate-screen mode. #26

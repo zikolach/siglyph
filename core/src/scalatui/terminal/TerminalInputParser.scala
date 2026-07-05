@@ -20,6 +20,7 @@ object TerminalInputParser:
     "\u0006"       -> key(TerminalKey.Character("f"), KeyModifiers(ctrl = true)),
     "\u000b"       -> key(TerminalKey.Character("k"), KeyModifiers(ctrl = true)),
     "\u000c"       -> key(TerminalKey.Character("l"), KeyModifiers(ctrl = true)),
+    "\u000f"       -> key(TerminalKey.Character("o"), KeyModifiers(ctrl = true)),
     "\u0014"       -> key(TerminalKey.Character("t"), KeyModifiers(ctrl = true)),
     "\u0015"       -> key(TerminalKey.Character("u"), KeyModifiers(ctrl = true)),
     "\u0017"       -> key(TerminalKey.Character("w"), KeyModifiers(ctrl = true)),

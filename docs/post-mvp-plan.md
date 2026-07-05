@@ -2,9 +2,10 @@
 
 The first milestone intentionally stopped at the core renderer, terminal abstraction, virtual terminal, and MVP components (`Text`, `Box`, `Spacer`, `SelectList`, `Input`). The project has since added the main `pi-tui`-style runtime and component behaviors: multiline editing, overlays, loaders, Markdown, image protocol helpers, JVM and Scala Native interactive backends, resize-safe rendering, and hardware cursor marker support.
 
-The remaining post-MVP work is now tracked as parity hardening rather than foundational bring-up. The active OpenSpec change for the next batch is:
+The remaining post-MVP work is now tracked as parity hardening rather than foundational bring-up. Active OpenSpec changes for the next batches are:
 
 - `openspec/changes/close-pi-tui-parity-gaps/`
+- `openspec/changes/siglyph-extras/`
 
 ## Components
 
@@ -31,6 +32,13 @@ Suggested follow-up chain for `pi-tui` parity:
 5. Expand advanced keyboard protocol support only where behavior is safe and testable on JVM and Native backends.
 6. Consider optional loader scheduler integration if applications need runtime-owned ticking beyond the current deterministic `tick()` API.
 7. Continue public API stabilization after editor, overlay, autocomplete, and selector/settings pressure is real.
+
+## Extras
+
+- The `extras` module is separate from `core` and provides reusable helper widgets above the primitive component layer.
+- Initial scope is expandable text, expandable sections, and an expansion controller that applies one Boolean state to registered helpers.
+- The module depends only on `core`; terminal backends, Markdown, images, demos, agent sessions, LLM messages, tool execution, extension runtimes, model selection, and message history stay outside this boundary.
+- Future extras should be accepted only when they are reusable TUI helpers rather than application-specific behavior.
 
 ## Markdown
 
