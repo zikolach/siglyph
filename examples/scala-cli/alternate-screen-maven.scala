@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit
 import com.github.plokhotnyuk.jsoniter_scala.core.*
 import com.github.plokhotnyuk.jsoniter_scala.macros.*
 import scalatui.ansi.Ansi
-import scalatui.components.{Loader, LoaderOptions}
+import scalatui.components.{Input, Loader, LoaderOptions, SelectItem, SelectList, SelectListOptions}
 import scalatui.core.*
 import scalatui.syntax.Equality.*
 import scalatui.terminal.*
@@ -202,13 +202,16 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
     Loader(LoaderOptions(message = "Loading...", leadingBlankLine = false, paddingX = 0))
   private var loaderTick = Option.empty[ScheduledFuture[?]]
 
-  private var query              = "siglyph"
+  private val searchInput = Input("siglyph")
+  searchInput.focused = true
+  searchInput.onSubmit = _ => runSearch()
+
   private var step               = ExplorerStep.Search
-  private var artifactIndex      = 0
-  private var versionIndex       = 0
-  private var snippetIndex       = 0
   private var artifacts          = Vector.empty[Artifact]
   private var versions           = Vector.empty[VersionInfo]
+  private var artifactList       = Option.empty[SelectList]
+  private var versionList        = Option.empty[SelectList]
+  private var buildToolList      = Option.empty[SelectList]
   private var searchState        = LoadState.Idle
   private var versionState       = LoadState.Idle
   private var message            = "Press Enter to search Sonatype Central. Esc exits cleanly."
@@ -222,35 +225,36 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
 
   override def handleInputResult(input: TerminalInput): InputResult = stateLock.synchronized {
     input match
-      case TerminalInput.Key(TerminalKey.Character("c"), modifiers) if modifiers.ctrl  =>
+      case TerminalInput.Key(TerminalKey.Character("c"), modifiers) if modifiers.ctrl =>
         InputResult.Exit
-      case TerminalInput.Key(TerminalKey.Escape, _)                                    =>
+      case TerminalInput.Key(TerminalKey.Escape, _)                                   =>
         InputResult.Exit
-      case TerminalInput.Key(TerminalKey.Enter, _)                                     =>
-        advance()
-        InputResult.Render
-      case TerminalInput.Key(TerminalKey.Left, _)                                      =>
+      case TerminalInput.Key(TerminalKey.Tab, modifiers) if modifiers.shift           =>
         goBack()
         InputResult.Render
-      case TerminalInput.Key(TerminalKey.Up, _)                                        =>
-        moveSelection(-1)
+      case TerminalInput.Key(TerminalKey.Tab, modifiers) if modifiers.isEmpty         =>
+        advanceStep()
         InputResult.Render
-      case TerminalInput.Key(TerminalKey.Down, _)                                      =>
-        moveSelection(1)
-        InputResult.Render
-      case TerminalInput.Key(TerminalKey.Backspace, _) if step === ExplorerStep.Search =>
-        if query.nonEmpty then query = query.dropRight(1)
-        InputResult.Render
-      case TerminalInput.Key(TerminalKey.Character(value), modifiers)
-          if modifiers.isEmpty && step === ExplorerStep.Search =>
-        query += value
-        message = "Press Enter to search Sonatype Central."
-        InputResult.Render
-      case _                                                                           =>
+      case _ if step === ExplorerStep.Search                                          =>
+        val submitting = input match
+          case TerminalInput.Key(TerminalKey.Enter, _) => true
+          case _                                       => false
+        val result     = searchInput.handleInputResult(input)
+        if !submitting && (searchState !== LoadState.Loading) then
+          message = "Press Enter to search Sonatype Central."
+        result
+      case _                                                                          =>
+        activeSelectList.foreach(_.handleInput(input))
         InputResult.Render
   }
 
-  private def advance(): Unit = step match
+  private def activeSelectList: Option[SelectList] = step match
+    case ExplorerStep.Search    => None
+    case ExplorerStep.Artifacts => artifactList
+    case ExplorerStep.Versions  => versionList
+    case ExplorerStep.BuildTool => buildToolList
+
+  private def advanceStep(): Unit = step match
     case ExplorerStep.Search    => runSearch()
     case ExplorerStep.Artifacts => loadVersionsForSelection()
     case ExplorerStep.Versions  => openBuildToolStep()
@@ -258,28 +262,16 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
 
   private def goBack(): Unit = step match
     case ExplorerStep.Search    => ()
-    case ExplorerStep.Artifacts => step = ExplorerStep.Search
-    case ExplorerStep.Versions  => step = ExplorerStep.Artifacts
-    case ExplorerStep.BuildTool => step = ExplorerStep.Versions
+    case ExplorerStep.Artifacts => enterStep(ExplorerStep.Search)
+    case ExplorerStep.Versions  => enterStep(ExplorerStep.Artifacts)
+    case ExplorerStep.BuildTool => enterStep(ExplorerStep.Versions)
 
-  private def moveSelection(delta: Int): Unit = step match
-    case ExplorerStep.Search    => ()
-    case ExplorerStep.Artifacts =>
-      if artifacts.nonEmpty then
-        artifactIndex = clamp(artifactIndex + delta, artifacts.size)
-        resetVersionSelection()
-        message = "Press Enter to inspect versions for the selected artifact."
-    case ExplorerStep.Versions  =>
-      if versions.nonEmpty then versionIndex = clamp(versionIndex + delta, versions.size)
-    case ExplorerStep.BuildTool =>
-      val snippets = buildSnippets
-      if snippets.nonEmpty then
-        val nextIndex = clamp(snippetIndex + delta, snippets.size)
-        if nextIndex !== snippetIndex then copiedSnippetIndex = None
-        snippetIndex = nextIndex
+  private def enterStep(nextStep: ExplorerStep): Unit =
+    step = nextStep
+    searchInput.focused = nextStep === ExplorerStep.Search
 
   private def runSearch(): Unit =
-    val requestedQuery = query
+    val requestedQuery = searchInput.value
     searchState = LoadState.Loading
     versionState = LoadState.Idle
     message = "Searching Sonatype Central..."
@@ -287,15 +279,16 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
     runAsync(client.search(requestedQuery)) {
       case Right(results) =>
         artifacts = results
-        artifactIndex = 0
+        updateArtifactList()
         resetVersionSelection()
         searchState = LoadState.Ready
         if results.isEmpty then message = "No artifacts found. Edit the query and press Enter."
         else
-          step = ExplorerStep.Artifacts
+          enterStep(ExplorerStep.Artifacts)
           message = s"Found ${results.size} artifacts. Press Enter to inspect versions."
       case Left(error)    =>
         artifacts = Vector.empty
+        artifactList = None
         resetVersionSelection()
         searchState = LoadState.Failed
         message = s"Search failed: $error"
@@ -310,12 +303,13 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
         runAsync(client.versions(artifact)) {
           case Right(values) =>
             versions = values
-            versionIndex = 0
-            snippetIndex = 0
+            updateVersionList()
+            buildToolList = None
+            copiedSnippetIndex = None
             versionState = LoadState.Ready
             if values.isEmpty then message = "No versions returned for this artifact."
             else
-              step = ExplorerStep.Versions
+              enterStep(ExplorerStep.Versions)
               message = s"Loaded ${values.size} versions. Press Enter to choose a build tool."
           case Left(error)   =>
             resetVersionSelection()
@@ -364,16 +358,19 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
 
   private def openBuildToolStep(): Unit =
     if versions.nonEmpty then
-      step = ExplorerStep.BuildTool
-      snippetIndex = 0
+      copiedSnippetIndex = None
+      updateBuildToolList(selectedIndex = 0)
+      enterStep(ExplorerStep.BuildTool)
       message = "Choose a build-tool coordinate and press Enter to copy it."
     else loadVersionsForSelection()
 
   private def copySelectedSnippet(): Unit =
-    buildSnippets.lift(snippetIndex).foreach { snippet =>
+    val index = selectedIndex(buildToolList)
+    buildSnippets.lift(index).foreach { snippet =>
       TerminalClipboard.copy(tui.terminal, snippet.value) match
         case Right(())   =>
-          copiedSnippetIndex = Some(snippetIndex)
+          copiedSnippetIndex = Some(index)
+          updateBuildToolList(selectedIndex = index)
           message = "Esc exits and restores the normal screen."
         case Left(error) =>
           message = s"Selected ${snippet.label}, but copy failed: $error"
@@ -381,10 +378,76 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
 
   private def resetVersionSelection(): Unit =
     versions = Vector.empty
-    versionIndex = 0
-    snippetIndex = 0
+    versionList = None
+    buildToolList = None
     versionState = LoadState.Idle
     copiedSnippetIndex = None
+
+  private def updateArtifactList(): Unit =
+    artifactList =
+      if artifacts.isEmpty then None
+      else
+        val list = SelectList(
+          artifacts.zipWithIndex.map { case (artifact, index) =>
+            val date        = artifact.latestPublished.fold("")(published => s"  $published")
+            val description = Option.when(artifact.description.nonEmpty)(artifact.description)
+            SelectItem(
+              value = index.toString,
+              label = s"${artifact.module}  ${artifact.latestVersion}$date",
+              description = description
+            )
+          },
+          selectOptions(maxVisible = 20, showDescriptions = true)
+        )
+        list.onSelect = _ => loadVersionsForSelection()
+        list.onSelectionChange = _ =>
+          resetVersionSelection()
+          message = "Press Enter to inspect versions for the selected artifact."
+        Some(list)
+
+  private def updateVersionList(): Unit =
+    versionList =
+      if versions.isEmpty then None
+      else
+        val list = SelectList(
+          versions.zipWithIndex.map { case (version, index) =>
+            SelectItem(value = index.toString, label = version.label)
+          },
+          selectOptions(maxVisible = 8, showDescriptions = false)
+        )
+        list.onSelect = _ => openBuildToolStep()
+        list.onSelectionChange = _ =>
+          buildToolList = None
+          copiedSnippetIndex = None
+        Some(list)
+
+  private def updateBuildToolList(selectedIndex: Int): Unit =
+    val snippets = buildSnippets
+    buildToolList =
+      if snippets.isEmpty then None
+      else
+        val list = SelectList(
+          snippets.zipWithIndex.map { case (snippet, index) =>
+            val copied = copiedSnippetIndex.contains(index)
+            val badge  = if copied then "  [32mCopied![0m" else ""
+            SelectItem(value = index.toString, label = s"${snippet.label}: ${snippet.value}$badge")
+          },
+          selectOptions(maxVisible = snippets.size, showDescriptions = false)
+        )
+        list.moveSelectionBy(selectedIndex)
+        list.onSelect = _ => copySelectedSnippet()
+        list.onSelectionChange = _ => copiedSnippetIndex = None
+        Some(list)
+
+  private def selectOptions(maxVisible: Int, showDescriptions: Boolean): SelectListOptions =
+    SelectListOptions(
+      maxVisible = math.max(1, maxVisible),
+      selectedPrefix = "› ",
+      normalPrefix = "  ",
+      showDescriptions = showDescriptions,
+      showScrollInfo = true,
+      noMatchText = "No items"
+    )
 
   // ----- Rendering -----
 
@@ -400,7 +463,7 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
 
     lines += border("┌", "─", "┐", width)
     lines += framed("Sonatype Central Telescope — alternate screen demo", width)
-    lines += framed(headerText, width)
+    lines += framed(headerText(width - 4), width)
     lines += border("├", "─", "┤", width)
     lines += twoPane("Artifacts", "Versions and build snippets", leftWidth, rightWidth)
 
@@ -427,22 +490,18 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
   private def compactRender(width: Int): Vector[String] =
     Vector(
       fit("Sonatype Central Telescope", width),
-      fit(s"Search: $query", width),
+      fit(headerText(width), width),
       fit(message, width),
       fit("Use a wider terminal.", width)
     )
 
   private def artifactRows(width: Int): Vector[String] =
     if artifacts.isEmpty then emptyArtifactRows(width)
-    else
-      artifacts.zipWithIndex.map { case (artifact, index) =>
-        val marker = if step === ExplorerStep.Artifacts && index === artifactIndex then "›" else " "
-        val date   = artifact.latestPublished.fold("")(published => s"  $published")
-        fit(s"$marker ${artifact.module}  ${artifact.latestVersion}$date", width)
-      }
+    else artifactList.fold(Vector.empty[String])(_.render(width))
 
   private def emptyArtifactRows(width: Int): Vector[String] = searchState match
-    case LoadState.Idle    => Vector("Default query: siglyph", "Type another query or press Enter.")
+    case LoadState.Idle    =>
+      Vector("Default query: siglyph", "Type or paste another query, then press Enter.")
     case LoadState.Loading => loadingRows("Searching Sonatype Central...", width)
     case LoadState.Failed  => Vector("Search failed.")
     case LoadState.Ready   => Vector("No results.")
@@ -474,39 +533,23 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
     case LoadState.Failed  => Vector("Version lookup failed.")
     case LoadState.Ready   =>
       if versions.isEmpty then Vector("No versions returned.")
-      else
-        Vector("Versions:") ++ versions.take(7).zipWithIndex.map { case (version, index) =>
-          val marker = if step === ExplorerStep.Versions && index === versionIndex then "›" else " "
-          fit(s"$marker ${version.label}", width)
-        }
+      else Vector("Versions:") ++ versionList.fold(Vector.empty[String])(_.render(width))
 
   private def snippetRows(width: Int): Vector[String] =
     if step !== ExplorerStep.BuildTool then Vector.empty
-    else
-      Vector("", "Build tool:") ++ buildSnippets.zipWithIndex.map { case (snippet, index) =>
-        val marker = if index === snippetIndex then "›" else " "
-        snippetLine(marker, snippet, index, width)
-      }
-
-  private def snippetLine(marker: String, snippet: BuildSnippet, index: Int, width: Int): String =
-    val prefix = s"$marker ${snippet.label}: "
-    copiedSnippetIndex match
-      case Some(copiedIndex) if copiedIndex === index =>
-        val badge      = "\u001b[32mCopied!\u001b[0m"
-        val valueWidth =
-          math.max(0, width - Ansi.visibleWidth(prefix) - Ansi.visibleWidth(badge) - 1)
-        fit(prefix + Ansi.truncateToWidth(snippet.value, valueWidth, "…") + " " + badge, width)
-      case _                                          =>
-        fit(prefix + snippet.value, width)
+    else Vector("", "Build tool:") ++ buildToolList.fold(Vector.empty[String])(_.render(width))
 
   // ----- Derived state -----
 
-  private def selectedArtifact: Option[Artifact] = artifacts.lift(artifactIndex)
+  private def selectedArtifact: Option[Artifact] =
+    selectedIndexOption(artifactList).flatMap(artifacts.lift)
 
   private def selectedVersion: String =
-    versions.lift(
-      versionIndex
-    ).map(_.version).orElse(selectedArtifact.map(_.latestVersion)).getOrElse("")
+    selectedIndexOption(versionList)
+      .flatMap(versions.lift)
+      .map(_.version)
+      .orElse(selectedArtifact.map(_.latestVersion))
+      .getOrElse("")
 
   private def buildSnippets: Vector[BuildSnippet] = selectedArtifact match
     case None           => Vector.empty
@@ -520,9 +563,12 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
         BuildSnippet("Maven", s"${artifact.group}:${artifact.artifact}:$version")
       )
 
-  private def headerText: String = step match
-    case ExplorerStep.Search => s"Search: ${query}_"
-    case _                   => s"${stepLabel} · Query: $query"
+  private def headerText(width: Int): String = step match
+    case ExplorerStep.Search =>
+      val label      = "Search: "
+      val inputWidth = math.max(1, width - Ansi.visibleWidth(label))
+      label + searchInput.render(inputWidth).headOption.getOrElse("")
+    case _                   => s"${stepLabel} · Query: ${searchInput.value}"
 
   private def stepLabel: String = step match
     case ExplorerStep.Search    => "1 Search"
@@ -531,10 +577,11 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
     case ExplorerStep.BuildTool => "4 Build tool"
 
   private def helpText: String = step match
-    case ExplorerStep.Search    => "Type query · Enter search · Esc exit"
-    case ExplorerStep.Artifacts => "↑/↓ artifact · Enter versions · ← search · Esc exit"
-    case ExplorerStep.Versions  => "↑/↓ version · Enter build tool · ← artifacts · Esc exit"
-    case ExplorerStep.BuildTool => "↑/↓ build tool · Enter copy · ← versions · Esc exit"
+    case ExplorerStep.Search    => "Type/paste query · Enter/Tab search · Esc exit"
+    case ExplorerStep.Artifacts => "↑/↓ artifact · Enter/Tab versions · Shift+Tab search · Esc exit"
+    case ExplorerStep.Versions  =>
+      "↑/↓ version · Enter/Tab build tool · Shift+Tab artifacts · Esc exit"
+    case ExplorerStep.BuildTool => "↑/↓ build tool · Enter/Tab copy · Shift+Tab versions · Esc exit"
 
   // ----- Text layout helpers -----
 
@@ -551,8 +598,11 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
     if width <= 0 then ""
     else Ansi.padRight(Ansi.truncateToWidth(text, width, ellipsis = "…"), width)
 
-  private def clamp(value: Int, size: Int): Int =
-    math.max(0, math.min(value, math.max(0, size - 1)))
+  private def selectedIndex(list: Option[SelectList]): Int =
+    selectedIndexOption(list).getOrElse(0)
+
+  private def selectedIndexOption(list: Option[SelectList]): Option[Int] =
+    list.flatMap(_.selected.flatMap(item => item.value.toIntOption))
 
 @main def mavenCentralTelescope(): Unit =
   val executor = Executors.newScheduledThreadPool(
