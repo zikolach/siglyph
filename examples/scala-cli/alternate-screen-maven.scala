@@ -16,8 +16,10 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Base64
-import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 import com.github.plokhotnyuk.jsoniter_scala.core.*
 import com.github.plokhotnyuk.jsoniter_scala.macros.*
@@ -193,11 +195,12 @@ object TerminalClipboard:
 
 // ----- Explorer component -----
 
-final class MavenExplorer(tui: TUI, executor: ExecutorService) extends Component:
-  private val client    = SonatypeCentralClient()
-  private val stateLock = Object()
-  private val loader    =
+final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends Component:
+  private val client     = SonatypeCentralClient()
+  private val stateLock  = Object()
+  private val loader     =
     Loader(LoaderOptions(message = "Loading...", leadingBlankLine = false, paddingX = 0))
+  private var loaderTick = Option.empty[ScheduledFuture[?]]
 
   private var query              = "siglyph"
   private var step               = ExplorerStep.Search
@@ -280,6 +283,7 @@ final class MavenExplorer(tui: TUI, executor: ExecutorService) extends Component
     searchState = LoadState.Loading
     versionState = LoadState.Idle
     message = "Searching Sonatype Central..."
+    startLoading("Searching Sonatype Central...")
     runAsync(client.search(requestedQuery)) {
       case Right(results) =>
         artifacts = results
@@ -302,6 +306,7 @@ final class MavenExplorer(tui: TUI, executor: ExecutorService) extends Component
       case Some(artifact) =>
         versionState = LoadState.Loading
         message = s"Loading versions for ${artifact.artifact}..."
+        startLoading("Loading versions and dates...")
         runAsync(client.versions(artifact)) {
           case Right(values) =>
             versions = values
@@ -322,10 +327,40 @@ final class MavenExplorer(tui: TUI, executor: ExecutorService) extends Component
   private def runAsync[A](work: => A)(complete: A => Unit): Unit =
     executor.execute { () =>
       val result = work
-      stateLock.synchronized(complete(result))
+      stateLock.synchronized {
+        stopLoading()
+        complete(result)
+      }
       tui.requestRender()
       tui.flushRender()
     }
+
+  private def startLoading(text: String): Unit =
+    loader.setMessage(text)
+    loader.start()
+    loaderTick.foreach(_.cancel(false))
+    loaderTick = Some(executor.scheduleAtFixedRate(
+      () => tickLoaderIfLoading(),
+      loader.intervalMs.toLong,
+      loader.intervalMs.toLong,
+      TimeUnit.MILLISECONDS
+    ))
+
+  private def stopLoading(): Unit =
+    loaderTick.foreach(_.cancel(false))
+    loaderTick = None
+    loader.stop()
+
+  private def tickLoaderIfLoading(): Unit =
+    val shouldRender = stateLock.synchronized {
+      if searchState === LoadState.Loading || versionState === LoadState.Loading then loader.tick()
+      else
+        stopLoading()
+        false
+    }
+    if shouldRender then
+      tui.requestRender()
+      tui.flushRender()
 
   private def openBuildToolStep(): Unit =
     if versions.nonEmpty then
@@ -413,8 +448,7 @@ final class MavenExplorer(tui: TUI, executor: ExecutorService) extends Component
     case LoadState.Ready   => Vector("No results.")
 
   private def loadingRows(text: String, width: Int): Vector[String] =
-    loader.setMessage(text)
-    loader.start()
+    if loader.message !== text then loader.setMessage(text)
     loader.render(width).map(line => fit(line, width))
 
   private def detailRows(width: Int): Vector[String] = selectedArtifact match
@@ -521,11 +555,14 @@ final class MavenExplorer(tui: TUI, executor: ExecutorService) extends Component
     math.max(0, math.min(value, math.max(0, size - 1)))
 
 @main def mavenCentralTelescope(): Unit =
-  val executor = Executors.newSingleThreadExecutor { runnable =>
-    val thread = Thread(runnable, "siglyph-sonatype-demo")
-    thread.setDaemon(true)
-    thread
-  }
+  val executor = Executors.newScheduledThreadPool(
+    2,
+    { runnable =>
+      val thread = Thread(runnable, "siglyph-sonatype-demo")
+      thread.setDaemon(true)
+      thread
+    }
+  )
   val tui      = TUI(SttyTerminal(), TUIOptions(screenMode = TUIScreenMode.Alternate))
   val explorer = MavenExplorer(tui, executor)
   tui.addChild(explorer)
