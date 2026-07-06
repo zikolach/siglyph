@@ -186,7 +186,7 @@ final class SonatypeCentralClient:
         Right(readFromArray[A](response.body()))
       else Left(s"Sonatype Central returned HTTP ${response.statusCode}")
     catch
-      case error: Exception => Left(error.getMessage.nn)
+      case error: Exception => Left(exceptionMessage(error))
 
   private def formatDate(epochMillis: Long): Option[String] =
     if epochMillis <= 0L then None
@@ -213,6 +213,9 @@ object SonatypeCentralClient:
   private val VersionsUrl   = "https://central.sonatype.com/api/internal/browse/component/versions"
   private val DetailsUrl    = "https://central.sonatype.com/api/internal/component/details"
 
+private def exceptionMessage(error: Exception): String =
+  Option(error.getMessage).getOrElse(error.toString)
+
 // ----- Clipboard helper -----
 
 object TerminalClipboard:
@@ -222,7 +225,7 @@ object TerminalClipboard:
       terminal.write(s"\u001b]52;c;$encoded\u0007")
       Right(())
     catch
-      case error: Exception => Left(error.getMessage.nn)
+      case error: Exception => Left(exceptionMessage(error))
 
 final class SynchronizedTerminal(delegate: Terminal) extends Terminal:
   private val outputLock = Object()
