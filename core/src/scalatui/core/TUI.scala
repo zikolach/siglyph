@@ -280,23 +280,33 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         terminal.write(TerminalImageProtocol.QueryCellDimensions)
         requestRenderInternal(force = true, clear = isAlternateScreenMode)
         flushRender()
-        val (deferredInputs, deferredResizeRequested) = lifecycleLock.synchronized {
-          startupCallbacksReady = true
-          val inputs = startupInputs.reverse
-          val resize = startupResizeRequested
-          startupInputs = Nil
-          startupResizeRequested = false
-          inputs -> resize
-        }
-        deferredInputs.foreach(input => safeRuntimeCallback(handleInput(input)))
-        if deferredResizeRequested then
-          safeRuntimeCallback {
-            requestRender()
-            flushRender()
+        // Keep callbacks deferred until replay drains all batches. Input delivered during replay
+        // stays buffered so it cannot overtake earlier startup input.
+        var startupReplayComplete = false
+        while !startupReplayComplete do
+          val (deferredInputs, deferredResizeRequested) = lifecycleLock.synchronized {
+            val inputs = startupInputs.reverse
+            val resize = startupResizeRequested
+            startupInputs = Nil
+            startupResizeRequested = false
+            inputs -> resize
+          }
+          deferredInputs.foreach(input => safeRuntimeCallback(handleInput(input)))
+          if deferredResizeRequested then
+            safeRuntimeCallback {
+              requestRender()
+              flushRender()
+            }
+          startupReplayComplete = lifecycleLock.synchronized {
+            if startupInputs.isEmpty && !startupResizeRequested then
+              startupCallbacksReady = true
+              true
+            else false
           }
       catch
         case e: Throwable =>
-          stop()
+          try stop()
+          catch case cleanupFailure: Throwable => e.addSuppressed(cleanupFailure)
           throw e
 
   def run(): Unit =

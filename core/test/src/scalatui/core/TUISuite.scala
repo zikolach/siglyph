@@ -86,6 +86,35 @@ class TUISuite extends munit.FunSuite:
 
     def output: String = writesBuffer.mkString
 
+  final class ReplayInputDuringStartupTerminal extends Terminal:
+    private val writesBuffer = scala.collection.mutable.ArrayBuffer.empty[String]
+    private var inputHandler = Option.empty[TerminalInput => Unit]
+
+    override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
+      inputHandler = Some(onInput)
+      emit(TerminalInput.Key(TerminalKey.Character("a")))
+
+    def emit(input: TerminalInput): Unit = inputHandler.foreach(handler => handler(input))
+
+    override def stop(): Unit = ()
+
+    override def write(data: String): Unit = writesBuffer += data
+
+    override def columns: Int = 20
+    override def rows: Int    = 5
+
+    override def moveBy(lines: Int): Unit =
+      if lines > 0 then write(s"\u001b[${lines}B")
+      else if lines < 0 then write(s"\u001b[${-lines}A")
+
+    override def hideCursor(): Unit      = write("\u001b[?25l")
+    override def showCursor(): Unit      = write("\u001b[?25h")
+    override def clearLine(): Unit       = write("\u001b[K")
+    override def clearFromCursor(): Unit = write("\u001b[J")
+    override def clearScreen(): Unit     = write("\u001b[2J\u001b[H")
+
+    def output: String = writesBuffer.mkString
+
   final class StartFailingTerminal extends Terminal:
     private val writesBuffer = scala.collection.mutable.ArrayBuffer.empty[String]
     var stopCalled           = false
@@ -171,6 +200,28 @@ class TUISuite extends munit.FunSuite:
     override def moveBy(lines: Int): Unit = ()
     override def hideCursor(): Unit       = ()
     override def showCursor(): Unit       = showCursorCalled = true
+    override def clearLine(): Unit        = ()
+    override def clearFromCursor(): Unit  = ()
+    override def clearScreen(): Unit      = ()
+
+  final class RenderAndStopFailingTerminal extends Terminal:
+    private var failedRenderWrite = false
+
+    override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit = ()
+
+    override def stop(): Unit = throw RuntimeException("stop failed")
+
+    override def write(data: String): Unit =
+      if data.contains(TUI.AutoWrapOff) && !failedRenderWrite then
+        failedRenderWrite = true
+        throw RuntimeException("render write failed")
+
+    override def columns: Int = 20
+    override def rows: Int    = 5
+
+    override def moveBy(lines: Int): Unit = ()
+    override def hideCursor(): Unit       = ()
+    override def showCursor(): Unit       = ()
     override def clearLine(): Unit        = ()
     override def clearFromCursor(): Unit  = ()
     override def clearScreen(): Unit      = ()
@@ -280,6 +331,29 @@ class TUISuite extends munit.FunSuite:
 
     assertEquals(received.toVector, Vector("a", "b", "c"))
 
+  test("startup input buffering preserves order for input emitted during replay"):
+    val terminal  = ReplayInputDuringStartupTerminal()
+    val received  = scala.collection.mutable.ArrayBuffer.empty[String]
+    val component = new Component:
+      override def render(width: Int): Vector[String] = Vector(received.mkString)
+
+      override def handleInputResult(input: TerminalInput): InputResult = input match
+        case TerminalInput.Key(TerminalKey.Character("a"), _)   =>
+          terminal.emit(TerminalInput.Key(TerminalKey.Character("b")))
+          received += "a"
+          InputResult.Render
+        case TerminalInput.Key(TerminalKey.Character(value), _) =>
+          received += value
+          InputResult.Render
+        case _                                                  => InputResult.Ignored
+    val tui       = TUI(terminal, TUIOptions(screenMode = TUIScreenMode.Alternate))
+    tui.addChild(component)
+    tui.setFocus(component)
+
+    tui.start()
+
+    assertEquals(received.toVector, Vector("a", "b"))
+
   test("alternate-screen mode does not enter when terminal start fails"):
     val terminal = StartFailingTerminal()
     val tui      = TUI(terminal, TUIOptions(screenMode = TUIScreenMode.Alternate))
@@ -333,6 +407,16 @@ class TUISuite extends munit.FunSuite:
     assert(output.contains(TUI.AlternateScreenExit), output)
     assert(terminal.showCursorCalled)
     assert(terminal.stopCalled)
+
+  test("startup failure preserves original exception when cleanup fails"):
+    val terminal = RenderAndStopFailingTerminal()
+    val tui      = TUI(terminal, TUIOptions(screenMode = TUIScreenMode.Alternate))
+    tui.addChild(MutableLine("hello"))
+
+    val failure = intercept[RuntimeException](tui.start())
+
+    assertEquals(failure.getMessage, "render write failed")
+    assertEquals(failure.getSuppressed.toVector.map(_.getMessage), Vector("stop failed"))
 
   test("render write failure restores autowrap during cleanup"):
     val terminal = PartialAutoWrapRenderFailingTerminal()

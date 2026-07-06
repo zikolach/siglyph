@@ -279,8 +279,9 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
   private var copiedSnippetIndex = Option.empty[Int]
 
   override def render(width: Int): Vector[String] = stateLock.synchronized {
-    val w = math.max(1, width)
-    if w < 32 then compactRender(w)
+    val w    = math.max(1, width)
+    val rows = math.max(1, tui.terminal.rows)
+    if w < 32 || rows < 10 then compactRender(w).take(rows)
     else fullRender(w)
   }
 
