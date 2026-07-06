@@ -55,7 +55,7 @@ To include optional `siglyph-extras`, add it to your dependency list:
 - **SBT:** `"io.github.zikolach" %% "siglyph-extras" % "0.4.0"`
 - **Mill:** `mvn"io.github.zikolach::siglyph-extras::0.4.0"`
 
-For Scala Native versions that include optional Native artifacts, use platform-aware Mill coordinates from a `ScalaNativeModule`:
+For Scala Native versions that include optional Native artifacts, add these platform-aware Mill coordinates from a `ScalaNativeModule` in addition to `siglyph-core` and `siglyph-terminal-native`:
 
 ```scala
 mvn"io.github.zikolach::siglyph-markdown::VERSION"
