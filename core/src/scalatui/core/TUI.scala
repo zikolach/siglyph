@@ -246,14 +246,14 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     }
     if shouldStart then
       var startupCallbacksReady                          = false
-      var startupInputs                                  = Vector.empty[TerminalInput]
+      var startupInputs                                  = List.empty[TerminalInput]
       var startupResizeRequested                         = false
       def deferOrHandleInput(input: TerminalInput): Unit =
         safeRuntimeCallback {
           val shouldHandle = lifecycleLock.synchronized {
             if startupCallbacksReady then true
             else
-              startupInputs = startupInputs :+ input
+              startupInputs = input :: startupInputs
               false
           }
           if shouldHandle then handleInput(input)
@@ -282,9 +282,9 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         flushRender()
         val (deferredInputs, deferredResizeRequested) = lifecycleLock.synchronized {
           startupCallbacksReady = true
-          val inputs = startupInputs
+          val inputs = startupInputs.reverse
           val resize = startupResizeRequested
-          startupInputs = Vector.empty
+          startupInputs = Nil
           startupResizeRequested = false
           inputs -> resize
         }
