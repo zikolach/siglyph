@@ -499,7 +499,7 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
       val list = SelectList(
         snippets.zipWithIndex.map { case (snippet, index) =>
           val copied = copiedSnippetIndex.contains(index)
-          val badge  = if copied then "  [32mCopied![0m" else ""
+          val badge  = if copied then "  \u001b[32mCopied!\u001b[0m" else ""
           SelectItem(value = index.toString, label = s"${snippet.label}: ${snippet.value}$badge")
         },
         selectOptions(maxVisible = maxVisible, showDescriptions = false)
