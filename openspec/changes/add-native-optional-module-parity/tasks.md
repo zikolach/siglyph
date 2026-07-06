@@ -7,10 +7,10 @@
 
 ## 2. Tests and Validation Targets
 
-- [ ] 2.1 Add or wire Native validation for baseline Markdown behavior, using shared tests where practical or Native compile/link validation where test reuse is not practical.
-- [ ] 2.2 Add or wire Native validation for baseline image behavior, using shared tests where practical or Native compile/link validation where test reuse is not practical.
-- [ ] 2.3 Ensure JVM Markdown and image tests continue to run unchanged.
-- [ ] 2.4 Ensure Native optional module validation does not add third-party runtime dependencies.
+- [x] 2.1 Add or wire Native validation for baseline Markdown behavior, using shared tests where practical or Native compile/link validation where test reuse is not practical.
+- [x] 2.2 Add or wire Native validation for baseline image behavior, using shared tests where practical or Native compile/link validation where test reuse is not practical.
+- [x] 2.3 Ensure JVM Markdown and image tests continue to run unchanged.
+- [x] 2.4 Ensure Native optional module validation does not add third-party runtime dependencies.
 
 ## 3. Documentation and Publishing Metadata
 

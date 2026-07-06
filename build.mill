@@ -136,6 +136,12 @@ object markdownNative extends SiglyphNativePublishModule {
   def artifactName = "siglyph-markdown"
   def moduleDeps   = Seq(coreNative)
   def sources      = Task.Sources(workspaceRoot / "markdown" / "src")
+
+  object test extends ScalaNativeTests {
+    def sources       = Task.Sources(workspaceRoot / "markdown" / "test" / "src")
+    def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
+    def testFramework = "munit.Framework"
+  }
 }
 
 object image extends SiglyphPublishModule {
@@ -152,6 +158,12 @@ object imageNative extends SiglyphNativePublishModule {
   def artifactName = "siglyph-image"
   def moduleDeps   = Seq(coreNative)
   def sources      = Task.Sources(workspaceRoot / "image" / "src")
+
+  object test extends ScalaNativeTests {
+    def sources       = Task.Sources(workspaceRoot / "image" / "test" / "src")
+    def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
+    def testFramework = "munit.Framework"
+  }
 }
 
 object extras extends SiglyphPublishModule {
