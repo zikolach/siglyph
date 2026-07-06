@@ -50,14 +50,14 @@ class TUISuite extends munit.FunSuite:
     override def rows: Int    = 5
 
     override def moveBy(lines: Int): Unit =
-      if lines > 0 then write(s"[${lines}B")
-      else if lines < 0 then write(s"[${-lines}A")
+      if lines > 0 then write(s"\u001b[${lines}B")
+      else if lines < 0 then write(s"\u001b[${-lines}A")
 
-    override def hideCursor(): Unit      = write("[?25l")
-    override def showCursor(): Unit      = write("[?25h")
-    override def clearLine(): Unit       = write("[K")
-    override def clearFromCursor(): Unit = write("[J")
-    override def clearScreen(): Unit     = write("[2J[H")
+    override def hideCursor(): Unit      = write("\u001b[?25l")
+    override def showCursor(): Unit      = write("\u001b[?25h")
+    override def clearLine(): Unit       = write("\u001b[K")
+    override def clearFromCursor(): Unit = write("\u001b[J")
+    override def clearScreen(): Unit     = write("\u001b[2J\u001b[H")
 
     def output: String = writesBuffer.mkString
 
@@ -76,11 +76,11 @@ class TUISuite extends munit.FunSuite:
     override def rows: Int    = 5
 
     override def moveBy(lines: Int): Unit = ()
-    override def hideCursor(): Unit       = write("[?25l")
-    override def showCursor(): Unit       = write("[?25h")
+    override def hideCursor(): Unit       = write("\u001b[?25l")
+    override def showCursor(): Unit       = write("\u001b[?25h")
     override def clearLine(): Unit        = ()
     override def clearFromCursor(): Unit  = ()
-    override def clearScreen(): Unit      = write("[2J[H")
+    override def clearScreen(): Unit      = write("\u001b[2J\u001b[H")
 
     def output: String = writesBuffer.mkString
 
