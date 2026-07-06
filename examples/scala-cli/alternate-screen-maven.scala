@@ -277,6 +277,7 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
   private var versionState       = LoadState.Idle
   private var message            = "Press Enter to search Sonatype Central. Esc exits cleanly."
   private var copiedSnippetIndex = Option.empty[Int]
+  private var active             = true
 
   override def render(width: Int): Vector[String] = stateLock.synchronized {
     val w    = math.max(1, width)
@@ -288,8 +289,10 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
   override def handleInputResult(input: TerminalInput): InputResult = stateLock.synchronized {
     input match
       case TerminalInput.Key(TerminalKey.Character("c"), modifiers) if modifiers.ctrl =>
+        deactivate()
         InputResult.Exit
       case TerminalInput.Key(TerminalKey.Escape, _)                                   =>
+        deactivate()
         InputResult.Exit
       case TerminalInput.Key(TerminalKey.Tab, modifiers) if modifiers.shift           =>
         goBack()
@@ -384,25 +387,34 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
 
   private def runAsync[A](work: => A)(complete: A => Unit): Unit =
     executor.execute { () =>
-      val result = work
-      stateLock.synchronized {
-        stopLoading()
-        complete(result)
+      val result       = work
+      val shouldRender = stateLock.synchronized {
+        if active then
+          stopLoading()
+          complete(result)
+          true
+        else false
       }
-      tui.requestRender()
-      tui.flushRender()
+      if shouldRender then
+        tui.requestRender()
+        tui.flushRender()
     }
 
+  private def deactivate(): Unit =
+    active = false
+    stopLoading()
+
   private def startLoading(text: String): Unit =
-    loader.setMessage(text)
-    loader.start()
-    loaderTick.foreach(_.cancel(false))
-    loaderTick = Some(executor.scheduleAtFixedRate(
-      () => tickLoaderIfLoading(),
-      loader.intervalMs.toLong,
-      loader.intervalMs.toLong,
-      TimeUnit.MILLISECONDS
-    ))
+    if active then
+      loader.setMessage(text)
+      loader.start()
+      loaderTick.foreach(_.cancel(false))
+      loaderTick = Some(executor.scheduleAtFixedRate(
+        () => tickLoaderIfLoading(),
+        loader.intervalMs.toLong,
+        loader.intervalMs.toLong,
+        TimeUnit.MILLISECONDS
+      ))
 
   private def stopLoading(): Unit =
     loaderTick.foreach(_.cancel(false))
@@ -411,7 +423,11 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
 
   private def tickLoaderIfLoading(): Unit =
     val shouldRender = stateLock.synchronized {
-      if searchState === LoadState.Loading || versionState === LoadState.Loading then loader.tick()
+      if !active then
+        stopLoading()
+        false
+      else if searchState === LoadState.Loading || versionState === LoadState.Loading then
+        loader.tick()
       else
         stopLoading()
         false
