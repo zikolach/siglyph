@@ -28,10 +28,10 @@ Published artifacts are available on Maven Central. GitHub Packages and GitHub R
 
 ```scala
 libraryDependencies ++= Seq(
-  "io.github.zikolach" %% "siglyph-core" % "0.3.0",
-  "io.github.zikolach" %% "siglyph-terminal-jvm" % "0.3.0",
-  "io.github.zikolach" %% "siglyph-markdown" % "0.3.0",
-  "io.github.zikolach" %% "siglyph-image" % "0.3.0"
+  "io.github.zikolach" %% "siglyph-core" % "0.4.0",
+  "io.github.zikolach" %% "siglyph-terminal-jvm" % "0.4.0",
+  "io.github.zikolach" %% "siglyph-markdown" % "0.4.0",
+  "io.github.zikolach" %% "siglyph-image" % "0.4.0"
 )
 ```
 
@@ -42,18 +42,18 @@ object app extends ScalaModule {
   def scalaVersion = "3.7.4"
 
   def mvnDeps = Seq(
-    mvn"io.github.zikolach::siglyph-core::0.3.0",
-    mvn"io.github.zikolach::siglyph-terminal-jvm::0.3.0",
-    mvn"io.github.zikolach::siglyph-markdown::0.3.0",
-    mvn"io.github.zikolach::siglyph-image::0.3.0"
+    mvn"io.github.zikolach::siglyph-core::0.4.0",
+    mvn"io.github.zikolach::siglyph-terminal-jvm::0.4.0",
+    mvn"io.github.zikolach::siglyph-markdown::0.4.0",
+    mvn"io.github.zikolach::siglyph-image::0.4.0"
   )
 }
 ```
 
 To include optional `siglyph-extras`, add it to your dependency list:
 
-- **SBT:** `"io.github.zikolach" %% "siglyph-extras" % "0.3.0"`
-- **Mill:** `mvn"io.github.zikolach::siglyph-extras::0.3.0"`
+- **SBT:** `"io.github.zikolach" %% "siglyph-extras" % "0.4.0"`
+- **Mill:** `mvn"io.github.zikolach::siglyph-extras::0.4.0"`
 
 ### Maven for Java and Kotlin JVM apps
 
@@ -95,7 +95,7 @@ Single-file demos live in [`examples/scala-cli/`](examples/scala-cli/) and are i
 ./examples/scala-cli/alternate-screen-maven.scala
 ```
 
-They reference Maven Central dependencies, so they can run without cloning or GitHub Packages credentials. The alternate-screen Sonatype Central explorer uses the full alternate-screen height, shows built-in loader states and published dates, copies selected build snippets through terminal clipboard escape sequences with an inline `Copied!` badge, and uses local source directives until alternate-screen mode is available in a published release.
+They reference Maven Central dependencies, so they can run without cloning or GitHub Packages credentials. The alternate-screen Sonatype Central explorer uses the full alternate-screen height, shows built-in loader states and published dates, and copies selected build snippets through terminal clipboard escape sequences with an inline `Copied!` badge.
 
 ## Quick example
 
