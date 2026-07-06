@@ -21,13 +21,13 @@
 
 ## 4. Validation
 
-- [ ] 4.1 Run `mill markdownNative.compile`.
-- [ ] 4.2 Run `mill imageNative.compile` if the image Native artifact remains in scope.
-- [ ] 4.3 Run relevant Native optional module tests or compile/link validation added by this change.
-- [ ] 4.4 Run `mill markdown.test`.
-- [ ] 4.5 Run `mill image.test`.
-- [ ] 4.6 Run `mill __.compile`.
-- [ ] 4.7 Run `mill scalafmtCheck`.
-- [ ] 4.8 Run `mill scalafixCheck`.
-- [ ] 4.9 Run `openspec validate --all --strict`.
-- [ ] 4.10 Run `git diff --check`.
+- [x] 4.1 Run `mill markdownNative.compile`.
+- [x] 4.2 Run `mill imageNative.compile` if the image Native artifact remains in scope.
+- [x] 4.3 Run relevant Native optional module tests or compile/link validation added by this change.
+- [x] 4.4 Run `mill markdown.test`.
+- [x] 4.5 Run `mill image.test`.
+- [x] 4.6 Run `mill __.compile`.
+- [x] 4.7 Run `mill scalafmtCheck`.
+- [x] 4.8 Run `mill scalafixCheck`.
+- [x] 4.9 Run `openspec validate --all --strict`.
+- [x] 4.10 Run `git diff --check`.
