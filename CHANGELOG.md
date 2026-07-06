@@ -7,10 +7,12 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-06
+
 ### Added
 
-- Added opt-in alternate-screen TUI runtime mode while keeping normal-screen mode as the default.
-- Added a Scala CLI Sonatype Central explorer demo that showcases full-height alternate-screen mode, built-in loader states, version dates, and coordinate copy.
+- Added opt-in alternate-screen TUI runtime mode while keeping normal-screen mode as the default. #29
+- Added a Scala CLI Sonatype Central explorer demo that showcases full-height alternate-screen mode, built-in loader states, version dates, and coordinate copy. #29
 
 ## [0.3.0] - 2026-07-05
 
@@ -170,7 +172,8 @@ and this project uses semantic versioning while it remains pre-1.0.
 - GitHub Actions CI, jar packaging, GitHub Packages publishing, and GitHub
   release artifacts.
 
-[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/zikolach/siglyph/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/zikolach/siglyph/compare/v0.2.7...v0.3.0
 [0.2.7]: https://github.com/zikolach/siglyph/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/zikolach/siglyph/compare/v0.2.4...v0.2.6
