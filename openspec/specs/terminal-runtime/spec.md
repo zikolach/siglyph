@@ -96,15 +96,11 @@ The terminal runtime SHALL buffer raw input chunks and emit complete logical inp
 - **THEN** the runtime flushes the incomplete data as a raw or best-effort input event without blocking future input forever
 
 ### Requirement: Control-key normalization
-The terminal runtime SHALL normalize raw ASCII control bytes into typed key events with control modifiers where those bytes represent common control-key combinations.
+The terminal input parser SHALL normalize supported raw ASCII control bytes into typed key events with control modifiers.
 
-#### Scenario: Ctrl+C normalization
-- **WHEN** the runtime receives raw byte `0x03`
-- **THEN** it emits a typed key event equivalent to Ctrl+C
-
-#### Scenario: Readline shortcut normalization
-- **WHEN** the runtime receives raw control bytes for Ctrl+A, Ctrl+E, Ctrl+U, Ctrl+K, or Ctrl+W
-- **THEN** it emits typed key events with the corresponding character and control modifier
+#### Scenario: Ctrl O raw control byte parses to typed key
+- **WHEN** the input parser receives raw byte `0x0f`
+- **THEN** it emits `TerminalKey.Character("o")` with Ctrl modifier state
 
 ### Requirement: Terminal protocol lifecycle
 Interactive terminal backends SHALL enable terminal protocols needed for interactivity on start and disable them on stop.
@@ -576,3 +572,18 @@ The terminal input model SHALL represent the Insert key as a first-class typed k
 #### Scenario: Insert is not reported as unknown
 - **WHEN** a supported Insert key sequence is parsed
 - **THEN** the parser does not emit `TerminalKey.Unknown("insert")` for that sequence
+
+### Requirement: Modified Enter tilde sequence parsing
+The terminal input parser SHALL normalize supported tilde-form modified Enter sequences into typed Enter key events with modifier state.
+
+#### Scenario: Shift Enter tilde sequence parses to typed key
+- **WHEN** the input parser receives `ESC[13;2~`
+- **THEN** it emits `TerminalKey.Enter` with Shift modifier state
+
+#### Scenario: Alt Enter tilde sequence parses to typed key
+- **WHEN** the input parser receives `ESC[13;3~`
+- **THEN** it emits `TerminalKey.Enter` with Alt modifier state
+
+#### Scenario: Existing modified Enter sequences remain typed
+- **WHEN** the input parser receives `ESC[13;2u`, `ESC[27;2;13~`, `ESC[13;3u`, or `ESC[27;3;13~`
+- **THEN** it emits `TerminalKey.Enter` with the parsed modifier state instead of raw input
