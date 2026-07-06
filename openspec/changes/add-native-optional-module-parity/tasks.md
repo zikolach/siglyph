@@ -1,9 +1,9 @@
 ## 1. Native Module Setup
 
-- [ ] 1.1 Add a `markdownNative` publish module that depends on `coreNative` and compiles canonical `markdown/src` sources.
-- [ ] 1.2 Add an `imageNative` compile spike module that depends on `coreNative` and compiles canonical `image/src` sources.
-- [ ] 1.3 If `image/src` does not compile on Native, identify the exact unsupported APIs and stop unless a small shared compatibility boundary can preserve the public image API without duplicated rendering logic.
-- [ ] 1.4 If the image portability path is clean, keep `imageNative` as a publish module for the Native `siglyph-image` artifact.
+- [x] 1.1 Add a `markdownNative` publish module that depends on `coreNative` and compiles canonical `markdown/src` sources.
+- [x] 1.2 Add an `imageNative` compile spike module that depends on `coreNative` and compiles canonical `image/src` sources.
+- [x] 1.3 If `image/src` does not compile on Native, identify the exact unsupported APIs and stop unless a small shared compatibility boundary can preserve the public image API without duplicated rendering logic.
+- [x] 1.4 If the image portability path is clean, keep `imageNative` as a publish module for the Native `siglyph-image` artifact.
 
 ## 2. Tests and Validation Targets
 
