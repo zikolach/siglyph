@@ -14,10 +14,10 @@
 
 ## 3. Documentation and Publishing Metadata
 
-- [ ] 3.1 Update README dependency guidance to list Native optional Markdown and image artifacts where available.
-- [ ] 3.2 Update `docs/publishing.md` and release verification guidance to include new Native optional artifacts.
-- [ ] 3.3 Document that Java/Kotlin interop and `keyTester` remain JVM-only.
-- [ ] 3.4 Update promoted OpenSpec specs after implementation is complete.
+- [x] 3.1 Update README dependency guidance to list Native optional Markdown and image artifacts where available.
+- [x] 3.2 Update `docs/publishing.md` and release verification guidance to include new Native optional artifacts.
+- [x] 3.3 Document that Java/Kotlin interop and `keyTester` remain JVM-only.
+- [x] 3.4 Update promoted OpenSpec specs after implementation is complete.
 
 ## 4. Validation
 

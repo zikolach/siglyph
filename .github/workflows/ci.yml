@@ -62,7 +62,9 @@ jobs:
             terminalJvm \
             terminalNative \
             markdown \
+            markdownNative \
             image \
+            imageNative \
             extras \
             extrasNative \
             demo \

@@ -55,6 +55,14 @@ To include optional `siglyph-extras`, add it to your dependency list:
 - **SBT:** `"io.github.zikolach" %% "siglyph-extras" % "0.4.0"`
 - **Mill:** `mvn"io.github.zikolach::siglyph-extras::0.4.0"`
 
+For Scala Native versions that include optional Native artifacts, use platform-aware Mill coordinates from a `ScalaNativeModule`:
+
+```scala
+mvn"io.github.zikolach::siglyph-markdown::VERSION"
+mvn"io.github.zikolach::siglyph-image::VERSION"
+mvn"io.github.zikolach::siglyph-extras::VERSION"
+```
+
 ### Maven for Java and Kotlin JVM apps
 
 Replace `VERSION` with a published release that includes the JVM interop facade.
@@ -83,7 +91,7 @@ implementation("io.github.zikolach:siglyph-core_3:VERSION")
 implementation("io.github.zikolach:siglyph-terminal-jvm_3:VERSION")
 ```
 
-Scala JVM applications usually start with `siglyph-core` and `siglyph-terminal-jvm` through Scala build-tool syntax such as `%%` or Mill `::`. Java and Kotlin JVM applications use the concrete JVM artifact IDs `siglyph-core_3` and `siglyph-terminal-jvm_3`, and can use `scalatui.terminal.jvm.interop.SiglyphJvm` for a narrow Java-friendly facade. Scala Native applications use the platform-aware `siglyph-core` coordinates along with `siglyph-terminal-native`; Mill resolves those to `_native0.5_3` artifacts from `ScalaNativeModule` projects. The Java/Kotlin facade is JVM-only; Scala Native artifacts remain Scala-focused.
+Scala JVM applications usually start with `siglyph-core` and `siglyph-terminal-jvm` through Scala build-tool syntax such as `%%` or Mill `::`. Java and Kotlin JVM applications use the concrete JVM artifact IDs `siglyph-core_3` and `siglyph-terminal-jvm_3`, and can use `scalatui.terminal.jvm.interop.SiglyphJvm` for a narrow Java-friendly facade. Scala Native applications use platform-aware coordinates such as `siglyph-core`, `siglyph-terminal-native`, `siglyph-markdown`, `siglyph-image`, and `siglyph-extras`; Mill resolves those to `_native0.5_3` artifacts from `ScalaNativeModule` projects when the release includes those Native variants. The Java/Kotlin facade and `keyTester` are JVM-only; Scala Native artifacts remain Scala-focused.
 
 ## Try with Scala CLI
 
@@ -179,9 +187,9 @@ import scalatui.terminal.jvm.SttyTerminal
 
 ## Optional helper modules
 
-Markdown rendering stays in `siglyph-markdown`. The baseline renderer is dependency-free and supports theme hooks, readable link fallback, OSC 8 links when `TerminalCapabilities.hyperlinks` is true, parser adapters, optional fenced-code highlighter hooks, normalized list markers by default, and opt-in source list marker preservation with `MarkdownRenderOptions(preserveSourceListMarkers = true)`. Task-list markers render as visible text; they are not interactive checkboxes.
+Markdown rendering stays in `siglyph-markdown`. The baseline renderer is dependency-free, is available for JVM and Scala Native releases that include the Native artifact, and supports theme hooks, readable link fallback, OSC 8 links when `TerminalCapabilities.hyperlinks` is true, parser adapters, optional fenced-code highlighter hooks, normalized list markers by default, and opt-in source list marker preservation with `MarkdownRenderOptions(preserveSourceListMarkers = true)`. Task-list markers render as visible text; they are not interactive checkboxes.
 
-Image rendering stays in `siglyph-image`. `ImageSource.fromFile(path)` loads supported PNG, JPEG, GIF, and WebP files into base64 data, MIME type, and dimensions for the existing `Image` component contract. Unsupported terminals render readable fallback text. The `Image` component uses runtime cell-size replies by default; pass `ImageRenderOptions(cellDimensionsSource = ImageCellDimensionsSource.Fixed, cellDimensions = ...)` for deterministic fixed sizing. `examples/scala-cli/image.scala` is the quickest visual smoke test for protocol rendering, fallback behavior, runtime cell-size sizing in supported versions, and row reservation (see `examples/scala-cli/README.md` for running it against local sources from this checkout).
+Image rendering stays in `siglyph-image`. JVM and Scala Native releases that include the Native artifact expose the same baseline public API. `ImageSource.fromFile(path)` loads supported PNG, JPEG, GIF, and WebP files into base64 data, MIME type, and dimensions for the existing `Image` component contract. Unsupported terminals render readable fallback text. The `Image` component uses runtime cell-size replies by default; pass `ImageRenderOptions(cellDimensionsSource = ImageCellDimensionsSource.Fixed, cellDimensions = ...)` for deterministic fixed sizing. `examples/scala-cli/image.scala` is the quickest visual smoke test for protocol rendering, fallback behavior, runtime cell-size sizing in supported versions, and row reservation (see `examples/scala-cli/README.md` for running it against local sources from this checkout).
 
 Expandable helpers stay in `siglyph-extras`. The module depends only on `siglyph-core` and provides reusable compact/detail widgets without terminal backend, Markdown, image, demo, agent-session, LLM message, tool execution, extension runtime, model-selection, or message-history APIs.
 
