@@ -15,6 +15,21 @@ import scalatui.terminal.{
 
 import scala.collection.mutable.ArrayBuffer
 
+/** Terminal screen buffer mode owned by [[TUI]] for one runtime lifecycle. */
+enum TUIScreenMode derives CanEqual:
+  /**
+   * Render in the normal terminal screen. This is the default and preserves existing
+   * transcript-like behavior where rendered frames remain in the shell scrollback after exit.
+   */
+  case Normal
+
+  /**
+   * Enter the terminal alternate screen while the TUI is running and exit it during cleanup. This
+   * prevents TUI frames from being appended to normal shell scrollback. It does not add temporary
+   * modal sessions, a full-screen editor, or height-aware component rendering.
+   */
+  case Alternate
+
 /**
  * Runtime options for [[TUI]].
  *
@@ -23,8 +38,15 @@ import scala.collection.mutable.ArrayBuffer
  *   moves the terminal hardware cursor to the marker position after output. The default is false so
  *   existing applications keep relying on the rendered fake cursor only. This option is
  *   backend-independent and does not require application code to emit raw terminal escape strings.
+ * @param screenMode
+ *   Terminal screen buffer mode for this TUI lifecycle. The default [[TUIScreenMode.Normal]] keeps
+ *   existing normal-screen behavior. [[TUIScreenMode.Alternate]] enters the terminal alternate
+ *   screen on start and exits it during cleanup without changing the component render contract.
  */
-final case class TUIOptions(hardwareCursorPositioning: Boolean = false) derives CanEqual
+final case class TUIOptions(
+    hardwareCursorPositioning: Boolean = false,
+    screenMode: TUIScreenMode = TUIScreenMode.Normal
+) derives CanEqual
 
 /** Main terminal UI runtime with a small differential renderer. */
 final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
@@ -44,6 +66,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   private var renderRequested                         = false
   private var clearRequested                          = false
   private var autoWrapRestoreNeeded                   = false
+  private var alternateScreenEntered                  = false
   private var sanitizationCount                       = 0
   private var lastSanitization                        = Option.empty[TUI.RenderSanitization]
   private var runtimeFailure                          = Option.empty[Throwable]
@@ -222,25 +245,68 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         true
     }
     if shouldStart then
+      var startupCallbacksReady                          = false
+      var startupInputs                                  = List.empty[TerminalInput]
+      var startupResizeRequested                         = false
+      def deferOrHandleInput(input: TerminalInput): Unit =
+        safeRuntimeCallback {
+          val shouldHandle = lifecycleLock.synchronized {
+            if startupCallbacksReady then true
+            else
+              startupInputs = input :: startupInputs
+              false
+          }
+          if shouldHandle then handleInput(input)
+        }
+      def deferOrHandleResize(): Unit                    =
+        safeRuntimeCallback {
+          val shouldHandle = lifecycleLock.synchronized {
+            if startupCallbacksReady then true
+            else
+              startupResizeRequested = true
+              false
+          }
+          if shouldHandle then
+            requestRender()
+            flushRender()
+        }
       try
-        terminal.start(
-          input => safeRuntimeCallback(handleInput(input)),
-          () =>
-            safeRuntimeCallback {
-              requestRender()
-              flushRender()
-            }
-        )
+        terminal.start(deferOrHandleInput, () => deferOrHandleResize())
+        enterAlternateScreenIfConfigured()
         if terminalColorSchemeNotificationsEnabled then
           terminal.write(TerminalColorProtocol.EnableColorSchemeNotifications)
         TerminalImageProtocol.resetCellDimensions()
         terminal.hideCursor()
         terminal.write(TerminalImageProtocol.QueryCellDimensions)
-        requestRenderInternal(force = true, clear = false)
+        requestRenderInternal(force = true, clear = isAlternateScreenMode)
         flushRender()
+        // Keep callbacks deferred until replay drains all batches. Input delivered during replay
+        // stays buffered so it cannot overtake earlier startup input.
+        var startupReplayComplete = false
+        while !startupReplayComplete do
+          val (deferredInputs, deferredResizeRequested) = lifecycleLock.synchronized {
+            val inputs = startupInputs.reverse
+            val resize = startupResizeRequested
+            startupInputs = Nil
+            startupResizeRequested = false
+            inputs -> resize
+          }
+          deferredInputs.foreach(input => safeRuntimeCallback(handleInput(input)))
+          if deferredResizeRequested then
+            safeRuntimeCallback {
+              requestRender()
+              flushRender()
+            }
+          startupReplayComplete = lifecycleLock.synchronized {
+            if startupInputs.isEmpty && !startupResizeRequested then
+              startupCallbacksReady = true
+              true
+            else false
+          }
       catch
         case e: Throwable =>
-          stop()
+          try stop()
+          catch case cleanupFailure: Throwable => e.addSuppressed(cleanupFailure)
           throw e
 
   def run(): Unit =
@@ -261,15 +327,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     if running then
       running = false
       try
-        if previousLines.nonEmpty then
-          val builder = StringBuilder()
-          appendVerticalMove(
-            builder,
-            fromRow = cursorRow,
-            toRow = math.max(0, previousLines.length - 1)
-          )
-          builder.append("\r\n")
-          terminal.write(builder.result())
+        parkCursorBelowContentIfNeeded()
         if terminalColorSchemeNotificationsEnabled then
           terminal.write(TerminalColorProtocol.DisableColorSchemeNotifications)
         Terminal.drainInput(terminal)
@@ -278,8 +336,10 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         finally
           try terminal.showCursor()
           finally
-            try terminal.stop()
-            finally lifecycleLock.notifyAll()
+            try exitAlternateScreenIfNeeded()
+            finally
+              try terminal.stop()
+              finally lifecycleLock.notifyAll()
   }
 
   override def requestRender(force: Boolean = false): Unit = lifecycleLock.synchronized {
@@ -558,7 +618,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   ): Unit =
     val builder = StringBuilder()
     appendRenderStart(builder)
-    if clear then builder.append("\u001b[2J\u001b[H\u001b[3J")
+    if clear then builder.append(clearSequence)
     builder.append(frame.lines.mkString("\r\n"))
     appendHardwareCursorMove(builder, frame)
     appendRenderEnd(builder)
@@ -583,6 +643,34 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     autoWrapRestoreNeeded = true
     terminal.write(buffer)
     autoWrapRestoreNeeded = false
+
+  private def parkCursorBelowContentIfNeeded(): Unit =
+    if previousLines.nonEmpty && !alternateScreenEntered then
+      val builder = StringBuilder()
+      appendVerticalMove(
+        builder,
+        fromRow = cursorRow,
+        toRow = math.max(0, previousLines.length - 1)
+      )
+      builder.append("\r\n")
+      terminal.write(builder.result())
+
+  private def enterAlternateScreenIfConfigured(): Unit =
+    if isAlternateScreenMode && !alternateScreenEntered then
+      terminal.write(AlternateScreenEnter)
+      alternateScreenEntered = true
+
+  private def exitAlternateScreenIfNeeded(): Unit =
+    if alternateScreenEntered then
+      try terminal.write(AlternateScreenExit)
+      finally alternateScreenEntered = false
+
+  private def clearSequence: String =
+    if alternateScreenEntered then AlternateScreenClear else NormalScreenClear
+
+  private def isAlternateScreenMode: Boolean = options.screenMode match
+    case TUIScreenMode.Alternate => true
+    case TUIScreenMode.Normal    => false
 
   private def restoreAutoWrapIfNeeded(): Unit =
     if autoWrapRestoreNeeded then
@@ -712,14 +800,22 @@ object TUI:
       sanitized: String
   ) derives CanEqual
 
-  val SyncStart: String   = "\u001b[?2026h"
-  val SyncEnd: String     = "\u001b[?2026l"
-  val AutoWrapOff: String = "\u001b[?7l"
-  val AutoWrapOn: String  = "\u001b[?7h"
-  val LineReset: String   = "\u001b[0m\u001b]8;;\u0007"
+  val SyncStart: String            = "\u001b[?2026h"
+  val SyncEnd: String              = "\u001b[?2026l"
+  val AutoWrapOff: String          = "\u001b[?7l"
+  val AutoWrapOn: String           = "\u001b[?7h"
+  val AlternateScreenEnter: String = "\u001b[?1049h"
+  val AlternateScreenExit: String  = "\u001b[?1049l"
+  val NormalScreenClear: String    = "\u001b[2J\u001b[H\u001b[3J"
+  val AlternateScreenClear: String = "\u001b[2J\u001b[H"
+  val LineReset: String            = "\u001b[0m\u001b]8;;\u0007"
 
-private val SyncStart   = TUI.SyncStart
-private val SyncEnd     = TUI.SyncEnd
-private val AutoWrapOff = TUI.AutoWrapOff
-private val AutoWrapOn  = TUI.AutoWrapOn
-private val LineReset   = TUI.LineReset
+private val SyncStart            = TUI.SyncStart
+private val SyncEnd              = TUI.SyncEnd
+private val AutoWrapOff          = TUI.AutoWrapOff
+private val AutoWrapOn           = TUI.AutoWrapOn
+private val AlternateScreenEnter = TUI.AlternateScreenEnter
+private val AlternateScreenExit  = TUI.AlternateScreenExit
+private val NormalScreenClear    = TUI.NormalScreenClear
+private val AlternateScreenClear = TUI.AlternateScreenClear
+private val LineReset            = TUI.LineReset

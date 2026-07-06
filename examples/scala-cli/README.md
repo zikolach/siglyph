@@ -13,6 +13,7 @@ Run from this repository:
 ./examples/scala-cli/hello.scala
 ./examples/scala-cli/editor-autocomplete.scala
 ./examples/scala-cli/image.scala /path/to/image.png
+./examples/scala-cli/alternate-screen-maven.scala
 ```
 
 Run from a raw Gist URL:
@@ -23,8 +24,11 @@ chmod +x hello.scala
 ./hello.scala
 ```
 
-`hello.scala`, `editor-autocomplete.scala`, and `image.scala` require a real macOS/Linux TTY.
+`hello.scala`, `editor-autocomplete.scala`, `image.scala`, and `alternate-screen-maven.scala` require a real macOS/Linux TTY.
 `markdown.scala` is non-interactive and renders to standard output.
+
+
+`alternate-screen-maven.scala` demonstrates opt-in alternate-screen mode with a practical Sonatype Central explorer. It searches the Sonatype Central browse API, uses the full alternate-screen height and shows built-in loader states, artifacts, versions, published dates, and build-tool snippets in a temporary full-screen workspace, copies the selected snippet through terminal clipboard escape sequences with an inline `Copied!` badge, and exits back to the normal shell without leaving the search UI in scrollback. It uses `jsoniter-scala` only inside the example for JSON parsing. Until alternate-screen mode is available in a published release, this demo uses local source directives for `core/src` and `terminalJvm/src`, so run it from this checkout.
 
 `editor-autocomplete.scala` demonstrates the built-in `CombinedAutocompleteProvider` with:
 

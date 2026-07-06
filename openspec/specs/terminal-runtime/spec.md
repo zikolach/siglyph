@@ -128,6 +128,33 @@ Interactive terminal backends and the TUI runtime SHALL restore terminal state w
 - **WHEN** an exception occurs after raw mode has been enabled
 - **THEN** the runtime restores terminal state before propagating or reporting the exception
 
+### Requirement: Opt-in alternate-screen lifecycle
+The TUI runtime SHALL support an opt-in alternate-screen mode that enters the terminal alternate screen for the lifetime of a running `TUI` instance while preserving normal-screen mode as the default.
+
+#### Scenario: Default mode does not enter alternate screen
+- **WHEN** an application constructs and starts a `TUI` without configuring alternate-screen mode
+- **THEN** the terminal output does not contain `ESC[?1049h` or `ESC[?1049l`
+
+#### Scenario: Alternate-screen mode enters before first frame
+- **WHEN** an application starts a `TUI` configured for alternate-screen mode
+- **THEN** the runtime emits `ESC[?1049h` before writing the first rendered frame
+
+#### Scenario: Alternate-screen mode exits on stop
+- **WHEN** an application stops a `TUI` that entered alternate-screen mode
+- **THEN** the runtime emits `ESC[?1049l` before returning control to the shell
+
+#### Scenario: Alternate-screen mode skips normal-screen cursor parking
+- **WHEN** an application stops a `TUI` that entered alternate-screen mode after rendering content
+- **THEN** the runtime exits alternate screen without writing the normal-screen cursor-below-content parking sequence
+
+#### Scenario: Alternate-screen cleanup runs after runtime failure
+- **WHEN** a runtime failure occurs after alternate-screen mode has been entered
+- **THEN** the runtime restores autowrap if needed, shows the cursor, exits alternate screen, and stops the terminal backend
+
+#### Scenario: Alternate-screen lifecycle is idempotent
+- **WHEN** `stop()` is called more than once after an alternate-screen `TUI` has been started
+- **THEN** alternate-screen exit is emitted at most once for that lifecycle
+
 ### Requirement: JVM and Native interactive parity
 The project SHALL provide interactive runtime behavior and demo launch targets for both JVM and Scala Native backends.
 
@@ -151,19 +178,23 @@ The TUI runtime SHALL clamp terminal render dimensions to positive minimums befo
 - **THEN** the TUI tracks at least one row for redraw and viewport decisions
 
 ### Requirement: Height-aware resize redraws
-The TUI runtime SHALL track both terminal width and terminal height changes across renders and SHALL repaint after dimension changes using pi-tui-style full clear output without entering alternate-screen mode.
+The TUI runtime SHALL track both terminal width and terminal height changes across renders and SHALL repaint after dimension changes according to the active screen mode.
 
-#### Scenario: Width resize redraws with full clear
-- **WHEN** terminal width changes after a previous render
-- **THEN** the TUI emits synchronized output with autowrap disabled, clears the viewport and scrollback with `CSI 2 J`, `CSI H`, and `CSI 3 J`, and writes the recomputed frame
+#### Scenario: Normal-screen width resize redraws with full clear
+- **WHEN** terminal width changes after a previous render in normal-screen mode
+- **THEN** the TUI emits synchronized output with autowrap disabled, clears the viewport and scrollback with `CSI 2 J`, `CSI H`, and `CSI 3 J`, and writes the recomputed frame without entering alternate screen
 
-#### Scenario: Height resize redraws with full clear
-- **WHEN** terminal height changes after a previous render
-- **THEN** the TUI emits synchronized output with autowrap disabled, clears the viewport and scrollback with `CSI 2 J`, `CSI H`, and `CSI 3 J`, and writes the recomputed frame
+#### Scenario: Normal-screen height resize redraws with full clear
+- **WHEN** terminal height changes after a previous render in normal-screen mode
+- **THEN** the TUI emits synchronized output with autowrap disabled, clears the viewport and scrollback with `CSI 2 J`, `CSI H`, and `CSI 3 J`, and writes the recomputed frame without entering alternate screen
 
 #### Scenario: Resize with overlay recomputes layout
-- **WHEN** terminal dimensions change while an autocomplete overlay is visible
+- **WHEN** terminal dimensions change while an autocomplete overlay is visible in normal-screen mode
 - **THEN** the overlay is re-resolved and composited into the full-clear resize redraw without entering alternate-screen mode
+
+#### Scenario: Alternate-screen resize redraw clears active viewport
+- **WHEN** terminal dimensions change after a previous render while alternate-screen mode is active
+- **THEN** the TUI emits synchronized output with autowrap disabled, clears the active alternate-screen viewport, homes the cursor, and writes the recomputed frame without emitting another alternate-screen enter sequence or `CSI 3 J`
 
 ### Requirement: Runtime sanitizes over-wide output
 The TUI runtime SHALL sanitize final rendered non-image lines before writing to the terminal so normal interactive rendering does not throw because a line exceeds terminal width.
