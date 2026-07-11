@@ -241,6 +241,36 @@ class InteractiveDemoSuite extends munit.FunSuite:
     )
     assertEquals(messages, Vector("query #1 started", "query #1: complete"))
 
+  test("thrown demo query invocation releases ownership and preserves the original failure"):
+    val subscription = DemoQuerySubscription()
+    val failure      = IllegalStateException("query failed")
+    val query        = (_: String => Unit) => throw failure
+
+    val thrown = intercept[IllegalStateException] {
+      subscription.start(query)(_ => ())((_, _) => ())
+    }
+
+    assert(thrown eq failure)
+    assertEquals(subscription.start(_ => () => ())(_ => ())((_, _) => ()), Some(2L))
+
+  test("thrown old demo query invocation cannot clear newer ownership"):
+    val subscription = DemoQuerySubscription()
+    val failure      = RuntimeException("query failed after completion")
+    var nestedStart  = Option.empty[Long]
+    val query        = (callback: String => Unit) =>
+      callback("complete")
+      throw failure
+
+    val thrown = intercept[RuntimeException] {
+      subscription.start(query)(_ => ()) { (_, _) =>
+        nestedStart = subscription.start(_ => () => ())(_ => ())((_, _) => ())
+      }
+    }
+
+    assert(thrown eq failure)
+    assertEquals(nestedStart, Some(2L))
+    assertEquals(subscription.start(_ => () => ())(_ => ())((_, _) => ()), None)
+
   test("old demo query completion cannot clear newer ownership"):
     val subscription = DemoQuerySubscription()
     var callbacks    = Vector.empty[String => Unit]

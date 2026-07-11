@@ -125,3 +125,7 @@ Manual JVM and Scala Native resize smoke was not run during the independent vali
 ## 14. Unlimited application-owned Input values
 
 - [x] 14.1 Document that 4096-byte chunk, parser, and ingress limits bound transport and runtime transit state only, while `Input` and other application-owned component values have no core content-size limit and applications own validation or rejection before retention.
+
+## 15. Demo query invocation failure ownership
+
+- [x] 15.1 Release only the throwing demo query's active ownership, rethrow the original failure unchanged, and add recovery and stale-ownership regressions.

@@ -185,3 +185,11 @@ The interactive demo SHALL retain at most one unanswered subscription per query 
 - **WHILE** one demo subscription for a protocol remains unanswered
 - **WHEN** the demo considers another query for that protocol
 - **THEN** it does not create a second subscription
+
+#### Scenario: Demo query invocation fails
+- **WHEN** query invocation throws before cancellation installation
+- **THEN** the demo releases that query's ownership only if its query ID still owns the active slot and rethrows the original failure unchanged
+
+#### Scenario: Failed query completed synchronously
+- **WHEN** synchronous completion clears a query's ownership and establishes a newer query before the old invocation throws
+- **THEN** failure cleanup preserves the newer query's ownership

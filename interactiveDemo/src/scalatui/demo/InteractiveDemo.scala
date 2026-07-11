@@ -751,7 +751,14 @@ private[demo] final class DemoQuerySubscription:
     }
     queryId.map { id =>
       onStarted(id)
-      val cancel = query(result => complete(id, result, onComplete))
+      val cancel =
+        try query(result => complete(id, result, onComplete))
+        catch
+          case failure: Throwable =>
+            synchronized {
+              if active.exists(_._1 === id) then active = None
+            }
+            throw failure
       synchronized {
         if active.exists(_._1 === id) then active = Some(id -> cancel)
       }

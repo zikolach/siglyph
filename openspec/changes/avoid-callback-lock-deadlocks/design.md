@@ -162,3 +162,7 @@ Input owns one mutable paste session from `PasteStart` until `PasteEnd` or the f
 The session seeds one incremental grapheme counter with the original prefix and advances it only with newly decoded text. This keeps cursor placement exact when combining marks, ZWJ sequences, or regional-indicator pairs cross chunk boundaries at start, middle, or end insertion positions. `value` and `render` expose the accepted text during an active paste by viewing the session's current prefix plus retained suffix. Paste start and chunks request no render; finalization publishes one immutable value and requests one render only when text was accepted. A non-paste input finalizes first and then follows its normal render behavior.
 
 Deterministic tests inspect the canonical package-scoped session to prove one append per non-empty decoded segment and no accumulated-prefix rebuild. A multi-megabyte regression uses bounded chunks and exact value, render, cursor, undo, backspace, and interruption assertions without elapsed-time limits.
+
+## Demo query invocation failure ownership
+
+If demo query invocation throws before cancellation installation, the subscription clears the active slot only when that query ID still owns it and rethrows the same failure. Synchronous completion may clear the slot and establish a newer query before the invocation throws; in that case, failure cleanup does not clear the newer ownership.
