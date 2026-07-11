@@ -225,6 +225,26 @@ class StreamTerminalSuite extends munit.FunSuite:
     )(_ => observedLock.synchronized(observed :+= "stale"))
     assertEquals(observedLock.synchronized(observed), Vector("first", "third", "fourth"))
 
+  test("ordered delivery suppresses the remainder when a callback invalidates its generation"):
+    val delivery   = OrderedInputDelivery()
+    val generation = delivery.start(())
+    var observed   = Vector.empty[String]
+
+    delivery.parseAndDeliver(
+      generation,
+      Vector(
+        TerminalInput.Key(TerminalKey.Character("first")),
+        TerminalInput.Key(TerminalKey.Character("second"))
+      )
+    ) {
+      case TerminalInput.Key(TerminalKey.Character(value), _) =>
+        observed :+= value
+        delivery.stop(generation, ())
+      case _                                                  => ()
+    }
+
+    assertEquals(observed, Vector("first"))
+
   test("ordered delivery restores waiter interruption when callback throws and keeps ordering"):
     val delivery       = OrderedInputDelivery()
     val firstStarted   = CountDownLatch(1)
@@ -391,6 +411,167 @@ class StreamTerminalSuite extends munit.FunSuite:
       "StreamTerminal is already running"
     )
     releaseCurrentRead.countDown()
+    terminal.stop()
+
+  test("stream terminal delivers complete ordered EOF vectors and terminates"):
+    val incompleteUtf8 = Array[Byte](0xf0.toByte, 0x9f.toByte)
+    val incompleteCsi  = Array[Byte](0x1b, 0x5b, 0x31, 0x3b)
+    val values         = Vector(
+      Array[Byte](0x1b)                          -> Vector(TerminalInput.Key(TerminalKey.Escape)),
+      incompleteUtf8                             -> Vector(
+        TerminalInput.RawStart(TerminalRawKind.Utf8),
+        TerminalInput.RawChunk(TerminalInputChunk(incompleteUtf8)),
+        TerminalInput.RawEnd(TerminalRawTermination.Incomplete)
+      ),
+      incompleteCsi                              -> Vector(
+        TerminalInput.RawStart(TerminalRawKind.Csi),
+        TerminalInput.RawChunk(TerminalInputChunk(incompleteCsi)),
+        TerminalInput.RawEnd(TerminalRawTermination.Incomplete)
+      ),
+      (Array[Byte]('x'.toByte) ++ incompleteCsi) -> Vector(
+        TerminalInput.Key(TerminalKey.Character("x")),
+        TerminalInput.RawStart(TerminalRawKind.Csi),
+        TerminalInput.RawChunk(TerminalInputChunk(incompleteCsi)),
+        TerminalInput.RawEnd(TerminalRawTermination.Incomplete)
+      )
+    )
+    values.foreach { (bytes, expected) =>
+      val terminal = StreamTerminal(input = ByteArrayInputStream(bytes))
+      val observed = CountDownLatch(expected.size)
+      var inputs   = Vector.empty[TerminalInput]
+      terminal.start(
+        input => {
+          inputs :+= input
+          observed.countDown()
+        },
+        () => ()
+      )
+      assert(observed.await(1, TimeUnit.SECONDS), s"missing EOF framing for ${bytes.toVector}")
+      assertEquals(inputs, expected)
+
+      val deadline  = System.nanoTime() + TimeUnit.SECONDS.toNanos(1)
+      var restarted = false
+      while !restarted && System.nanoTime() < deadline do
+        try
+          terminal.start(_ => (), () => ())
+          restarted = true
+        catch case _: IllegalStateException => Thread.onSpinWait()
+      assert(restarted, s"finite EOF did not terminate for ${bytes.toVector}")
+      terminal.stop()
+    }
+
+  test("stream terminal completes the final EOF vector before invalidating its generation"):
+    val bytes        = Array[Byte]('x'.toByte, 0x1b, 0x5b, 0x31, 0x3b)
+    val finalStarted = CountDownLatch(1)
+    val releaseFinal = CountDownLatch(1)
+    val terminal     = StreamTerminal(input = ByteArrayInputStream(bytes))
+    var inputs       = Vector.empty[TerminalInput]
+    terminal.start(
+      input => {
+        inputs :+= input
+        if input === TerminalInput.RawEnd(TerminalRawTermination.Incomplete) then
+          finalStarted.countDown()
+          releaseFinal.await()
+      },
+      () => ()
+    )
+
+    assert(finalStarted.await(1, TimeUnit.SECONDS))
+    assertEquals(
+      intercept[IllegalStateException](terminal.start(_ => (), () => ())).getMessage,
+      "StreamTerminal is already running"
+    )
+    releaseFinal.countDown()
+
+    val deadline  = System.nanoTime() + TimeUnit.SECONDS.toNanos(1)
+    var restarted = false
+    while !restarted && System.nanoTime() < deadline do
+      try
+        terminal.start(_ => (), () => ())
+        restarted = true
+      catch case _: IllegalStateException => Thread.onSpinWait()
+    assert(restarted, "finite EOF did not invalidate after delivering its complete final vector")
+    terminal.stop()
+    assertEquals(
+      inputs,
+      Vector(
+        TerminalInput.Key(TerminalKey.Character("x")),
+        TerminalInput.RawStart(TerminalRawKind.Csi),
+        TerminalInput.RawChunk(TerminalInputChunk(bytes.drop(1))),
+        TerminalInput.RawEnd(TerminalRawTermination.Incomplete)
+      )
+    )
+
+  test("stream terminal discards incomplete paste at finite EOF without synthetic end"):
+    val bytes     = "\u001b[200~unfinished".getBytes(java.nio.charset.StandardCharsets.UTF_8)
+    val terminal  = StreamTerminal(input = ByteArrayInputStream(bytes))
+    val pasteSeen = CountDownLatch(1)
+    val stopped   = CountDownLatch(1)
+    var inputs    = Vector.empty[TerminalInput]
+    terminal.start(
+      input => {
+        inputs :+= input
+        if input === TerminalInput.PasteStart then pasteSeen.countDown()
+      },
+      () => ()
+    )
+    assert(pasteSeen.await(1, TimeUnit.SECONDS))
+    val deadline  = System.nanoTime() + TimeUnit.SECONDS.toNanos(1)
+    while !stopped.await(0, TimeUnit.NANOSECONDS) && System.nanoTime() < deadline do
+      try
+        terminal.start(_ => (), () => ())
+        stopped.countDown()
+      catch case _: IllegalStateException => Thread.onSpinWait()
+    terminal.stop()
+    assert(stopped.getCount === 0L, "finite EOF did not terminate the generation")
+    assertEquals(inputs, Vector(TerminalInput.PasteStart))
+
+  test("stream terminal rejects restart while the old flush worker remains alive"):
+    val releaseRead   = CountDownLatch(1)
+    val callbackStart = CountDownLatch(1)
+    val releaseFlush  = CountDownLatch(1)
+    val input         = new java.io.InputStream:
+      private var first                                                     = true
+      override def read(): Int                                              = -1
+      override def read(buffer: Array[Byte], offset: Int, length: Int): Int =
+        if first then
+          first = false
+          buffer(offset) = 0x1b.toByte
+          1
+        else
+          try releaseRead.await()
+          catch case _: InterruptedException => ()
+          -1
+    val terminal      = StreamTerminal(input = input)
+    terminal.start(
+      _ => {
+        callbackStart.countDown()
+        var released = false
+        while !released do
+          try
+            releaseFlush.await()
+            released = true
+          catch case _: InterruptedException => ()
+      },
+      () => ()
+    )
+    assert(callbackStart.await(1, TimeUnit.SECONDS))
+    terminal.stop()
+    releaseRead.countDown()
+
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1)
+    var message  = ""
+    while (message !== "cannot restart StreamTerminal while the previous flush worker is still alive") &&
+      System.nanoTime() < deadline
+    do
+      message = intercept[IllegalStateException](terminal.start(_ => (), () => ())).getMessage
+      if message !== "cannot restart StreamTerminal while the previous flush worker is still alive"
+      then Thread.onSpinWait()
+    assertEquals(
+      message,
+      "cannot restart StreamTerminal while the previous flush worker is still alive"
+    )
+    releaseFlush.countDown()
     terminal.stop()
 
   test("stream terminal drain discards pending escape without dispatching input"):

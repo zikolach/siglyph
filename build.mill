@@ -120,6 +120,7 @@ object coreNative extends SiglyphNativePublishModule {
     def sources       = Task.Sources(
       workspaceRoot / "core" / "test" / "src" / "scalatui" / "TestInputStreams.scala",
       workspaceRoot / "core" / "test" / "src" / "scalatui" / "components" / "EditorSuite.scala",
+      workspaceRoot / "core" / "test" / "src" / "scalatui" / "components" / "InputPasteSuite.scala",
       workspaceRoot / "core" / "test" / "src" / "scalatui" / "core" / "TUIConcurrencySuite.scala",
       workspaceRoot / "core" / "test" / "src" / "scalatui" / "editing" / "EditorBufferSuite.scala",
       workspaceRoot / "core" / "test" / "src" / "scalatui" / "terminal" / "TerminalInputBufferSuite.scala",

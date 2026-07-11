@@ -55,3 +55,27 @@ Accepted TUI root additions, removals, and clears SHALL update immutable desired
 #### Scenario: Structural hook fails
 - **WHEN** attach or detach throws
 - **THEN** the committed mutation remains, later ordinary work is discarded, failure is recorded, and cleanup proceeds
+
+### Requirement: Ordinary work selection is deterministic and fair
+The runtime SHALL retain one serialized owner, prioritize retained query completions and stop or cleanup progression as urgent work, and select ordinary Structural, Action, Ingress, Control, and Render work in deterministic cyclic order. Queued categories SHALL remain FIFO, and Render SHALL remain coalesced.
+
+#### Scenario: Continuously ready ordinary category is bounded
+- **WHILE** ordinary categories remain continuously ready
+- **WHEN** the owner selects ordinary work
+- **THEN** the runtime services each category within five ordinary selections
+
+#### Scenario: Urgent work precedes ordinary work
+- **WHILE** retained query completions or stop or cleanup progression is ready
+- **WHEN** the owner selects work
+- **THEN** it selects urgent work before an ordinary category without creating a second owner
+
+### Requirement: Structural claim and overlay restoration are publication-ordered
+The owner SHALL commit structural model state atomically when claiming Structural work, invoke root mutation and hooks outside runtime locks, and capture overlay restoration focus in owner publication order.
+
+#### Scenario: Structural work is claimed
+- **WHEN** the owner claims an accepted structural operation
+- **THEN** committed model state changes atomically before root mutation or hooks run outside locks
+
+#### Scenario: Overlay restoration focus is captured
+- **WHEN** overlay and focus work is published in an owner-defined order
+- **THEN** restoration uses the focus captured at the overlay operation's publication point and later work does not retroactively change it

@@ -18,6 +18,8 @@ import scalatui.terminal.{
 
 import scala.scalanative.unsafe.*
 import scala.scalanative.unsigned.*
+import java.io.IOException
+
 import scala.scalanative.posix.termios
 import scala.scalanative.posix.termios.*
 import scala.scalanative.posix.termiosOps.*
@@ -31,8 +33,9 @@ import scala.scalanative.libc.stdlib
  *
  * It configures stdin raw mode via termios, reads stdin on a background thread, writes to stdout,
  * queries dimensions through ioctl, and polls for live resize changes while running. After
- * [[stop]], [[start]] requires the prior stdin reader to have terminated before raw mode is enabled
- * again.
+ * [[stop]], [[start]] requires the previous stdin reader, input flush worker, and resize worker to
+ * have terminated. Start is also rejected while any cleanup obligation from the previous run
+ * remains incomplete.
  */
 final class PosixTerminal(
     initialColumns: Int = PosixTerminal.envInt("COLUMNS").getOrElse(80),
@@ -43,27 +46,47 @@ final class PosixTerminal(
       TerminalTitleSupport,
       TerminalProgressSupport:
   private type Winsize = CStruct4[CUnsignedShort, CUnsignedShort, CUnsignedShort, CUnsignedShort]
-  @volatile private var running                             = false
-  @volatile private var resizePolling                       = false
-  @volatile private var inputHandler: TerminalInput => Unit = _ => ()
-  @volatile private var resizeHandler: () => Unit           = () => ()
-  @volatile private var currentColumns                      = initialColumns
-  @volatile private var currentRows                         = initialRows
-  private var inputThread: Thread | Null                    = null
-  private var resizeThread: Thread | Null                   = null
-  private var flushThread: Thread | Null                    = null
-  private var savedState: Ptr[termios.termios]              = null
-  private val inputBuffer                                   = TerminalInputBuffer()
-  private val inputDelivery                                 = OrderedInputDelivery()
-  private var inputGeneration                               = 0L
-  private val keyboardProtocolNegotiator                    = KittyKeyboardProtocolNegotiator()
+  @volatile private var running                                             = false
+  @volatile private var resizePolling                                       = false
+  @volatile private var inputHandler: TerminalInput => Unit                 = _ => ()
+  @volatile private var resizeHandler: () => Unit                           = () => ()
+  @volatile private var currentColumns                                      = initialColumns
+  @volatile private var currentRows                                         = initialRows
+  private var inputThread: Thread | Null                                    = null
+  private var resizeThread: Thread | Null                                   = null
+  private var flushThread: Thread | Null                                    = null
+  private var savedState: Ptr[termios.termios]                              = null
+  private val inputBuffer                                                   = TerminalInputBuffer()
+  private val inputDelivery                                                 = OrderedInputDelivery()
+  private var inputGeneration                                               = 0L
+  private var inputCleanupPending                                           = false
+  private var pasteCleanupPending                                           = false
+  private var kittyCleanupPending                                           = false
+  private[native] var cleanupFailureForTesting: String => Option[Throwable] = _ => None
+  private[native] var writeFailureForTesting: String => Option[Throwable]   = _ => None
+  private val keyboardProtocolNegotiator                                    = KittyKeyboardProtocolNegotiator()
 
   override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit = synchronized {
-    if !running then
+    if running then throw IllegalStateException("PosixTerminal is already running")
+    else
       reapInputThread()
+      reapFlushThread()
+      reapResizeThread()
+      if hasCleanupObligations then
+        throw IllegalStateException(
+          "cannot start PosixTerminal while cleanup from the previous generation remains incomplete"
+        )
       if inputThread ne null then
         throw IllegalStateException(
           "cannot restart PosixTerminal while the previous stdin reader is still alive"
+        )
+      if flushThread ne null then
+        throw IllegalStateException(
+          "cannot restart PosixTerminal while the previous flush worker is still alive"
+        )
+      if resizeThread ne null then
+        throw IllegalStateException(
+          "cannot restart PosixTerminal while the previous resize worker is still alive"
         )
       if unistd.isatty(unistd.STDIN_FILENO) == 0 then
         throw IllegalStateException(
@@ -74,8 +97,10 @@ final class PosixTerminal(
       refreshSize(notify = false)
       try
         enableRawMode()
+        pasteCleanupPending = true
         write("\u001b[?2004h")
         inputGeneration = inputDelivery.start(inputBuffer.clear())
+        inputCleanupPending = true
         running = true
         val generation = inputGeneration
         val thread     = Thread(() => readLoop(generation), "scala-tui-posix-terminal-input")
@@ -90,42 +115,17 @@ final class PosixTerminal(
       catch
         case e: Throwable =>
           running = false
-          inputDelivery.stop(inputGeneration, inputBuffer.clear())
           stopResizePolling()
-          Option(inputThread).foreach(_.interrupt())
-          Option(flushThread).foreach(_.interrupt())
-          reapInputThread()
-          reapFlushThread()
-          def attempt(action: => Unit): Unit =
-            try action
-            catch case cleanupFailure: Throwable => e.addSuppressed(cleanupFailure)
-          attempt(write("\u001b[?2004l"))
-          attempt(inputDelivery.clear(inputBuffer.clear()))
-          attempt(restoreMode())
+          cleanup().foreach(e.addSuppressed)
           throw e
 
   }
 
   override def stop(): Unit = synchronized {
-    if running || savedState != null then
+    if running || hasCleanupObligations || (inputThread ne null) || (flushThread ne null) then
       running = false
-      inputDelivery.stop(inputGeneration, inputBuffer.clear())
       stopResizePolling()
-      Option(inputThread).foreach(_.interrupt())
-      Option(flushThread).foreach(_.interrupt())
-      reapInputThread()
-      reapFlushThread()
-      var failure                        = Option.empty[Throwable]
-      def attempt(action: => Unit): Unit =
-        try action
-        catch
-          case error: Throwable => failure match
-              case Some(first) => first.addSuppressed(error)
-              case None        => failure = Some(error)
-      attempt(disableKittyKeyboardProtocol())
-      attempt(write("\u001b[?2004l"))
-      attempt(restoreMode())
-      failure.foreach(throw _)
+      cleanup().foreach(throw _)
 
   }
 
@@ -133,8 +133,14 @@ final class PosixTerminal(
     inputDelivery.clear(inputBuffer.clear())
 
   override def write(data: String): Unit =
-    System.out.print(data)
-    System.out.flush()
+    val stream = System.out
+    stream.print(data)
+    writeFailureForTesting(data).foreach(throw _)
+    stream.flush()
+    if stream.checkError() then
+      throw IOException(
+        "PosixTerminal output PrintStream reported a suppressed output failure; check stdout"
+      )
 
   override def columns: Int =
     refreshSize(notify = false)
@@ -172,13 +178,16 @@ final class PosixTerminal(
       nowMillis: Long
   ): Boolean =
     val accepted = keyboardProtocolNegotiator.receiveResponse(response, nowMillis)
-    if accepted then write(KittyKeyboardProtocol.EnableSequence)
+    if accepted then
+      kittyCleanupPending = true
+      write(KittyKeyboardProtocol.EnableSequence)
     accepted
 
   override def disableKittyKeyboardProtocol(): Unit =
     if keyboardProtocolState !== KittyKeyboardProtocolState.Inactive then
       write(KittyKeyboardProtocol.DisableSequence)
     keyboardProtocolNegotiator.disable()
+    kittyCleanupPending = false
 
   private def enableRawMode(): Unit =
     if savedState == null then
@@ -241,16 +250,20 @@ final class PosixTerminal(
   private def stopResizePolling(): Unit =
     resizePolling = false
     Option(resizeThread).foreach(_.interrupt())
-    resizeThread = null
+
+  private def reapResizeThread(): Unit =
+    if Option(resizeThread).exists(!_.isAlive) then resizeThread = null
 
   private def resizeLoop(): Unit =
-    while resizePolling do
-      try
-        Thread.sleep(PosixTerminal.ResizePollMillis)
-        refreshSize(notify = true)
-      catch
-        case _: InterruptedException => resizePolling = false
-        case _: Throwable            => ()
+    try
+      while resizePolling do
+        try
+          Thread.sleep(PosixTerminal.ResizePollMillis)
+          refreshSize(notify = true)
+        catch
+          case _: InterruptedException => resizePolling = false
+          case _: Throwable            => ()
+    finally clearResizeThread(Thread.currentThread())
 
   private def readLoop(generation: Long): Unit =
     try
@@ -294,6 +307,38 @@ final class PosixTerminal(
         if inputGeneration === generation then running = false
       }
 
+  private def hasCleanupObligations: Boolean =
+    inputCleanupPending || kittyCleanupPending || pasteCleanupPending || savedState != null
+
+  private def cleanup(): Option[Throwable] =
+    var failure                                      = Option.empty[Throwable]
+    def attempt(name: String)(action: => Unit): Unit =
+      try
+        cleanupFailureForTesting(name).foreach(throw _)
+        action
+      catch
+        case error: Throwable => failure match
+            case Some(first) => first.addSuppressed(error)
+            case None        => failure = Some(error)
+
+    if inputCleanupPending then
+      attempt("input") {
+        inputDelivery.stop(inputGeneration, inputBuffer.clear())
+        Option(inputThread).foreach(_.interrupt())
+        Option(flushThread).foreach(_.interrupt())
+        reapInputThread()
+        reapFlushThread()
+        inputCleanupPending = false
+      }
+    if kittyCleanupPending then attempt("kitty")(disableKittyKeyboardProtocol())
+    if pasteCleanupPending then
+      attempt("paste") {
+        write("\u001b[?2004l")
+        pasteCleanupPending = false
+      }
+    if savedState != null then attempt("termios")(restoreMode())
+    failure
+
   private def reapInputThread(): Unit =
     if Option(inputThread).exists(!_.isAlive) then inputThread = null
 
@@ -306,6 +351,14 @@ final class PosixTerminal(
 
   private def clearFlushThread(thread: Thread): Unit = synchronized {
     if flushThread eq thread then flushThread = null
+  }
+
+  private def clearResizeThread(thread: Thread): Unit = synchronized {
+    if resizeThread eq thread then resizeThread = null
+  }
+
+  private[native] def retainFlushThreadForTesting(thread: Thread): Unit = synchronized {
+    flushThread = thread
   }
 
   private def clearFlags(value: termios.tcflag_t, mask: Int): termios.tcflag_t =

@@ -118,6 +118,17 @@ The API SHALL expose copied `TerminalInputChunk` values of length 1 through 4096
 - **WHEN** terminal input is pattern matched
 - **THEN** paste uses `PasteStart`, `PasteChunk`, `PasteEnd` and raw uses `RawStart`, `RawChunk`, `RawEnd`
 
+### Requirement: Bounded transport does not limit application-owned content
+The 4096-byte chunk, parser, and ingress limits SHALL bound transport and runtime transit state only. `Input` and other application-owned component values SHALL have no core content-size limit. Applications that need content limits SHALL validate or reject content before retaining it. Core SHALL NOT truncate or drop content, add a fixed content limit, add limit configuration, or add an overflow callback in this change.
+
+#### Scenario: Bounded input is documented
+- **WHEN** bounded input is documented
+- **THEN** the documentation distinguishes transport and runtime transit bounds from retained application content
+
+#### Scenario: Application requires a content limit
+- **WHEN** an application requires a content-size limit
+- **THEN** the application validates or rejects content before retaining it without relying on core truncation, dropping, configuration, or overflow callbacks
+
 ### Requirement: TUI root structural API publishes desired state
 The TUI SHALL expose `addChild(component): Unit`, `removeChild(component): Unit`, `clear(): Unit`, and `children: Vector[Component]`, while Container and Box retain their local Boolean removal APIs.
 
@@ -143,3 +154,34 @@ The Editor SHALL treat one `PasteStart` through `PasteEnd` stream as one logical
 #### Scenario: Large streamed paste remains expandable
 - **WHEN** aggregate paste content exceeds 10 lines or 1000 grapheme clusters
 - **THEN** marker metrics use the whole normalized paste and submit or expansion recovers the exact normalized content
+
+### Requirement: Query ownership and paste cardinality are documented
+The public API documentation SHALL state that the runtime retains a query wire flight until reply, stop, or failure, each subscriber owns cancellation and timeout scheduling, and one bracketed paste contains zero or more `PasteChunk` events.
+
+#### Scenario: Subscriber leaves a wire flight
+- **WHEN** a subscriber no longer wants a query result
+- **THEN** it invokes its idempotent cancellation function while the runtime retains the wire flight independently
+
+#### Scenario: Empty paste is represented
+- **WHEN** bracketed paste has no content
+- **THEN** input delivery contains `PasteStart` followed by `PasteEnd` with zero `PasteChunk` events
+
+### Requirement: Query exit routing cancels before runtime stop
+Applications that no longer need active query subscriptions on exit SHALL disable applicable built-in exit handling before startup and SHALL install cancellation-aware exit routing only after cancellation functions are established.
+
+#### Scenario: Input arrives before cancellation is established
+- **WHILE** cancellation functions are not installed
+- **WHEN** input arrives
+- **THEN** the example does not trigger built-in runtime exit
+
+#### Scenario: Cancellation-aware listener handles exit
+- **WHEN** the cancellation-aware listener handles exit
+- **THEN** the example cancels active subscribers before requesting exit
+
+### Requirement: Demo query subscriptions are bounded
+The interactive demo SHALL retain at most one unanswered subscription per query protocol and SHALL not use a timer to enforce that bound.
+
+#### Scenario: Query remains unanswered
+- **WHILE** one demo subscription for a protocol remains unanswered
+- **WHEN** the demo considers another query for that protocol
+- **THEN** it does not create a second subscription

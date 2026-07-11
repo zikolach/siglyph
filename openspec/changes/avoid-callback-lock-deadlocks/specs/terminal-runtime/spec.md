@@ -218,3 +218,80 @@ Correlation-only raw fragments SHALL consume zero ingress slots. A recognized fi
 #### Scenario: Blocked classification is non-mutating
 - **WHEN** classification needs an output slot and ingress is full
 - **THEN** it waits without changing correlation, notification, or query-flight state and atomically commits the transition with the first enqueued output after capacity becomes available
+
+### Requirement: Starting backpressure does not retain backend start
+`Terminal.start` SHALL return independently of callbacks invoked from other threads. Application callbacks accepted during `Starting` SHALL remain deferred until `Running`, even when bounded Starting ingress backpressures publishers.
+
+#### Scenario: Full Starting ingress blocks a publisher
+- **WHILE** Starting ingress is full
+- **WHEN** a publisher blocks
+- **THEN** backend start returns independently, transitions can reach Running, and Running can drain the blocked ingress without invoking application callbacks during Starting
+
+### Requirement: Cleaning callback sets are finite and globally serialized
+Cleaning SHALL have one finite pre-restoration callback set and one finite post-restoration callback set, SHALL serialize both through the single owner, and SHALL prevent later query registration from overlapping callbacks or extending restoration.
+
+#### Scenario: Late query registers during detached callbacks
+- **WHILE** detached Cleaning callbacks execute
+- **WHEN** a late query registers
+- **THEN** the runtime prevents concurrent application callback execution and the registration cannot extend restoration
+
+#### Scenario: Restoration seals post-restoration work
+- **WHEN** restoration completion detaches the post-restoration callback set
+- **THEN** that finite set runs serially and later registrations use stopped behavior
+
+### Requirement: Escape Alt framing uses flush as its sequence boundary
+The parser SHALL frame Escape followed by one multibyte UTF-8 scalar as one Alt input without duplicating or losing bytes when the complete scalar arrives before parser flush. Parser flush SHALL end pending non-paste Escape and Alt framing.
+
+#### Scenario: Alt scalar crosses read fragments before flush
+- **WHEN** Escape and the bytes of a multibyte UTF-8 scalar arrive in separate read fragments before parser flush
+- **THEN** the parser emits exactly one Alt input for that scalar
+
+#### Scenario: Flush follows pending Escape
+- **WHEN** parser flush occurs after Escape and before another scalar byte arrives
+- **THEN** flush emits standalone Escape and later bytes start a separate sequence
+
+#### Scenario: Flush follows incomplete Alt scalar
+- **WHEN** parser flush occurs after Escape and an incomplete multibyte UTF-8 scalar prefix
+- **THEN** flush emits that framing with incomplete raw termination and later bytes start a separate sequence
+
+### Requirement: Ordered delivery validates every event and restart excludes old workers
+Ordered delivery SHALL recheck terminal-start generation before each event, and restart SHALL reject a live old-generation reader, flush worker, or backend resize worker.
+
+#### Scenario: Generation changes within a batch
+- **WHEN** generation becomes stale after one event in an ordered batch
+- **THEN** delivery rejects every remaining event before invoking its callback
+
+#### Scenario: Old worker remains live
+- **WHILE** an old-generation reader, flush worker, or backend resize worker remains live
+- **WHEN** restart is requested
+- **THEN** restart throws `IllegalStateException` before starting new-generation workers
+
+### Requirement: Finite stream EOF preserves only complete non-paste framing
+At EOF, finite StreamTerminal input SHALL deliver the complete final non-paste event vector before invalidating the generation and SHALL discard incomplete paste framing without a synthetic end event.
+
+#### Scenario: EOF flushes pending framing
+- **WHEN** EOF occurs
+- **THEN** the stream backend delivers the complete final non-paste event vector before generation invalidation and discards incomplete paste framing
+
+#### Scenario: EOF interrupts paste
+- **WHILE** bracketed paste has started without its end marker
+- **WHEN** EOF occurs
+- **THEN** the backend emits no synthetic `PasteEnd`
+
+### Requirement: Backend cleanup obligations are independently retained
+JVM and Native terminal backends SHALL retain and retry each failed cleanup obligation independently, SHALL not repeat successful obligations, and SHALL reject restart while any obligation remains.
+
+#### Scenario: One cleanup obligation fails
+- **WHEN** one cleanup obligation fails after another succeeds
+- **THEN** retry executes only the failed obligation and restart remains rejected until it succeeds
+
+#### Scenario: PrintStream suppresses cleanup output failure
+- **WHEN** configured PrintStream output records an error without throwing during cleanup output and replaces `System.out` while writing
+- **THEN** the backend checks the same PrintStream that performed the write, throws `IOException` before clearing that cleanup obligation, and rejects restart while it remains pending
+
+### Requirement: Missing controlling terminal is actionable
+SttyTerminal SHALL report an actionable initial missing `/dev/tty` error, preserve its cause, and SHALL not fall back to another terminal source.
+
+#### Scenario: Initial `/dev/tty` open fails
+- **WHEN** SttyTerminal cannot open `/dev/tty` during initial startup
+- **THEN** startup fails with an actionable diagnostic whose cause is the original error and no fallback is attempted

@@ -196,6 +196,71 @@ class InteractiveDemoSuite extends munit.FunSuite:
     assertWidthSafe(terminal.output, 12)
     assert(Ansi.strip(terminal.output).contains("help"), "expected suggestions after resize")
 
+  test("demo query subscription keeps at most one unanswered query"):
+    val subscription = DemoQuerySubscription()
+    var starts       = 0
+    var started      = 0
+    val query        = (_: String => Unit) =>
+      starts += 1
+      () => ()
+
+    assertEquals(subscription.start(query)(_ => started += 1)((_, _) => ()), Some(1L))
+    assertEquals(subscription.start(query)(_ => started += 1)((_, _) => ()), None)
+    assertEquals(starts, 1)
+    assertEquals(started, 1)
+
+  test("demo query subscription does not retain synchronous completion cancellation"):
+    val subscription = DemoQuerySubscription()
+    var completions  = Vector.empty[(Long, String)]
+    val query        = (callback: String => Unit) =>
+      callback("complete")
+      () => ()
+
+    assertEquals(
+      subscription.start(query)(_ => ())((id, result) => completions :+= id -> result),
+      Some(1L)
+    )
+    assertEquals(
+      subscription.start(query)(_ => ())((id, result) => completions :+= id -> result),
+      Some(2L)
+    )
+    assertEquals(completions, Vector(1L -> "complete", 2L -> "complete"))
+
+  test("demo query publishes started before synchronous user-visible completion"):
+    val subscription = DemoQuerySubscription()
+    var messages     = Vector.empty[String]
+    val query        = (callback: String => Unit) =>
+      callback("complete")
+      () => ()
+
+    assertEquals(
+      subscription.start(query)(id => messages :+= s"query #$id started") { (id, result) =>
+        messages :+= s"query #$id: $result"
+      },
+      Some(1L)
+    )
+    assertEquals(messages, Vector("query #1 started", "query #1: complete"))
+
+  test("old demo query completion cannot clear newer ownership"):
+    val subscription = DemoQuerySubscription()
+    var callbacks    = Vector.empty[String => Unit]
+    var completions  = Vector.empty[Long]
+    val query        = (callback: String => Unit) =>
+      callbacks :+= callback
+      () => ()
+
+    assertEquals(subscription.start(query)(_ => ())((id, _) => completions :+= id), Some(1L))
+    subscription.cancelActive()
+    assertEquals(subscription.start(query)(_ => ())((id, _) => completions :+= id), Some(2L))
+
+    callbacks.head("late")
+    assertEquals(subscription.start(query)(_ => ())((_, _) => ()), None)
+    assertEquals(completions, Vector.empty)
+
+    callbacks(1)("current")
+    assertEquals(subscription.start(query)(_ => ())((_, _) => ()), Some(3L))
+    assertEquals(completions, Vector(2L))
+
   private def assertWidthSafe(output: String, width: Int): Unit =
     val visibleLines = Ansi.strip(output).replace("\r\n", "\n").replace('\r', '\n').split("\n", -1)
     visibleLines.foreach { line =>

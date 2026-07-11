@@ -60,7 +60,8 @@ private[terminal] final class OrderedInputDelivery:
         }
 
         if accepted then
-          try inputs.foreach(deliver)
+          try
+            inputs.iterator.takeWhile(_ => isActive(expectedGeneration)).foreach(deliver)
           finally
             stateLock.synchronized {
               if active && generation === expectedGeneration && (id === nextDelivery) then

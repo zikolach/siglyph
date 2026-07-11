@@ -111,3 +111,49 @@ class TerminalInputParserSuite extends munit.FunSuite:
       val expected = String(bytes, java.nio.charset.StandardCharsets.UTF_8)
       assertEquals(actual, expected)
     }
+
+  test("flush is the explicit Escape and Alt framing boundary"):
+    val scalar = "🙂".getBytes(java.nio.charset.StandardCharsets.UTF_8)
+
+    val beforeFlush = TerminalInputBuffer()
+    assertEquals(
+      beforeFlush.process(TerminalInputChunk(Array(0x1b.toByte) ++ scalar)),
+      Vector(TerminalInput.Key(TerminalKey.Character("🙂"), KeyModifiers(alt = true)))
+    )
+    assertEquals(beforeFlush.flush(), Vector.empty)
+
+    val acrossFlush = TerminalInputBuffer()
+    assertEquals(
+      acrossFlush.process(TerminalInputChunk(Array(0x1b.toByte))),
+      Vector.empty
+    )
+    assertEquals(acrossFlush.flush(), Vector(TerminalInput.Key(TerminalKey.Escape)))
+    assertEquals(
+      acrossFlush.process(TerminalInputChunk(scalar)),
+      Vector(TerminalInput.Key(TerminalKey.Character("🙂")))
+    )
+
+  test("flush ends incomplete Alt UTF-8 framing and later bytes are separate"):
+    val scalar   = "🙂".getBytes(java.nio.charset.StandardCharsets.UTF_8)
+    val buffer   = TerminalInputBuffer()
+    assertEquals(
+      buffer.process(TerminalInputChunk(Array(0x1b.toByte) ++ scalar.take(2))),
+      Vector.empty
+    )
+    assertEquals(
+      buffer.flush(),
+      Vector(
+        TerminalInput.RawStart(TerminalRawKind.Escape),
+        TerminalInput.RawChunk(TerminalInputChunk(Array(0x1b.toByte) ++ scalar.take(2))),
+        TerminalInput.RawEnd(TerminalRawTermination.Incomplete)
+      )
+    )
+    val later    = buffer.process(TerminalInputChunk(scalar.drop(2)))
+    val expected = scalar.drop(2).toVector.flatMap { byte =>
+      Vector(
+        TerminalInput.RawStart(TerminalRawKind.Utf8),
+        TerminalInput.RawChunk(TerminalInputChunk(Array(byte))),
+        TerminalInput.RawEnd(TerminalRawTermination.Malformed)
+      )
+    }
+    assertEquals(later, expected)

@@ -8,9 +8,9 @@ import java.io.{InputStream, OutputStream}
  * Stream-backed terminal for non-interactive output and tests.
  *
  * It does not configure raw mode. Dimensions are provided explicitly or read from COLUMNS/LINES
- * environment variables. After [[stop]], [[start]] requires the prior input reader to have
- * terminated; an input stream that ignores interruption must unblock before this terminal can
- * restart.
+ * environment variables. After [[stop]], [[start]] requires the prior input reader and periodic
+ * flush worker to have terminated; a callback or input stream that ignores interruption must
+ * unblock before this terminal can restart.
  */
 class StreamTerminal(
     input: InputStream = InputStream.nullInputStream(),
@@ -30,9 +30,14 @@ class StreamTerminal(
   override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit = synchronized {
     if running then throw IllegalStateException("StreamTerminal is already running")
     reapInputThread()
+    reapFlushThread()
     if inputThread ne null then
       throw IllegalStateException(
         "cannot restart StreamTerminal while the previous input reader is still alive"
+      )
+    if flushThread ne null then
+      throw IllegalStateException(
+        "cannot restart StreamTerminal while the previous flush worker is still alive"
       )
     inputHandler = onInput
     inputGeneration = inputDelivery.start(inputBuffer.clear())
@@ -49,7 +54,7 @@ class StreamTerminal(
   }
 
   override def stop(): Unit = synchronized {
-    if running || (inputThread ne null) then
+    if running || (inputThread ne null) || (flushThread ne null) then
       running = false
       inputDelivery.stop(inputGeneration, inputBuffer.clear())
       Option(inputThread).foreach(_.interrupt())
@@ -85,7 +90,9 @@ class StreamTerminal(
       while inputDelivery.isActive(generation) do
         try
           val read = input.read(buffer)
-          if read < 0 then terminateGeneration(generation)
+          if read < 0 then
+            flushPending(generation)
+            terminateGeneration(generation)
           else if read === 0 then flushPending(generation)
           else
             val chunk = TerminalInputChunk(buffer, 0, read)

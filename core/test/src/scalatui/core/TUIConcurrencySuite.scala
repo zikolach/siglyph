@@ -56,6 +56,7 @@ class TUIConcurrencySuite extends munit.FunSuite:
     private var writesBuffer                        = Vector.empty[String]
     private var activeWrites                        = 0
     private var concurrentWriteObserved             = false
+    private var startCount                          = 0
     private var stopCount                           = 0
     var beforeStart: () => Unit                     = () => ()
     var beforeWrite: String => Unit                 = _ => ()
@@ -63,6 +64,7 @@ class TUIConcurrencySuite extends munit.FunSuite:
     var beforeStop: () => Unit                      = () => ()
 
     override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit = synchronized {
+      startCount += 1
       inputHandler = onInput
       resizeHandler = onResize
       beforeStart()
@@ -108,6 +110,7 @@ class TUIConcurrencySuite extends munit.FunSuite:
     def output: String              = synchronized(writesBuffer.mkString)
     def writes: Vector[String]      = synchronized(writesBuffer)
     def hadConcurrentWrite: Boolean = synchronized(concurrentWriteObserved)
+    def starts: Int                 = synchronized(startCount)
     def stops: Int                  = synchronized(stopCount)
 
   test("render and concurrent flush do not invert an application lock"):
@@ -1256,6 +1259,439 @@ class TUIConcurrencySuite extends munit.FunSuite:
       completions :+= 65
     }
     assertEquals(completions, (1 to 65).toVector)
+
+  test("ordinary work selection cycles through all five continuously ready categories"):
+    val terminal        = RecordingTerminal()
+    val callbackEntered = Gate()
+    val allowCallback   = Gate()
+    val events          = scala.collection.mutable.ArrayBuffer.empty[String]
+    var tracking        = false
+    var structuralCount = 0
+    var actionCount     = 0
+    var ingressCount    = 0
+    var controlCount    = 0
+    var renderCount     = 0
+    val tui             = TUI(terminal)
+
+    def nextStructural(): Component = new Component with ContextualComponent:
+      override def render(width: Int): Vector[String]            = Vector.empty
+      override def tuiContext_=(value: Option[TUIContext]): Unit =
+        if tracking && value.nonEmpty then
+          events += "structural"
+          structuralCount += 1
+          if structuralCount < 6 then tui.addChild(nextStructural())
+
+    val focusable = new Component with Focusable:
+      private var current                             = false
+      override def render(width: Int): Vector[String] = Vector.empty
+      override def focused: Boolean                   = current
+      override def focused_=(value: Boolean): Unit    =
+        current = value
+        if tracking && value then
+          events += "action"
+          actionCount += 1
+          if actionCount < 6 then
+            tui.setFocus(null)
+            tui.setFocus(this)
+
+    tui.addChild(new Component:
+      override def render(width: Int): Vector[String] =
+        if tracking then
+          events += "render"
+          renderCount += 1
+          if renderCount < 6 then
+            tui.requestRender()
+            tui.requestRender(force = true)
+            tui.requestRender()
+        Vector("frame"))
+    tui.addInputListener {
+      case TerminalInput.Key(TerminalKey.Character("hold"), _)  =>
+        callbackEntered.release()
+        allowCallback.await()
+        InputResult.NoRender
+      case TerminalInput.Key(TerminalKey.Character("cycle"), _) =>
+        events += "ingress"
+        ingressCount += 1
+        if ingressCount < 6 then
+          terminal.send(TerminalInput.Key(TerminalKey.Character("cycle")))
+        InputResult.NoRender
+      case _                                                    => InputResult.Ignored
+    }
+    terminal.beforeWrite = data =>
+      if tracking && data.contains("title:cycle") then
+        events += "control"
+        controlCount += 1
+        if controlCount < 6 then tui.setTerminalTitle("cycle")
+
+    tui.start()
+    tracking = true
+    val owner = Thread(() => terminal.send(TerminalInput.Key(TerminalKey.Character("hold"))))
+    owner.start()
+    callbackEntered.await()
+    tui.addChild(nextStructural())
+    tui.setFocus(focusable)
+    terminal.send(TerminalInput.Key(TerminalKey.Character("cycle")))
+    tui.setTerminalTitle("cycle")
+    tui.requestRender()
+    allowCallback.release()
+    owner.join(5000)
+
+    assert(!owner.isAlive)
+    val cycle = Vector("structural", "action", "ingress", "control", "render")
+    events.take(25).sliding(2).foreach {
+      case Seq(previous, next) =>
+        val distance = (cycle.indexOf(next) - cycle.indexOf(previous) + cycle.length) % cycle.length
+        assert(distance > 0, s"ordinary selection did not advance cyclically: $previous, $next")
+      case _                   => ()
+    }
+    assertEquals(structuralCount, 6)
+    assertEquals(actionCount, 6)
+    assertEquals(ingressCount, 6)
+    assertEquals(controlCount, 6)
+    assertEquals(renderCount, 6)
+    tui.stop()
+
+  test("full Starting ingress does not retain backend start or invoke application callbacks"):
+    val startCanReturn   = Gate()
+    val allowStartReturn = Gate()
+    val acceptedFull     = Gate()
+    val publisherDone    = Gate()
+    val terminal         = new RecordingTerminal:
+      override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
+        super.start(onInput, onResize)
+        val publisher = Thread(() => {
+          (1 to 4096).foreach(index =>
+            onInput(TerminalInput.Key(TerminalKey.Character(index.toString)))
+          )
+          acceptedFull.release()
+          onInput(TerminalInput.Key(TerminalKey.Character("extra")))
+          publisherDone.release()
+        })
+        publisher.start()
+        acceptedFull.await()
+        startCanReturn.release()
+        allowStartReturn.await()
+    var received         = Vector.empty[String]
+    val tui              = TUI(terminal)
+    tui.addInputListener {
+      case TerminalInput.Key(TerminalKey.Character(value), _) =>
+        received :+= value
+        InputResult.NoRender
+      case _                                                  => InputResult.Ignored
+    }
+    val starter          = Thread(() => tui.start())
+    starter.start()
+    startCanReturn.await()
+    assertEquals(received, Vector.empty)
+    allowStartReturn.release()
+    publisherDone.await()
+    starter.join(5000)
+
+    assert(!starter.isAlive)
+    assertEquals(received.length, 4097)
+    assertEquals(received.head, "1")
+    assertEquals(received.last, "extra")
+    tui.stop()
+
+  test("Cleaning cutoff detaches a finite set and serializes continuous late work"):
+    val terminal         = RecordingTerminal()
+    val restorationHit   = Gate()
+    val allowRestore     = Gate()
+    val detachedEntered  = Gate()
+    val allowDetached    = Gate()
+    val reentrantEntered = Gate()
+    val allowReentrant   = Gate()
+    var callbacks        = Vector.empty[String]
+    var active           = 0
+    var overlap          = false
+    val action           = new Component with Focusable:
+      private var current                             = false
+      override def render(width: Int): Vector[String] = Vector.empty
+      override def focused: Boolean                   = current
+      override def focused_=(value: Boolean): Unit    =
+        active += 1
+        if active > 1 then overlap = true
+        callbacks :+= "action"
+        current = value
+        active -= 1
+    terminal.beforeStop = () => {
+      restorationHit.release()
+      allowRestore.await()
+    }
+    val tui              = TUI(terminal)
+    tui.start()
+    val stopper          = Thread(() => tui.stop())
+    stopper.start()
+    restorationHit.await()
+    tui.queryTerminalBackgroundColor { _ =>
+      active += 1
+      if active > 1 then overlap = true
+      callbacks :+= "detached"
+      detachedEntered.release()
+      tui.queryTerminalColorScheme { _ =>
+        active += 1
+        if active > 1 then overlap = true
+        callbacks :+= "reentrant"
+        reentrantEntered.release()
+        allowReentrant.await()
+        active -= 1
+      }
+      allowDetached.await()
+      active -= 1
+    }
+    allowRestore.release()
+    detachedEntered.await()
+
+    val registrar = Thread(() =>
+      (1 to 256).foreach { index =>
+        tui.queryTerminalBackgroundColor { _ =>
+          active += 1
+          if active > 1 then overlap = true
+          callbacks :+= s"late-$index"
+          active -= 1
+        }
+      }
+    )
+    registrar.start()
+    registrar.join(5000)
+    assert(!registrar.isAlive)
+    assertEquals(callbacks, Vector("detached"))
+
+    allowDetached.release()
+    reentrantEntered.await()
+    val restart       = Thread(() => tui.start())
+    val stoppedAction = Thread(() => tui.setFocus(action))
+    restart.start()
+    stoppedAction.start()
+    tui.queryTerminalColorScheme(_ => callbacks :+= "post-commit")
+    restart.join(2000)
+    stoppedAction.join(2000)
+    assert(!restart.isAlive)
+    assert(!stoppedAction.isAlive)
+    assertEquals(terminal.starts, 1)
+    assertEquals(callbacks, Vector("detached", "reentrant"))
+
+    allowReentrant.release()
+    stopper.join(5000)
+
+    assert(!stopper.isAlive)
+    assert(!overlap)
+    assertEquals(
+      callbacks,
+      Vector("detached", "reentrant") ++
+        (1 to 256).map(index => s"late-$index") ++ Vector("post-commit", "action")
+    )
+
+  test("stopped focus action owns the drain against a racing start and stays non-recursive"):
+    val terminal        = RecordingTerminal()
+    val callbackEntered = Gate()
+    val allowCallback   = Gate()
+    var depth           = 0
+    var maxDepth        = 0
+    var callbacks       = 0
+    var tui             = Option.empty[TUI]
+    val focusable       = new Component with Focusable:
+      private var current                             = false
+      override def render(width: Int): Vector[String] = Vector.empty
+      override def focused: Boolean                   = current
+      override def focused_=(value: Boolean): Unit    =
+        depth += 1
+        maxDepth = math.max(maxDepth, depth)
+        callbacks += 1
+        current = value
+        if value then
+          callbackEntered.release()
+          tui.foreach(_.setFocus(null))
+          allowCallback.await()
+        depth -= 1
+    val runtime         = TUI(terminal)
+    tui = Some(runtime)
+
+    val owner   = Thread(() => runtime.setFocus(focusable))
+    owner.start()
+    callbackEntered.await()
+    val starter = Thread(() => runtime.start())
+    starter.start()
+    starter.join(2000)
+
+    assert(!starter.isAlive)
+    assertEquals(terminal.starts, 0)
+    allowCallback.release()
+    owner.join(2000)
+
+    assert(!owner.isAlive)
+    assertEquals(callbacks, 2)
+    assertEquals(maxDepth, 1)
+
+  test("queued stopped query cancellation wins before drain claim"):
+    val terminal        = RecordingTerminal()
+    val callbackEntered = Gate()
+    val allowCallback   = Gate()
+    var callbacks       = Vector.empty[String]
+    val focusable       = new Component with Focusable:
+      private var current                             = false
+      override def render(width: Int): Vector[String] = Vector.empty
+      override def focused: Boolean                   = current
+      override def focused_=(value: Boolean): Unit    =
+        current = value
+        callbackEntered.release()
+        allowCallback.await()
+    val tui             = TUI(terminal)
+
+    val owner  = Thread(() => tui.setFocus(focusable))
+    owner.start()
+    callbackEntered.await()
+    val cancel = tui.queryTerminalBackgroundColor(_ => callbacks :+= "cancelled")
+    tui.queryTerminalColorScheme(_ => callbacks :+= "uncancelled")
+    cancel()
+    cancel()
+    allowCallback.release()
+    owner.join(2000)
+
+    assert(!owner.isAlive)
+    assertEquals(callbacks, Vector("uncancelled"))
+
+  test("synchronous stopped query owns the drain against a racing start"):
+    val terminal        = RecordingTerminal()
+    val callbackEntered = Gate()
+    val allowCallback   = Gate()
+    var callbacks       = 0
+    val tui             = TUI(terminal)
+
+    val owner   = Thread(() =>
+      tui.queryTerminalBackgroundColor { result =>
+        assertEquals(result, TerminalQueryResult.Stopped)
+        callbacks += 1
+        callbackEntered.release()
+        allowCallback.await()
+      }
+      ()
+    )
+    owner.start()
+    callbackEntered.await()
+    val starter = Thread(() => tui.start())
+    starter.start()
+    starter.join(2000)
+
+    assert(!starter.isAlive)
+    assertEquals(terminal.starts, 0)
+    allowCallback.release()
+    owner.join(2000)
+
+    assert(!owner.isAlive)
+    assertEquals(callbacks, 1)
+
+  test("cleanup failure waits for detached and post-cutoff completions"):
+    val terminal        = RecordingTerminal()
+    val restorationHit  = Gate()
+    val allowRestore    = Gate()
+    val detachedEntered = Gate()
+    val allowDetached   = Gate()
+    var callbacks       = Vector.empty[String]
+    var stopFailure     = Option.empty[Throwable]
+    var failRestoration = true
+    terminal.beforeStop = () => {
+      restorationHit.release()
+      allowRestore.await()
+      if failRestoration then throw RuntimeException("restoration failed")
+    }
+    val tui             = TUI(terminal)
+    tui.start()
+    val stopper         = Thread(() =>
+      try tui.stop()
+      catch case error: Throwable => stopFailure = Some(error)
+    )
+    stopper.start()
+    restorationHit.await()
+    tui.queryTerminalBackgroundColor { result =>
+      assertEquals(result, TerminalQueryResult.Stopped)
+      callbacks :+= "detached"
+      detachedEntered.release()
+      allowDetached.await()
+    }
+    allowRestore.release()
+    detachedEntered.await()
+
+    tui.queryTerminalColorScheme { result =>
+      assertEquals(result, TerminalQueryResult.Stopped)
+      callbacks :+= "post-cutoff"
+    }
+    assertEquals(callbacks, Vector("detached"))
+    assertEquals(stopFailure, None)
+    allowDetached.release()
+    stopper.join(2000)
+
+    assert(!stopper.isAlive)
+    assertEquals(callbacks, Vector("detached", "post-cutoff"))
+    assertEquals(stopFailure.map(_.getMessage), Some("restoration failed"))
+    failRestoration = false
+    tui.start()
+    assertEquals(terminal.starts, 2)
+    tui.stop()
+
+  test("claimed structure survives stop and queued overlay captures prior focus action"):
+    val terminal      = RecordingTerminal()
+    val attachEntered = Gate()
+    val allowAttach   = Gate()
+    var attached      = false
+    val child         = new Component with ContextualComponent:
+      override def render(width: Int): Vector[String]            = Vector("child")
+      override def tuiContext_=(value: Option[TUIContext]): Unit =
+        if value.nonEmpty then
+          attached = true
+          attachEntered.release()
+          allowAttach.await()
+    val first         = new Component with Focusable:
+      var focused                                     = false
+      override def render(width: Int): Vector[String] = Vector("first")
+    val second        = new Component with Focusable:
+      var focused                                     = false
+      override def render(width: Int): Vector[String] = Vector("second")
+    val overlay       = new Component with Focusable:
+      var focused                                     = false
+      override def render(width: Int): Vector[String] = Vector("overlay")
+    val tui           = TUI(terminal)
+    tui.addChild(first)
+    tui.addChild(second)
+    tui.setFocus(first)
+    tui.start()
+
+    val publisher = Thread(() => tui.addChild(child))
+    publisher.start()
+    attachEntered.await()
+    tui.stop()
+    assertEquals(tui.children, Vector(first, second, child))
+    allowAttach.release()
+    publisher.join(5000)
+    assert(attached)
+
+    val secondTerminal = RecordingTerminal()
+    val secondTui      = TUI(secondTerminal)
+    val holdEntered    = Gate()
+    val allowHold      = Gate()
+    secondTui.addChild(first)
+    secondTui.addChild(second)
+    secondTui.setFocus(first)
+    secondTui.addInputListener { _ =>
+      holdEntered.release()
+      allowHold.await()
+      InputResult.NoRender
+    }
+    secondTui.start()
+    val owner          = Thread(() =>
+      secondTerminal.send(TerminalInput.Key(TerminalKey.Character("hold")))
+    )
+    owner.start()
+    holdEntered.await()
+    secondTui.setFocus(second)
+    val handle         = secondTui.showOverlay(overlay)
+    allowHold.release()
+    owner.join(5000)
+    handle.hide()
+
+    assert(second.focused)
+    assert(!first.focused)
+    secondTui.stop()
 
   test("startup, uncontended, reentrant, and concurrent stop have one cleanup owner"):
     val startupTerminal = RecordingTerminal()

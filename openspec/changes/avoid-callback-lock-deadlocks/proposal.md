@@ -14,7 +14,13 @@ The TUI runtime must not invoke application code while holding lifecycle or term
 - Preserve serialized backend output, query write reservations, resize generation checks, current overlay visibility snapshots, cleanup idempotency, JVM/Scala Native compatibility, and dependency-free core.
 - Add an explicit `Cleaning` lifecycle phase between `Stopping` and `Stopped`, with atomic cleanup commitment, finite pre-cleanup and post-restoration query callback sets, and restoration that cannot be postponed by continuous query registration.
 - Replace whole-string paste and raw input with bounded byte-stream events, copied `TerminalInputChunk` values, incremental UTF-8 decoding for text consumers, and byte-first backend parsing.
+- Keep `Input` and other application-owned component values unlimited by core: the 4096-byte chunk, parser, and ingress limits bound only transport and runtime transit state. Applications own validation or rejection before retaining content when they need a limit; core does not truncate, drop, add a fixed limit, add configuration, or add an overflow callback in this change.
 - Publish TUI root structural operations through immutable desired entries and apply committed container mutations and context hooks on the drain owner in publication order.
+- Add deterministic cyclic selection across ordinary Structural, Action, Ingress, Control, and Render work while retaining urgent query completion and cleanup priority, queued-category FIFO order, and coalesced rendering.
+- Make startup independent of bounded Starting-ingress backpressure, seal Cleaning callback sets around restoration, and commit structural model state when the owner claims work.
+- Correct fragmented Alt/UTF-8 framing, generation checks for each ordered event, finite-stream EOF handling, and grapheme cursor accounting across paste chunks.
+- Retain and retry JVM and Native cleanup obligations independently, reject restart until cleanup succeeds, and preserve actionable `/dev/tty` startup failures without fallback.
+- Bound demo query subscriptions and document query retention, cancellation ownership, and zero-or-more paste chunks.
 - Update tests, README, interactive demo, runtime documentation, backend contracts, and OpenSpec requirements.
 
 ## Capabilities

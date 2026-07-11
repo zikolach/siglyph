@@ -97,6 +97,8 @@ The parser accepts only chunks. It retains at most 4096 typed-candidate bytes, f
 
 `TerminalUtf8Decoder` incrementally decodes text with at most three carried bytes. It replaces malformed and flushed incomplete text with U+FFFD while the terminal input API retains exact bytes. Text components consume paste chunks incrementally and do not assemble a complete paste. StreamTerminal and PosixTerminal keep 4096-byte reads, parse bytes before string conversion, and release parser locks before callbacks.
 
+These 4096-byte chunk, parser, and ingress limits bound transport and runtime transit state only. They do not limit retained application content. `Input` and other application-owned component values have no core content-size limit. An application that needs a content limit validates or rejects content before retaining it. This change does not truncate or drop content, add a fixed content limit, add limit configuration, or add an overflow callback.
+
 Protocol correlation buffers at most 4096 bytes only while a raw stream is eligible for an active reply flight. Valid and strict invalid complete replies are correlated. Unrelated or overlong streams become ordinary input; an overlong stream leaves its query flight active.
 
 ### Cleaning lifecycle and query cutoff
@@ -118,3 +120,45 @@ Hook failure does not roll back the committed mutation. It records runtime failu
 Protocol ingress classification uses three explicit outcomes. `Consumed` commits correlation-only state and consumes no FIFO slot. `Blocked` performs no state or query-flight mutation when output requires a slot but capacity is unavailable. `Publish(first, remaining)` atomically commits correlation or query state with the first slot-producing event. Replay stores at most 4097 remaining events in one ingress-owned continuation, derived from the maximum 4098-event replay of `RawStart`, 4096 retained one-byte `RawChunk` events, and `RawEnd`. The commit admits as many events as FIFO capacity allows, then the publisher claims or joins the synchronous drain without waiting to enqueue the remainder. Each dequeue refills freed FIFO slots from the continuation before later ingress may publish. Stop or failure clears the continuation with ordinary ingress and wakes blocked publishers. A recognized protocol completion or notification is one batch slot regardless of subscriber count. Unrelated and overlong raw replay preserves every stream event and leaves unrelated active query flights unchanged.
 
 Editor bracketed paste is one transaction from `PasteStart` through `PasteEnd`. The Editor owns one incremental UTF-8 decoder, CR carry, bounded text blocks, aggregate `Long` line and grapheme metrics, and the pre-paste buffer snapshot. Unicode exposes an incremental grapheme counter backed by the existing break rules. Small paste blocks are inserted through a package-scoped EditorBuffer chunk API without joining the whole paste. Large paste creates one normalized immutable whole string only for marker expansion storage. Completion creates one undo entry, invokes `onChange` once, refreshes autocomplete once, and requests one render. Empty paste is a no-op. A non-paste input first commits any unfinished accepted paste content.
+
+## Approved PR #33 final review fixes
+
+### Owner priority and deterministic ordinary fairness
+
+One serialized owner remains responsible for all application callbacks and runtime work. Retained query completions and stop or cleanup progression are urgent and run before ordinary work. Ordinary work has five categories in cyclic order: Structural, Action, Ingress, Control, and Render. Each ordinary selection starts after the category selected previously and chooses the next ready category in that cycle. Therefore, a category that remains continuously ready is selected within five ordinary selections. Queued work remains FIFO within each queued category, while Render remains a coalesced intent rather than a FIFO queue.
+
+### Startup and Cleaning callback cutoffs
+
+`Terminal.start` does not wait for independently invoked callbacks to finish. Starting ingress remains bounded and may block a publisher when full, but startup can return independently, transition to Running, and let the owner drain that ingress. Application callbacks accepted during Starting remain deferred until Running.
+
+Cleaning retains global application-callback serialization. Cleanup commitment seals one finite pre-restoration callback set. Restoration completion seals one finite post-restoration callback set. Registrations after that cutoff use stopped behavior. A query registered during detached post-restoration callback execution cannot overlap any application callback or extend restoration.
+
+### Structural claim and overlay publication order
+
+The owner atomically commits structural model state when it claims Structural work. Root container mutation and attach or detach hooks then run outside locks. Overlay restoration focus is captured according to owner publication order, so later structural or focus publication cannot retroactively change the restoration target of earlier overlay work.
+
+### Framing, delivery, and finite EOF
+
+Escape followed by a multibyte UTF-8 scalar is framed as one Alt input when the complete scalar arrives before the next parser flush, even when the escape byte and scalar bytes arrive in separate read fragments. A parser flush is the explicit framing cutoff: it emits a pending Escape as standalone, emits a pending Escape plus incomplete scalar with incomplete raw termination, clears that non-paste framing, and parses later bytes as a separate sequence. Ordered delivery rechecks the active generation before every event in a batch. Restart rejects any still-live reader, flush worker, or backend resize worker from the old generation.
+
+A finite StreamTerminal EOF flushes pending non-paste parser framing before generation invalidation. It discards incomplete bracketed paste without emitting a synthetic `PasteEnd`. Input paste cursor accounting carries grapheme-break state across chunks, so a grapheme spanning chunk boundaries advances the cursor once.
+
+### Backend cleanup and diagnostics
+
+JVM and Native backends track each cleanup obligation independently. Failed obligations remain pending and are retried; successful obligations are not repeated. Restart is rejected while any cleanup obligation remains. After writing and flushing a `PrintStream`, each backend checks its sticky error state and converts a suppressed output error to `IOException` before clearing the related cleanup obligation. SttyTerminal reports an actionable initial missing `/dev/tty` error, preserves the original cause, and does not fall back to another terminal source.
+
+### Demo and documentation ownership
+
+The demo permits at most one unanswered subscription per query protocol and uses no timer. Documentation assigns retention and cancellation ownership explicitly: the runtime retains a wire flight until reply, stop, or failure, while each caller owns cancellation and any timeout scheduling. An application with active subscriptions disables built-in exit handling before startup, establishes cancellation functions while input cannot trigger built-in runtime exit, and only then installs cancellation-aware exit routing. That routing cancels active subscribers before requesting normal runtime exit. Every application exit path follows this order when those subscriptions are no longer needed. A bracketed paste contains zero or more `PasteChunk` events between `PasteStart` and `PasteEnd`.
+
+### Validation additions
+
+Deterministic tests must cover ordinary-category fairness, startup under full Starting ingress, Cleaning query registration, structural and overlay publication order, fragmented Alt framing, EOF behavior, per-event generation rejection, restart exclusion, cross-chunk graphemes, independent cleanup retries, startup diagnostics, bounded demo subscriptions, and synchronous demo completion ordering.
+
+## Input streamed-paste performance correction
+
+Input owns one mutable paste session from `PasteStart` until `PasteEnd` or the first non-paste input. The session splits the original value once at the grapheme cursor into a mutable prefix builder and one retained immutable suffix. Each decoded, newline-normalized chunk is appended once to that builder. Input does not splice `currentValue`, copy a separate whole-paste buffer, or rescan the accumulated prefix per chunk.
+
+The session seeds one incremental grapheme counter with the original prefix and advances it only with newly decoded text. This keeps cursor placement exact when combining marks, ZWJ sequences, or regional-indicator pairs cross chunk boundaries at start, middle, or end insertion positions. `value` and `render` expose the accepted text during an active paste by viewing the session's current prefix plus retained suffix. Paste start and chunks request no render; finalization publishes one immutable value and requests one render only when text was accepted. A non-paste input finalizes first and then follows its normal render behavior.
+
+Deterministic tests inspect the canonical package-scoped session to prove one append per non-empty decoded segment and no accumulated-prefix rebuild. A multi-megabyte regression uses bounded chunks and exact value, render, cursor, undo, backspace, and interruption assertions without elapsed-time limits.

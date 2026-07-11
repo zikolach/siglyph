@@ -1,4 +1,5 @@
 package scalatui.terminal
+import scalatui.syntax.Equality.*
 
 class TerminalInputBufferSuite extends munit.FunSuite:
   private def chunk(value: String): TerminalInputChunk =
@@ -23,6 +24,42 @@ class TerminalInputBufferSuite extends munit.FunSuite:
       Vector(TerminalInput.Key(TerminalKey.Character("x"), KeyModifiers(alt = true)))
     )
     assertEquals(buffer.flush(), Vector.empty)
+  test("escape plus multibyte UTF-8 scalar is one Alt key across every fragmentation"):
+    Vector("¢", "界", "🙂").foreach { scalar =>
+      val bytes = ("\u001b" + scalar).getBytes(java.nio.charset.StandardCharsets.UTF_8)
+      (0 until (1 << (bytes.length - 1))).foreach { boundaryMask =>
+        val buffer = TerminalInputBuffer()
+        val events = Vector.newBuilder[TerminalInput]
+        var start  = 0
+        (0 until bytes.length - 1).foreach { index =>
+          if (boundaryMask & (1 << index)) !== 0 then
+            events ++= buffer.process(TerminalInputChunk(bytes.slice(start, index + 1)))
+            start = index + 1
+        }
+        events ++= buffer.process(TerminalInputChunk(bytes.drop(start)))
+        assertEquals(
+          events.result(),
+          Vector(TerminalInput.Key(TerminalKey.Character(scalar), KeyModifiers(alt = true))),
+          s"$scalar with boundary mask $boundaryMask"
+        )
+      }
+    }
+
+  test("malformed and incomplete Alt UTF-8 framing preserves exact raw bytes"):
+    Vector(
+      Array[Byte](0x1b, 0xc3.toByte, 0x28),
+      Array[Byte](0x1b, 0xf0.toByte, 0x9f.toByte)
+    ).foreach { bytes =>
+      val buffer = TerminalInputBuffer()
+      val events = bytes.flatMap(byte =>
+        buffer.process(TerminalInputChunk(Array(byte)))
+      ).toVector ++ buffer.flush()
+      assertEquals(events.head, TerminalInput.RawStart(TerminalRawKind.Escape))
+      assertEquals(
+        events.collect { case TerminalInput.RawChunk(value) => value.toArray }.flatten.toVector,
+        bytes.toVector
+      )
+    }
 
   test("recognizes paste markers split at every byte boundary"):
     val bytes = "\u001b[200~hello\u001b[201~".getBytes(java.nio.charset.StandardCharsets.UTF_8)

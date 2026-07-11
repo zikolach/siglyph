@@ -69,8 +69,8 @@ final class TerminalInputBuffer:
           case Some(length) if length === candidate.length                 =>
             val bytes = candidate.toArray
             candidate.clear()
-            if (bytes.head !== Esc) && !validUtf8Scalar(bytes) then
-              emitRaw(bytes, TerminalRawKind.Utf8, TerminalRawTermination.Malformed, out)
+            if !validTypedScalar(bytes) then
+              emitRaw(bytes, kindOf(bytes), TerminalRawTermination.Malformed, out)
             else
               TerminalInputParser.parseTyped(bytes) match
                 case Some(input) => out += input
@@ -207,6 +207,11 @@ object TerminalInputBuffer:
         continuation(2) && continuation(3)
       case _                                       => false
 
+  private def validTypedScalar(bytes: Array[Byte]): Boolean =
+    if bytes.head === Esc && bytes.lengthCompare(1) > 0 && unsigned(bytes(1)) >= 0x80 then
+      validUtf8Scalar(bytes.drop(1))
+    else bytes.head === Esc || validUtf8Scalar(bytes)
+
   private def completeLength(value: collection.Seq[Byte]): Option[Int] =
     if value.isEmpty then None
     else if value.head !== Esc then
@@ -214,12 +219,14 @@ object TerminalInputBuffer:
     else if value.length === 1 then None
     else
       value(1) match
-        case 0x5b               => value.indices.drop(2).find(index =>
+        case 0x5b                           => value.indices.drop(2).find(index =>
             unsigned(value(index)) >= 0x40 && unsigned(value(index)) <= 0x7e
           ).map(_ + 1)
-        case 0x4f               => Option.when(value.length >= 3)(3)
-        case 0x5d | 0x50 | 0x5f => terminatedLength(value)
-        case _                  => Some(2)
+        case 0x4f                           => Option.when(value.length >= 3)(3)
+        case 0x5d | 0x50 | 0x5f             => terminatedLength(value)
+        case byte if unsigned(byte) >= 0x80 =>
+          Option.when(value.length >= 1 + utf8Length(byte))(1 + utf8Length(byte))
+        case _                              => Some(2)
 
   private def terminatedLength(value: collection.Seq[Byte]): Option[Int] =
     value.indices.drop(2).find { index =>

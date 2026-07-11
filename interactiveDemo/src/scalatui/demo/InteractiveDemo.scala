@@ -72,7 +72,8 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
   private var mode                               = DemoMode.EditorMode
   private var focus                              = Focus.EditorPane
   private var terminalSchemeNotificationsEnabled = false
-  private var terminalQueryCounter               = 0
+  private val backgroundQuerySubscription        = DemoQuerySubscription()
+  private val schemeQuerySubscription            = DemoQuerySubscription()
 
   // ---------- Shared editor showcase ----------
   private val workspaceRoot = DemoRoot.findWorkspaceRoot(File(System.getProperty("user.dir")))
@@ -242,11 +243,11 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
           s"Terminal progress off ${supportLabel(tui.setTerminalProgress(active = false))}"
         )
       case "terminal-background"    =>
-        runTerminalQuery("background color") { onComplete =>
+        runTerminalQuery("background color", backgroundQuerySubscription) { onComplete =>
           tui.queryTerminalBackgroundColor(result => onComplete(formatBackgroundResult(result)))
         }
       case "terminal-scheme"        =>
-        runTerminalQuery("color scheme") { onComplete =>
+        runTerminalQuery("color scheme", schemeQuerySubscription) { onComplete =>
           tui.queryTerminalColorScheme(result => onComplete(formatSchemeResult(result)))
         }
       case "terminal-notifications" =>
@@ -687,18 +688,18 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
     messages = Vector.empty
   }
 
-  private def runTerminalQuery(label: String)(
+  private def runTerminalQuery(label: String, subscription: DemoQuerySubscription)(
       query: (String => Unit) => (() => Unit)
   ): Unit =
-    terminalQueryCounter += 1
-    val queryId = terminalQueryCounter
-    addDemoMessage(s"Terminal $label query #$queryId started")
-    query { result =>
+    subscription.start(query)(queryId =>
+      addDemoMessage(s"Terminal $label query #$queryId started")
+    ) { (queryId, result) =>
       addDemoMessage(s"Terminal $label query #$queryId: $result")
       tui.requestRender()
       tui.flushRender()
-    }
-    ()
+    } match
+      case Some(_) => ()
+      case None    => addDemoMessage(s"Terminal $label query already pending")
 
   private def formatBackgroundResult(result: TerminalQueryResult[RgbColor]): String = result match
     case TerminalQueryResult.Success(color)  =>
@@ -733,6 +734,45 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
 
   private def fit(value: String, width: Int): String =
     Ansi.truncateToWidth(value, width, "")
+
+private[demo] final class DemoQuerySubscription:
+  private var nextQueryId = 0L
+  private var active      = Option.empty[(Long, () => Unit)]
+
+  def start(
+      query: (String => Unit) => (() => Unit)
+  )(onStarted: Long => Unit)(onComplete: (Long, String) => Unit): Option[Long] =
+    val queryId = synchronized {
+      if active.nonEmpty then None
+      else
+        nextQueryId += 1
+        active = Some(nextQueryId -> (() => ()))
+        Some(nextQueryId)
+    }
+    queryId.map { id =>
+      onStarted(id)
+      val cancel = query(result => complete(id, result, onComplete))
+      synchronized {
+        if active.exists(_._1 === id) then active = Some(id -> cancel)
+      }
+      id
+    }
+
+  private[demo] def cancelActive(): Unit =
+    val cancel = synchronized {
+      val retained = active.map(_._2)
+      active = None
+      retained
+    }
+    cancel.foreach(_())
+
+  private def complete(queryId: Long, result: String, onComplete: (Long, String) => Unit): Unit =
+    val ownsCompletion = synchronized {
+      val owns = active.exists(_._1 === queryId)
+      if owns then active = None
+      owns
+    }
+    if ownsCompletion then onComplete(queryId, result)
 
 private object DemoRoot:
   private val Tags = Vector("#bug", "#docs", "#demo", "#release-notes")

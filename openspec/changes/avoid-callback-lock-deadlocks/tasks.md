@@ -93,3 +93,35 @@ Manual JVM and Scala Native resize smoke was not run during the independent vali
 - [x] 10.3 Add portable deterministic ordered-delivery, stale-flush, and interrupt restoration tests plus the interrupt-ignoring StreamTerminal restart regression.
 - [x] 10.4 Document the backend restart precondition in Scaladoc and terminal-runtime requirements.
 - [x] 10.5 Run focused, full JVM, full Native, PTY backend, compile, format, lint, strict OpenSpec, and diff validation.
+
+## 11. Approved PR #33 final review fixes
+
+- [x] 11.1 Update the proposal, design, affected specifications, and tasks with the approved final-review contracts.
+- [x] 11.2 Implement deterministic cyclic Structural, Action, Ingress, Control, and Render selection with urgent retained-query and cleanup priority, five-selection fairness, queued-category FIFO order, and coalesced render behavior.
+- [x] 11.3 Make backend start return independently of blocked Starting publishers while deferring application callbacks until Running can drain bounded ingress.
+- [x] 11.4 Keep Cleaning post-restoration callbacks as one finite globally serialized set, and prevent late query registration from overlapping callbacks or extending restoration.
+- [x] 11.5 Commit structural model state atomically when the owner claims work, run root mutation and hooks outside locks, and capture overlay restoration focus in owner publication order.
+- [x] 11.6 Implement exact fragmented Escape plus multibyte UTF-8 Alt framing and finite StreamTerminal EOF flushing that discards incomplete paste without synthetic end.
+- [x] 11.7 Recheck generation before every ordered event and reject restart while any old-generation reader or flush thread remains live.
+- [x] 11.8 Preserve Input paste cursor placement when Unicode grapheme clusters span chunks.
+- [x] 11.9 Retain and retry JVM and Native cleanup obligations independently, avoid repeating successful obligations, reject restart while obligations remain, and make initial missing `/dev/tty` failures actionable with their cause and no fallback.
+- [x] 11.10 Bound demo unanswered subscriptions to one per protocol without timers, and update README for query retention, cancellation ownership, and zero-or-more paste chunks.
+- [x] 11.11 Add deterministic portable, JVM, Native, backend, demo, parser, lifecycle, fairness, and text-editing regression tests for all section 11 contracts.
+- [x] 11.12 Run focused and full JVM, Native, backend, compile, format, lint, strict OpenSpec, and diff validation; keep manual smoke status unchanged unless run in this pass.
+
+## 12. Suppressed PrintStream output failures
+
+- [x] 12.1 Detect sticky JVM and verified Scala Native `PrintStream` output errors after write and flush, retain failed cleanup obligations, and reject restart.
+- [x] 12.2 Add JVM and Native regressions for suppressed output errors and update the backend cleanup contract.
+- [x] 12.3 Run JVM and Native backend suites, PTY suites, compile, format, lint, and strict OpenSpec validation.
+
+## 13. Input streamed-paste performance correction
+
+- [x] 13.1 Specify one canonical mutable Input paste session, active value/render semantics, incremental grapheme state, and deterministic complexity evidence.
+- [x] 13.2 Replace per-chunk immutable splice and prefix rescans with append-once session handling and single finalization.
+- [x] 13.3 Add portable deterministic structural and multi-megabyte regressions for cursor, rendering, exact text, interruption, undo, and backspace behavior.
+- [x] 13.4 Run focused and full JVM and Native core suites, compile, formatting, lint, and strict OpenSpec validation.
+
+## 14. Unlimited application-owned Input values
+
+- [x] 14.1 Document that 4096-byte chunk, parser, and ingress limits bound transport and runtime transit state only, while `Input` and other application-owned component values have no core content-size limit and applications own validation or rejection before retention.

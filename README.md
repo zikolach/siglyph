@@ -220,36 +220,62 @@ controller.setExpanded(true)
 `TUI` exposes optional terminal integration helpers for supported interactive backends:
 
 ```scala
-import scalatui.core.TerminalQueryResult
+import scalatui.core.{InputResult, TUI, TerminalQueryResult}
+import scalatui.terminal.{TerminalInput, TerminalKey}
+import scalatui.terminal.jvm.SttyTerminal
 
 val tui = TUI(SttyTerminal())
+tui.handlesControlC = false
+tui.exitsOnEscape = false
+
 val unsubscribe = tui.onTerminalColorSchemeChange { scheme =>
   println(s"terminal scheme changed to ${scheme.value}")
 }
 
-tui.start()
+var cancelBackground = () => ()
+var cancelScheme = () => ()
+var removeExitListener = () => ()
+def cancelQueries(): Unit =
+  cancelBackground()
+  cancelScheme()
+
 try
+  tui.start()
   val titleApplied = tui.setTerminalTitle("siglyph")
   val progressApplied = tui.setTerminalProgress(active = true)
-  val cancelBackground = tui.queryTerminalBackgroundColor {
+  cancelBackground = tui.queryTerminalBackgroundColor {
     case TerminalQueryResult.Success(color) => println(s"background: $color")
     case TerminalQueryResult.InvalidResponse => println("invalid background response")
     case TerminalQueryResult.Stopped => println("background query stopped")
     case TerminalQueryResult.Failed(cause) => cause.printStackTrace()
   }
-  val cancelScheme = tui.queryTerminalColorScheme {
+  cancelScheme = tui.queryTerminalColorScheme {
     case TerminalQueryResult.Success(scheme) => println(s"scheme: ${scheme.value}")
     case TerminalQueryResult.InvalidResponse => println("invalid scheme response")
     case TerminalQueryResult.Stopped => println("scheme query stopped")
     case TerminalQueryResult.Failed(cause) => cause.printStackTrace()
   }
   tui.setTerminalColorSchemeNotifications(enabled = true)
+  removeExitListener = tui.addInputListener {
+    case TerminalInput.Key(TerminalKey.Escape, _) =>
+      cancelQueries()
+      InputResult.Exit
+    case TerminalInput.Key(TerminalKey.Character("c"), modifiers) if modifiers.ctrl =>
+      cancelQueries()
+      InputResult.Exit
+    case _ => InputResult.Ignored
+  }
+  tui.run()
 finally
+  cancelQueries()
+  removeExitListener()
   unsubscribe()
   tui.stop()
 ```
 
-Title and progress helpers return `false` when the backend does not support the protocol. Color queries and notifications require a running TUI so the backend can read and deliver terminal replies. Each query protocol uses one wire request shared by subscribers; callbacks run in subscription and ingress order on the TUI drain and never concurrently with another application callback. Completion may occur before the query method returns. The returned cancellation function is idempotent and invokes no callback. Applications own timeout scheduling and call cancellation when their deadline expires; core has no timer, executor, `Future`, or effect dependency.
+Title and progress helpers return `false` when the backend does not support the protocol. Color queries and notifications require a running TUI so the backend can read and deliver terminal replies. Keep the runtime alive, as `tui.run()` does above, until replies arrive or the application exits. Before startup, the example disables built-in Ctrl+C and Escape exits so input cannot stop the runtime while query cancellation is being established. After both cancellation functions are installed, its global listener cancels the subscriptions before returning `InputResult.Exit` for normal runtime shutdown. Applications must route every exit path through cancellation-aware shutdown when active subscriptions are no longer needed.
+
+Each query protocol uses one wire request shared by subscribers; the runtime retains that wire flight until a reply, stop, or failure. Each subscriber retains and owns its idempotent cancellation function and invokes it when the result is no longer wanted. Cancellation invokes no callback and does not remove the runtime-owned wire flight. Callbacks run in subscription and ingress order on the TUI drain and never concurrently with another application callback. Completion may occur before the query method returns. Applications also own timeout scheduling and call cancellation when their deadline expires; core has no timer, executor, `Future`, or effect dependency.
 
 Terminal input and protocol reply batches share a lossless FIFO bounded at 4096 events. Correlation-only raw fragments consume no slot, a recognized protocol completion or notification consumes one slot regardless of subscriber count, and reconstructed ordinary raw events consume one slot each. A backend publisher waits when required capacity is full and wakes when the drain frees capacity or lifecycle stop rejects further input. Resize remains coalesced outside this capacity. Custom `Terminal` implementations must return from `start` without invoking either registered callback on the `start` call stack; callbacks may begin independently on another thread before `start` returns. Output-side methods follow the same callback-separation rule.
 
@@ -257,7 +283,9 @@ Terminal input and protocol reply batches share a lossless FIFO bounded at 4096 
 
 Applications can register typed global input listeners with `tui.addInputListener`. The listener receives `TerminalInput` before focused component routing. Return `InputResult.Ignored` to let normal routing continue, `InputResult.Handled(...)` to consume the input, or `InputResult.Exit` to stop through the normal terminal restoration path. The returned function removes the listener.
 
-Paste and untyped terminal input use bounded byte streams. Paste arrives as `PasteStart`, one or more `PasteChunk(TerminalInputChunk(...))` events, and `PasteEnd`. Untyped sequences use `RawStart`, `RawChunk`, and `RawEnd`. Each chunk contains 1 through 4096 copied bytes. Text consumers can use `TerminalUtf8Decoder` to decode chunk boundaries incrementally. Editor treats the full paste stream as one edit: newline normalization and marker thresholds span all chunks, and completion creates one undo entry, change callback, autocomplete refresh, and render.
+Paste and untyped terminal input use bounded byte streams. Paste arrives as `PasteStart`, zero or more `PasteChunk(TerminalInputChunk(...))` events, and `PasteEnd`. An empty bracketed paste is represented by `PasteStart` followed immediately by `PasteEnd`, with zero `PasteChunk` events. Untyped sequences use `RawStart`, `RawChunk`, and `RawEnd`. Each chunk contains 1 through 4096 copied bytes. Text consumers can use `TerminalUtf8Decoder` to decode chunk boundaries incrementally. Editor treats the full paste stream as one edit: newline normalization and marker thresholds span all chunks, and completion creates one undo entry, change callback, autocomplete refresh, and render.
+
+The 4096-byte chunk, parser, and ingress limits bound only transport and runtime transit state. `Input` and other application-owned component values have no core content-size limit. Applications that need content limits must validate or reject content before retaining it. Core does not truncate or drop application-owned content, add a fixed content limit, add limit configuration, or add an overflow callback.
 
 The editor exposes `insertAtCursor(text)` for application-owned insertion such as selected file paths or templates. It uses the same buffer mutation path as editor input: newline normalization, large-paste markers, undo, change callbacks, active autocomplete refresh, and render requests when attached to a `TUI`.
 
