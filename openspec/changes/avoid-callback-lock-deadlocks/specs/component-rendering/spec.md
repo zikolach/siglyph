@@ -79,3 +79,15 @@ The owner SHALL commit structural model state atomically when claiming Structura
 #### Scenario: Overlay restoration focus is captured
 - **WHEN** overlay and focus work is published in an owner-defined order
 - **THEN** restoration uses the focus captured at the overlay operation's publication point and later work does not retroactively change it
+
+### Requirement: Filter paste render scheduling is completion-based
+SelectList and SettingsList SHALL return `NoRender` for accepted paste chunks and SHALL request at most one render when a non-empty paste session commits.
+
+#### Scenario: Multi-chunk fuzzy paste
+- **WHILE** fuzzy filter paste chunks arrive
+- **WHEN** rendering occurs after a chunk is accepted
+- **THEN** the component shows accepted query text where it exposes a query prompt, filters and renders candidates from the committed query, and performs no intermediate selection callback or clamp-visible state change
+
+#### Scenario: Final filter commit
+- **WHEN** a non-empty filter paste ends
+- **THEN** final filtering and selection or clamp update occur once and at most one render is requested

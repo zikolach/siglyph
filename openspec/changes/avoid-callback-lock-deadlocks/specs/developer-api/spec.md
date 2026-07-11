@@ -193,3 +193,33 @@ The interactive demo SHALL retain at most one unanswered subscription per query 
 #### Scenario: Failed query completed synchronously
 - **WHEN** synchronous completion clears a query's ownership and establishes a newer query before the old invocation throws
 - **THEN** failure cleanup preserves the newer query's ownership
+
+### Requirement: Filter paste preserves component input contracts
+SelectList SHALL override `handleInputResult` for streamed paste render control and SHALL preserve `handleInput` compatibility. This change SHALL add no public API.
+
+#### Scenario: SelectList receives paste through either input hook
+- **WHEN** callers use `handleInput` or the runtime uses `handleInputResult`
+- **THEN** both paths use the same paste session and only the result-aware path exposes render scheduling
+
+#### Scenario: SettingsList mutates public filter state
+- **WHILE** a paste session is active
+- **WHEN** `clearFilter` or item replacement runs
+- **THEN** the mutation clears or commits the session as appropriate and no stale paste state can overwrite it later
+
+### Requirement: Active filter paste separates query exposure from candidate filtering
+SelectList and SettingsList SHALL expose accepted active paste text through `query`, and SettingsList SHALL expose one active query snapshot in its search prompt, while candidate filtering and rendering use committed `filterQuery` until commit.
+
+#### Scenario: Active filter paste renders
+- **WHILE** a filter paste is active
+- **WHEN** rendering occurs
+- **THEN** accepted query text is observable without fuzzy matching candidates against the uncommitted prefix
+
+#### Scenario: Active query remains unchanged
+- **WHILE** no accepted paste text has changed since the active query snapshot
+- **WHEN** query, prompt rendering, or commit reads it again
+- **THEN** the component reuses the cached full-query `String` reference
+
+#### Scenario: Active query snapshot is invalidated
+- **WHILE** a combined active query snapshot is cached
+- **WHEN** non-empty normalized paste text is accepted, including decoder-flush output
+- **THEN** the session immediately releases that snapshot, retains only the initial-query reference plus appended mutable text, and waits until the next read to build the replacement

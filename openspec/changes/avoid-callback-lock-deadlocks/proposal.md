@@ -22,6 +22,7 @@ The TUI runtime must not invoke application code while holding lifecycle or term
 - Retain and retry JVM and Native cleanup obligations independently, reject restart until cleanup succeeds, and preserve actionable `/dev/tty` startup failures without fallback.
 - Bound demo query subscriptions and document query retention, cancellation ownership, and zero-or-more paste chunks.
 - Update tests, README, interactive demo, runtime documentation, backend contracts, and OpenSpec requirements.
+- Use one shared package-private filter paste session for `SelectList` and `SettingsList`, append decoded normalized chunks without filtering or rendering, and commit filtering and selection state once at paste completion or interruption.
 
 ## Capabilities
 

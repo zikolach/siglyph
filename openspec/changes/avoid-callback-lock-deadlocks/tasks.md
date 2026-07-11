@@ -135,3 +135,12 @@ Manual JVM and Scala Native resize smoke was not run during the independent vali
 - [x] 16.1 Reject duplicate SttyTerminal start as already running before evaluating cleanup obligations, and test the distinct errors.
 - [x] 16.2 Make the asynchronous startup fixture return without waiting for its daemon publisher, and use explicit publication completion gates in affected tests.
 - [x] 16.3 Clarify duplicate-running precedence and independent fixture publication, then run focused and required validation.
+
+## 17. Copilot filter paste performance findings
+
+- [x] 17.1 Specify the shared package-private filter paste session, initial-query reference retention, appended-only storage, active prompt and query exposure, committed candidate filtering, single commit, interruption ordering, and unchanged unlimited retained-content policy.
+- [x] 17.2 Replace SelectList and SettingsList per-chunk filtering, selection, clamp, callback, and render work with appended-only chunk storage, committed candidate rendering during active paste, and one final commit after releasing session state.
+- [x] 17.3 Add portable deterministic component and multi-megabyte structural regressions for initial-query identity, appended-only storage counters, exact query content, interleaved explicit renders, committed candidate behavior, one final callback, UTF-8 and newline fragmentation, interruption, repeated start, empty and orphan events, and SettingsList public mutations.
+- [x] 17.4 Run focused and full JVM and Native core suites, all-module compile, formatting, lint, and strict OpenSpec validation.
+- [x] 17.5 Cache one full filter query snapshot per accepted mutation, reuse unchanged query/render/commit reads, avoid an intermediate appended snapshot, and add deterministic identity and materialization regressions.
+- [x] 17.6 Release stale combined filter-query snapshots immediately on accepted text and add deterministic clean-read, lazy multi-segment, mutation-release, and decoder-flush release regressions.

@@ -130,7 +130,7 @@ final class SettingsList(
   private var selectedIndex = 0
   private var scrollOffset  = 0
   private var filterQuery   = ""
-  private val pasteDecoder  = scalatui.terminal.TerminalUtf8Decoder()
+  private var pasteSession  = Option.empty[FilterPasteSession]
   private var context       = Option.empty[TUIContext]
   private var activeSubmenu = Option.empty[OverlayHandle]
 
@@ -146,25 +146,45 @@ final class SettingsList(
   def items: Vector[SettingItem] = currentItems
 
   def items_=(value: Vector[SettingItem]): Unit =
+    commitPaste()
     currentItems = value
     clampSelection()
 
   def selected: Option[SettingItem] = selectedEntry.map(_.item)
 
-  def query: String = filterQuery
+  def query: String = pasteSession.fold(filterQuery)(_.query)
 
   def clearFilter(): Unit =
+    pasteSession = None
     filterQuery = ""
     clampSelection()
 
   override def handleInput(input: TerminalInput): Unit = handleInputResult(input)
 
   override def handleInputResult(input: TerminalInput): InputResult = input match
-    case TerminalInput.Key(TerminalKey.Up, _)                                  => moveSelection(-1)
-    case TerminalInput.Key(TerminalKey.Down, _)                                => moveSelection(1)
-    case TerminalInput.Key(TerminalKey.Enter, _)                               => activateSelected()
-    case TerminalInput.Key(TerminalKey.Character(" "), _)                      => activateSelected()
-    case TerminalInput.Key(TerminalKey.Escape, _)                              =>
+    case TerminalInput.PasteStart if options.effectiveFiltering.enabled        =>
+      val changed = commitPaste()
+      pasteSession = Some(FilterPasteSession(filterQuery))
+      if changed then InputResult.Render else InputResult.NoRender
+    case TerminalInput.PasteChunk(chunk) if options.effectiveFiltering.enabled =>
+      pasteSession match
+        case Some(session) =>
+          session.append(chunk)
+          InputResult.NoRender
+        case None          => InputResult.Ignored
+    case TerminalInput.PasteEnd if options.effectiveFiltering.enabled          =>
+      if commitPaste() then InputResult.Render else InputResult.NoRender
+    case _                                                                     =>
+      val pasteChanged = commitPaste()
+      val result       = handleNonPasteInput(input)
+      if pasteChanged && result === InputResult.Ignored then InputResult.Render else result
+
+  private def handleNonPasteInput(input: TerminalInput): InputResult = input match
+    case TerminalInput.Key(TerminalKey.Up, _)             => moveSelection(-1)
+    case TerminalInput.Key(TerminalKey.Down, _)           => moveSelection(1)
+    case TerminalInput.Key(TerminalKey.Enter, _)          => activateSelected()
+    case TerminalInput.Key(TerminalKey.Character(" "), _) => activateSelected()
+    case TerminalInput.Key(TerminalKey.Escape, _)         =>
       onCancel()
       InputResult.Render
     case TerminalInput.Key(TerminalKey.Backspace, _)
@@ -177,41 +197,32 @@ final class SettingsList(
       filterQuery += text
       clampSelection()
       InputResult.Render
-    case TerminalInput.PasteStart if options.effectiveFiltering.enabled        =>
-      pasteDecoder.clear()
-      InputResult.NoRender
-    case TerminalInput.PasteChunk(chunk) if options.effectiveFiltering.enabled =>
-      filterQuery += pasteDecoder.process(chunk).replace('\n', ' ').replace('\r', ' ')
-      clampSelection()
-      InputResult.Render
-    case TerminalInput.PasteEnd if options.effectiveFiltering.enabled          =>
-      filterQuery += pasteDecoder.flush().replace('\n', ' ').replace('\r', ' ')
-      clampSelection()
-      InputResult.Render
-    case _                                                                     => InputResult.Ignored
+    case _                                                => InputResult.Ignored
 
   override def render(width: Int): Vector[String] =
     val safeWidth = math.max(0, width)
     if safeWidth <= 0 then Vector("")
     else
-      val entries = filteredEntries
-      clampSelection(entries)
-      val out     = Vector.newBuilder[String]
+      val activeQuery = query
+      val entries     = filteredEntries(filterQuery)
+      if pasteSession.isEmpty then clampSelection(entries)
+      val out         = Vector.newBuilder[String]
       if options.effectiveFiltering.enabled then
-        out += fit(options.theme.search(options.searchPrompt + filterQuery), safeWidth)
+        out += fit(options.theme.search(options.searchPrompt + activeQuery), safeWidth)
       if currentItems.isEmpty then out += fit(options.emptyText, safeWidth)
       else
         if entries.isEmpty then out += fit(options.noMatchesText, safeWidth)
         else
-          ensureVisible(entries.length)
+          if pasteSession.isEmpty then ensureVisible(entries.length)
           val visibleCount = math.max(1, options.maxVisible)
-          val visible      = entries.slice(scrollOffset, scrollOffset + visibleCount)
+          val pageOffset   = normalizedScrollOffset(entries.length, visibleCount)
+          val visible      = entries.slice(pageOffset, pageOffset + visibleCount)
           visible.zipWithIndex.foreach { case (entry, visibleIndex) =>
-            out += renderRow(entry.item, scrollOffset + visibleIndex, safeWidth)
+            out += renderRow(entry.item, pageOffset + visibleIndex, safeWidth)
           }
           if options.showScrollIndicators && entries.length > visibleCount then
-            val end = math.min(entries.length, scrollOffset + visibleCount)
-            out += fit(s"${scrollOffset + 1}-$end of ${entries.length}", safeWidth)
+            val end = math.min(entries.length, pageOffset + visibleCount)
+            out += fit(s"${pageOffset + 1}-$end of ${entries.length}", safeWidth)
           entries.lift(selectedIndex).flatMap(_.item.description).foreach { description =>
             Ansi.wrapTextWithAnsi(description, safeWidth).foreach { line =>
               out += fit(options.theme.description(line), safeWidth)
@@ -222,18 +233,18 @@ final class SettingsList(
 
   private final case class IndexedSetting(originalIndex: Int, item: SettingItem)
 
-  private def filteredEntries: Vector[IndexedSetting] =
+  private def filteredEntries(queryValue: String): Vector[IndexedSetting] =
     val indexed = currentItems.zipWithIndex.map { case (item, index) =>
       IndexedSetting(index, item)
     }
     options.effectiveFiltering match
       case SettingsListFiltering.Disabled    => indexed
-      case _ if filterQuery.isEmpty          => indexed
+      case _ if queryValue.isEmpty           => indexed
       case SettingsListFiltering.Containment =>
-        val needle = TextCase.lowercase(filterQuery)
+        val needle = TextCase.lowercase(queryValue)
         indexed.filter(entry => TextCase.lowercase(searchableText(entry.item)).indexOf(needle) >= 0)
       case SettingsListFiltering.Fuzzy       =>
-        FuzzyMatcher.filter(filterQuery, indexed)(entry => searchableText(entry.item)).map(_.item)
+        FuzzyMatcher.filter(queryValue, indexed)(entry => searchableText(entry.item)).map(_.item)
 
   private def searchableText(item: SettingItem): String =
     item.id + "\n" + item.label + "\n" + item.currentValue + "\n" + item.description.getOrElse("")
@@ -241,10 +252,11 @@ final class SettingsList(
   private def dropLastGrapheme(value: String): String =
     Unicode.graphemeClusters(value).dropRight(1).mkString
 
-  private def selectedEntry: Option[IndexedSetting] = filteredEntries.lift(selectedIndex)
+  private def selectedEntry: Option[IndexedSetting] =
+    filteredEntries(filterQuery).lift(selectedIndex)
 
   private def moveSelection(delta: Int): InputResult =
-    val entries = filteredEntries
+    val entries = filteredEntries(filterQuery)
     if entries.isEmpty then InputResult.Ignored
     else
       selectedIndex = math.max(0, math.min(entries.length - 1, selectedIndex + delta))
@@ -305,7 +317,7 @@ final class SettingsList(
       case _                                         => InputResult.Ignored
 
   private def clampSelection(): Unit =
-    clampSelection(filteredEntries)
+    clampSelection(filteredEntries(filterQuery))
 
   private def clampSelection(entries: Vector[IndexedSetting]): Unit =
     val length = entries.length
@@ -316,13 +328,28 @@ final class SettingsList(
       selectedIndex = math.max(0, math.min(length - 1, selectedIndex))
       ensureVisible(length)
 
+  private def normalizedScrollOffset(length: Int, visibleCount: Int): Int =
+    var offset    = scrollOffset
+    if selectedIndex < offset then offset = selectedIndex
+    if selectedIndex >= offset + visibleCount then offset = selectedIndex - visibleCount + 1
+    val maxOffset = math.max(0, length - visibleCount)
+    math.max(0, math.min(offset, maxOffset))
+
+  private def commitPaste(): Boolean =
+    pasteSession match
+      case None          => false
+      case Some(session) =>
+        pasteSession = None
+        session.finish()
+        if session.changed then
+          filterQuery = session.query
+          clampSelection()
+          true
+        else false
+
   private def ensureVisible(length: Int): Unit =
     val visibleCount = math.max(1, options.maxVisible)
-    if selectedIndex < scrollOffset then scrollOffset = selectedIndex
-    if selectedIndex >= scrollOffset + visibleCount then
-      scrollOffset = selectedIndex - visibleCount + 1
-    val maxOffset    = math.max(0, length - visibleCount)
-    scrollOffset = math.max(0, math.min(scrollOffset, maxOffset))
+    scrollOffset = normalizedScrollOffset(length, visibleCount)
 
   private def renderRow(item: SettingItem, filteredIndex: Int, width: Int): String =
     val selected = filteredIndex === selectedIndex
