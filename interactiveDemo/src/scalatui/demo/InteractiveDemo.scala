@@ -29,9 +29,9 @@ import scalatui.components.{
   SelectListTheme,
   Text
 }
-import scalatui.core.{Component, ComponentFrameBuilder, TUI}
+import scalatui.core.{Component, ComponentFrameBuilder, TUI, TerminalQueryResult}
 import scalatui.syntax.Equality.*
-import scalatui.terminal.{TerminalInput, TerminalKey}
+import scalatui.terminal.{RgbColor, TerminalColorScheme, TerminalInput, TerminalKey}
 
 import java.io.File
 import scala.io.Source
@@ -216,9 +216,12 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
       case "clear"                  =>
         clearDemoMessages()
       case "large-paste"            =>
-        editor.handleInput(
-          TerminalInput.Paste((1 to 12).map(i => s"pasted line $i").mkString("\n"))
+        val bytes = (1 to 12).map(i => s"pasted line $i").mkString("\n").getBytes(
+          java.nio.charset.StandardCharsets.UTF_8
         )
+        editor.handleInput(TerminalInput.PasteStart)
+        editor.handleInput(TerminalInput.PasteChunk(scalatui.terminal.TerminalInputChunk(bytes)))
+        editor.handleInput(TerminalInput.PasteEnd)
         focus = Focus.EditorPane
         updateEditorFocus()
       case "expand-paste"           =>
@@ -239,14 +242,12 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
           s"Terminal progress off ${supportLabel(tui.setTerminalProgress(active = false))}"
         )
       case "terminal-background"    =>
-        runTerminalQuery("background color") {
-          tui.queryTerminalBackgroundColor(timeoutMillis = 500).fold("no reply") { color =>
-            s"rgb(${color.red}, ${color.green}, ${color.blue})"
-          }
+        runTerminalQuery("background color") { onComplete =>
+          tui.queryTerminalBackgroundColor(result => onComplete(formatBackgroundResult(result)))
         }
       case "terminal-scheme"        =>
-        runTerminalQuery("color scheme") {
-          tui.queryTerminalColorScheme(timeoutMillis = 500).fold("no reply")(_.value)
+        runTerminalQuery("color scheme") { onComplete =>
+          tui.queryTerminalColorScheme(result => onComplete(formatSchemeResult(result)))
         }
       case "terminal-notifications" =>
         terminalSchemeNotificationsEnabled = !terminalSchemeNotificationsEnabled
@@ -686,21 +687,32 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
     messages = Vector.empty
   }
 
-  private def runTerminalQuery(label: String)(query: => String): Unit =
+  private def runTerminalQuery(label: String)(
+      query: (String => Unit) => (() => Unit)
+  ): Unit =
     terminalQueryCounter += 1
     val queryId = terminalQueryCounter
     addDemoMessage(s"Terminal $label query #$queryId started")
-    val thread  = Thread(
-      () =>
-        val result = query
-        addDemoMessage(s"Terminal $label query #$queryId: $result")
-        tui.requestRender()
-        tui.flushRender()
-      ,
-      s"siglyph-demo-terminal-$label-query-$queryId"
-    )
-    thread.setDaemon(true)
-    thread.start()
+    query { result =>
+      addDemoMessage(s"Terminal $label query #$queryId: $result")
+      tui.requestRender()
+      tui.flushRender()
+    }
+    ()
+
+  private def formatBackgroundResult(result: TerminalQueryResult[RgbColor]): String = result match
+    case TerminalQueryResult.Success(color)  =>
+      s"rgb(${color.red}, ${color.green}, ${color.blue})"
+    case TerminalQueryResult.InvalidResponse => "invalid response"
+    case TerminalQueryResult.Stopped         => "stopped"
+    case TerminalQueryResult.Failed(cause)   => s"failed: ${cause.getMessage}"
+
+  private def formatSchemeResult(result: TerminalQueryResult[TerminalColorScheme]): String =
+    result match
+      case TerminalQueryResult.Success(scheme) => scheme.value
+      case TerminalQueryResult.InvalidResponse => "invalid response"
+      case TerminalQueryResult.Stopped         => "stopped"
+      case TerminalQueryResult.Failed(cause)   => s"failed: ${cause.getMessage}"
 
   private def supportLabel(applied: Boolean): String =
     if applied then "supported" else "unsupported"

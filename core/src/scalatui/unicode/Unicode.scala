@@ -8,6 +8,36 @@ object Unicode:
 
   final case class Grapheme(text: String, width: Int) derives CanEqual
 
+  private[scalatui] final class IncrementalGraphemeCounter:
+    private var previous          = Option.empty[Int]
+    private var regionalInCluster = 0
+    private var currentCount      = 0L
+
+    def count: Long = currentCount
+
+    def process(value: String): Unit =
+      var index = 0
+      while index < value.length do
+        val current = value.codePointAt(index)
+        previous match
+          case None           =>
+            currentCount += 1
+            regionalInCluster = if isRegionalIndicator(current) then 1 else 0
+          case Some(previous) =>
+            val breaks = shouldBreak(previous, current, regionalInCluster)
+            if breaks then
+              currentCount += 1
+              regionalInCluster = if isRegionalIndicator(current) then 1 else 0
+            else if isRegionalIndicator(current) then regionalInCluster += 1
+            else if !isExtendLike(current) then regionalInCluster = 0
+        previous = Some(current)
+        index += Character.charCount(current)
+
+    def clear(): Unit =
+      previous = None
+      regionalInCluster = 0
+      currentCount = 0L
+
   def codePoints(value: String): Vector[Int] =
     val builder = Vector.newBuilder[Int]
     var i       = 0

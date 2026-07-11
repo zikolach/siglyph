@@ -23,6 +23,9 @@ class StreamTerminal(
   private var flushThread: Thread | Null                    = null
   private val inputBuffer                                   = TerminalInputBuffer()
   private val inputLock                                     = Object()
+  private val inputDeliveryLock                             = Object()
+  private var nextInputBatchId                              = 0L
+  private var nextDeliveredBatchId                          = 0L
 
   override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
     inputHandler = onInput
@@ -74,9 +77,8 @@ class StreamTerminal(
         if read < 0 then running = false
         else if read === 0 then flushPending()
         else
-          val data   = String(buffer, 0, read, java.nio.charset.StandardCharsets.UTF_8)
-          val inputs = inputLock.synchronized(inputBuffer.process(data))
-          inputs.foreach(inputHandler)
+          val chunk = TerminalInputChunk(buffer, 0, read)
+          parseAndDeliver(inputBuffer.process(chunk))
       catch case _: InterruptedException => running = false
 
   private def flushLoop(): Unit =
@@ -86,9 +88,28 @@ class StreamTerminal(
         flushPending()
       catch case _: InterruptedException => running = false
 
-  private def flushPending(): Unit =
-    val inputs = inputLock.synchronized(inputBuffer.flush())
-    inputs.foreach(inputHandler)
+  private def flushPending(): Unit = parseAndDeliver(inputBuffer.flush())
+
+  private def parseAndDeliver(parse: => Vector[TerminalInput]): Unit =
+    val (batchId, inputs) = inputLock.synchronized {
+      val parsed = parse
+      val id     = nextInputBatchId
+      nextInputBatchId += 1
+      id -> parsed
+    }
+    var interrupted       = false
+    inputDeliveryLock.synchronized {
+      while batchId !== nextDeliveredBatchId do
+        try inputDeliveryLock.wait()
+        catch case _: InterruptedException => interrupted = true
+    }
+    try inputs.foreach(inputHandler)
+    finally
+      inputDeliveryLock.synchronized {
+        nextDeliveredBatchId += 1
+        inputDeliveryLock.notifyAll()
+      }
+      if interrupted then Thread.currentThread().interrupt()
 
 object StreamTerminal:
   private val IncompleteEscapeFlushMillis = 75L

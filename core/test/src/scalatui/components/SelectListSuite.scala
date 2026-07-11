@@ -1,5 +1,7 @@
 package scalatui.components
 
+import scalatui.TestInputStreams
+
 import scalatui.ansi.Ansi
 import scalatui.terminal.{KeyModifiers, TerminalInput, TerminalKey}
 
@@ -296,7 +298,7 @@ class SelectListSuite extends munit.FunSuite:
       options = SelectListOptions(filtering = SelectListFiltering.Containment)
     )
 
-    list.handleInput(TerminalInput.Paste("Alpha\nCat"))
+    TestInputStreams.paste("Alpha\nCat").foreach(list.handleInput)
 
     assertEquals(list.query, "Alpha Cat")
     assert(Ansi.strip(list.render(40).mkString("\n")).contains("Alpha Cat"))

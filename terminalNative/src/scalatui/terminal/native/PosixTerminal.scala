@@ -9,6 +9,7 @@ import scalatui.terminal.{
   Terminal,
   TerminalInputDrainSupport,
   TerminalInput,
+  TerminalInputChunk,
   TerminalInputBuffer,
   TerminalProgressSupport,
   TerminalTitleSupport
@@ -51,6 +52,9 @@ final class PosixTerminal(
   private var savedState: Ptr[termios.termios]              = null
   private val inputBuffer                                   = TerminalInputBuffer()
   private val inputLock                                     = Object()
+  private val inputDeliveryLock                             = Object()
+  private var nextInputBatchId                              = 0L
+  private var nextDeliveredBatchId                          = 0L
   private val keyboardProtocolNegotiator                    = KittyKeyboardProtocolNegotiator()
 
   override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
@@ -77,23 +81,40 @@ final class PosixTerminal(
         startResizePolling()
       catch
         case e: Throwable =>
+          running = false
           stopResizePolling()
-          write("\u001b[?2004l")
-          restoreMode()
+          Option(inputThread).foreach(_.interrupt())
+          Option(flushThread).foreach(_.interrupt())
+          inputThread = null
+          flushThread = null
+          def attempt(action: => Unit): Unit =
+            try action
+            catch case cleanupFailure: Throwable => e.addSuppressed(cleanupFailure)
+          attempt(write("\u001b[?2004l"))
+          attempt(inputLock.synchronized(inputBuffer.clear()))
+          attempt(restoreMode())
           throw e
 
   override def stop(): Unit =
     if running || savedState != null then
-      disableKittyKeyboardProtocol()
-      write("\u001b[?2004l")
       running = false
       stopResizePolling()
       Option(inputThread).foreach(_.interrupt())
       Option(flushThread).foreach(_.interrupt())
       inputThread = null
       flushThread = null
-      inputLock.synchronized(inputBuffer.clear())
-      restoreMode()
+      var failure                        = Option.empty[Throwable]
+      def attempt(action: => Unit): Unit =
+        try action
+        catch
+          case error: Throwable => failure match
+              case Some(first) => first.addSuppressed(error)
+              case None        => failure = Some(error)
+      attempt(disableKittyKeyboardProtocol())
+      attempt(write("\u001b[?2004l"))
+      attempt(inputLock.synchronized(inputBuffer.clear()))
+      attempt(restoreMode())
+      failure.foreach(throw _)
 
   override def drainInput(maxMillis: Long, idleMillis: Long): Unit =
     inputLock.synchronized(inputBuffer.clear())
@@ -170,9 +191,12 @@ final class PosixTerminal(
 
   private def restoreMode(): Unit =
     if savedState != null then
-      termios.tcsetattr(unistd.STDIN_FILENO, TCSAFLUSH, savedState)
-      stdlib.free(savedState.asInstanceOf[Ptr[Byte]])
-      savedState = null
+      val state    = savedState
+      val restored = termios.tcsetattr(unistd.STDIN_FILENO, TCSAFLUSH, state) === 0
+      if restored then
+        stdlib.free(state.asInstanceOf[Ptr[Byte]])
+        savedState = null
+      else throw IllegalStateException("tcsetattr restore mode failed")
 
   private def refreshSize(notify: Boolean): Boolean =
     val winsize = stackalloc[Winsize]()
@@ -222,14 +246,13 @@ final class PosixTerminal(
       if read < 0 then running = false
       else if read == 0 then ()
       else
-        val bytes  = Array.ofDim[Byte](read)
-        var i      = 0
+        val bytes = Array.ofDim[Byte](read)
+        var i     = 0
         while i < read do
           bytes(i) = (!(buffer + i)).toByte
           i += 1
-        val data   = String(bytes, java.nio.charset.StandardCharsets.UTF_8)
-        val inputs = inputLock.synchronized(inputBuffer.process(data))
-        inputs.foreach(inputHandler)
+        val chunk = TerminalInputChunk(bytes)
+        parseAndDeliver(inputBuffer.process(chunk))
 
   private def flushLoop(): Unit =
     while running do
@@ -240,9 +263,28 @@ final class PosixTerminal(
         case _: InterruptedException => running = false
         case _: Throwable            => ()
 
-  private def flushPending(): Unit =
-    val inputs = inputLock.synchronized(inputBuffer.flush())
-    inputs.foreach(inputHandler)
+  private def flushPending(): Unit = parseAndDeliver(inputBuffer.flush())
+
+  private def parseAndDeliver(parse: => Vector[TerminalInput]): Unit =
+    val (batchId, inputs) = inputLock.synchronized {
+      val parsed = parse
+      val id     = nextInputBatchId
+      nextInputBatchId += 1
+      id -> parsed
+    }
+    var interrupted       = false
+    inputDeliveryLock.synchronized {
+      while batchId !== nextDeliveredBatchId do
+        try inputDeliveryLock.wait()
+        catch case _: InterruptedException => interrupted = true
+    }
+    try inputs.foreach(inputHandler)
+    finally
+      inputDeliveryLock.synchronized {
+        nextDeliveredBatchId += 1
+        inputDeliveryLock.notifyAll()
+      }
+      if interrupted then Thread.currentThread().interrupt()
 
   private def clearFlags(value: termios.tcflag_t, mask: Int): termios.tcflag_t =
     (value.toInt & ~mask).toUInt

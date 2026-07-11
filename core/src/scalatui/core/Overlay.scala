@@ -90,11 +90,22 @@ trait OverlayHandle:
 trait OverlayHost:
   def showOverlay(component: Component, options: OverlayOptions = OverlayOptions()): OverlayHandle
   def hideOverlay(): Unit
+
+  /**
+   * Return the latest overlay visibility computed by the work-drain owner. This read never waits
+   * for active application work and may be briefly stale while another drain action is running.
+   */
   def hasOverlay: Boolean
 
 /** Runtime services that components can use without depending on terminal backends. */
 trait TUIContext:
+  /** Queue a coalesced render intent. Force intent is preserved when requests merge. */
   def requestRender(force: Boolean = false): Unit
+
+  /**
+   * Drain synchronously when uncontended. A reentrant or concurrent call records follow-up work and
+   * returns without recursive rendering or waiting for the active application callback.
+   */
   def flushRender(): Unit
   def requestExit(): Unit
   def setFocus(component: Component | Null): Unit

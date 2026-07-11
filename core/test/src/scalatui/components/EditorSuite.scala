@@ -1,5 +1,7 @@
 package scalatui.components
 
+import scalatui.TestInputStreams
+
 import scalatui.ansi.Ansi
 import scalatui.autocomplete.*
 import scalatui.core.{CursorMarker, InputResult, OverlayOptions, OverlaySize, TUI}
@@ -9,6 +11,8 @@ import scalatui.terminal.{
   KeybindingManager,
   KeyModifiers,
   TerminalInput,
+  TerminalInputBuffer,
+  TerminalInputChunk,
   TerminalKey,
   VirtualTerminal
 }
@@ -59,7 +63,9 @@ class EditorSuite extends munit.FunSuite:
       editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("a"))),
       InputResult.Render
     )
-    assertEquals(editor.handleInputResult(TerminalInput.Paste("界\ne\u0301")), InputResult.Render)
+    assert(TestInputStreams.paste("界\ne\u0301").exists(editor.handleInputResult(_) match
+      case InputResult.Handled(true) => true
+      case _                         => false))
 
     assertEquals(editor.text, "a界\ne\u0301")
     assertEquals(editor.lines, Vector("a界", "e\u0301"))
@@ -72,7 +78,9 @@ class EditorSuite extends munit.FunSuite:
     editor.setCursor(EditorCursor(0, 1))
     editor.focused = true
 
-    assertEquals(editor.handleInputResult(TerminalInput.Paste(pasted)), InputResult.Render)
+    assert(TestInputStreams.paste(pasted).exists(editor.handleInputResult(_) match
+      case InputResult.Handled(true) => true
+      case _                         => false))
     assertEquals(editor.text, "a[paste #1 +11 lines]b")
     assert(editor.render(80).head.contains("[paste #1 +11 lines]"))
 
@@ -81,6 +89,106 @@ class EditorSuite extends munit.FunSuite:
 
     editor.expandPasteMarkers()
     assertEquals(editor.text, s"a${pasted}b")
+
+  test("real bracketed paste bytes commit one normalized Unicode edit"):
+    val pasted  = "A\r\ne\u0301\r👨‍👩‍👧‍👦\n🇦🇹"
+    var changed = Vector.empty[String]
+    val editor  = Editor("ab", EditorOptions(onChange = value => changed :+= value))
+    editor.setCursor(EditorCursor(0, 1))
+
+    val results = feedTerminalBytes(editor, bracketedPasteBytes(pasted), chunkSize = 1)
+
+    assertEquals(editor.text, "aA\ne\u0301\n👨‍👩‍👧‍👦\n🇦🇹b")
+    assertEquals(editor.cursor, EditorCursor(3, 1))
+    assertEquals(changed, Vector("aA\ne\u0301\n👨‍👩‍👧‍👦\n🇦🇹b"))
+    assertEquals(results.count { case InputResult.Render => true; case _ => false }, 1)
+    assertEquals(editor.undo(), true)
+    assertEquals(editor.text, "ab")
+    assertEquals(editor.undo(), false)
+
+  test("streamed paste applies aggregate line and grapheme marker thresholds"):
+    val elevenLines = (1 to 11).map(index => s"line$index").mkString("\r\n")
+    val lineEditor  = Editor()
+    feedTerminalBytes(lineEditor, bracketedPasteBytes(elevenLines), chunkSize = 3)
+    assertEquals(lineEditor.text, "[paste #1 +11 lines]")
+
+    val graphemes      = "x" * 1001
+    val graphemeEditor = Editor()
+    feedTerminalBytes(graphemeEditor, bracketedPasteBytes(graphemes), chunkSize = 7)
+    assertEquals(graphemeEditor.text, "[paste #1 1001 chars]")
+
+  test("streamed large paste submission and expansion recover normalized content"):
+    val pasted    = (1 to 11).map(index => s"line$index").mkString("\r\n")
+    val expected  = pasted.replace("\r\n", "\n")
+    var submitted = ""
+    val editor    = Editor(options = EditorOptions(onSubmit = value => submitted = value))
+
+    feedTerminalBytes(editor, bracketedPasteBytes(pasted), chunkSize = 2)
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Enter))
+    assertEquals(submitted, expected)
+    editor.expandPasteMarkers()
+    assertEquals(editor.text, expected)
+
+  test("empty paste is unchanged and interrupted paste commits before later input"):
+    var changes = 0
+    val editor  = Editor("base", EditorOptions(onChange = _ => changes += 1))
+    val empty   = feedTerminalBytes(editor, bracketedPasteBytes(""), chunkSize = 1)
+    assertEquals(editor.text, "base")
+    assertEquals(changes, 0)
+    assertEquals(empty.count { case InputResult.Render => true; case _ => false }, 0)
+    assertEquals(editor.undo(), false)
+
+    val unfinished = "\u001b[200~x\r\ny".getBytes(java.nio.charset.StandardCharsets.UTF_8)
+    feedTerminalBytes(editor, unfinished, chunkSize = 1)
+    assertEquals(editor.text, "base")
+    assertEquals(
+      editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("!"))),
+      InputResult.Render
+    )
+    assertEquals(editor.text, "basex\ny!")
+    assertEquals(changes, 2)
+    assertEquals(editor.undo(), true)
+    assertEquals(editor.text, "basex\ny")
+    assertEquals(editor.undo(), true)
+    assertEquals(editor.text, "base")
+
+  test("streamed paste renders and refreshes active autocomplete once at completion"):
+    var events    = Vector.empty[AutocompleteProbeEvent]
+    var scheduled = Vector.empty[() => Unit]
+    val provider  = recordingAutocompleteProvider(event => events :+= event)
+    val editor    = Editor(
+      "/",
+      EditorOptions(
+        autocompleteProvider = Some(provider),
+        autocompleteTrigger = EditorAutocompleteTrigger.ExplicitTabOnly,
+        autocompleteDebouncer = recordingDebouncer(action => scheduled :+= action)
+      )
+    )
+    assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Tab)), InputResult.Render)
+
+    val terminal = VirtualTerminal(40, 8)
+    var renders  = 0
+    val wrapper  = new scalatui.core.Component:
+      override def render(width: Int): Vector[String]                   =
+        renders += 1
+        editor.render(width)
+      override def handleInputResult(input: TerminalInput): InputResult =
+        editor.handleInputResult(input)
+    val tui      = TUI(terminal)
+    tui.addChild(wrapper)
+    tui.setFocus(wrapper)
+    tui.start()
+    renders = 0
+
+    val parser = TerminalInputBuffer()
+    bracketedPasteBytes("abc").foreach { byte =>
+      parser.process(TerminalInputChunk(Array(byte))).foreach(terminal.sendInput)
+    }
+
+    assertEquals(editor.text, "/abc")
+    assertEquals(renders, 1)
+    assertEquals(scheduled.length, 1)
+    tui.stop()
 
   test("insertAtCursor inserts text normalizes newlines and creates one undo step"):
     var changed = Vector.empty[String]
@@ -411,7 +519,7 @@ class EditorSuite extends munit.FunSuite:
     val pasted = (1 to 11).map(index => s"line$index").mkString("\n")
     val editor = Editor("ab")
     editor.setCursor(EditorCursor(0, 1))
-    editor.handleInputResult(TerminalInput.Paste(pasted))
+    TestInputStreams.paste(pasted).foreach(editor.handleInputResult)
 
     assert(editor.text.contains("[paste #1 +11 lines]"), editor.text)
     assertEquals(editor.cursor, EditorCursor(0, 2))
@@ -549,7 +657,9 @@ class EditorSuite extends munit.FunSuite:
   test("reports ignored and no-render handled inputs accurately"):
     val editor = Editor()
 
-    assertEquals(editor.handleInputResult(TerminalInput.Raw("?")), InputResult.Ignored)
+    TestInputStreams.raw("?").foreach(input =>
+      assertEquals(editor.handleInputResult(input), InputResult.Ignored)
+    )
     assertEquals(
       editor.handleInputResult(TerminalInput.Key(TerminalKey.Left)),
       InputResult.NoRender
@@ -963,6 +1073,19 @@ class EditorSuite extends munit.FunSuite:
 
     val lines = visibleFrameLines(terminal.output)
     assertEquals(lines.indexWhere(_.contains("help")), 5)
+
+  private def bracketedPasteBytes(value: String): Array[Byte] =
+    s"\u001b[200~$value\u001b[201~".getBytes(java.nio.charset.StandardCharsets.UTF_8)
+
+  private def feedTerminalBytes(
+      editor: Editor,
+      bytes: Array[Byte],
+      chunkSize: Int
+  ): Vector[InputResult] =
+    val parser = TerminalInputBuffer()
+    bytes.grouped(chunkSize).flatMap { chunk =>
+      parser.process(TerminalInputChunk(chunk)).map(editor.handleInputResult)
+    }.toVector
 
   private def autocomplete(value: String, prefix: String): AutocompleteSuggestions =
     AutocompleteSuggestions(Vector(AutocompleteItem(value, value)), prefix)

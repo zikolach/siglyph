@@ -130,6 +130,7 @@ final class SettingsList(
   private var selectedIndex = 0
   private var scrollOffset  = 0
   private var filterQuery   = ""
+  private val pasteDecoder  = scalatui.terminal.TerminalUtf8Decoder()
   private var context       = Option.empty[TUIContext]
   private var activeSubmenu = Option.empty[OverlayHandle]
 
@@ -159,11 +160,11 @@ final class SettingsList(
   override def handleInput(input: TerminalInput): Unit = handleInputResult(input)
 
   override def handleInputResult(input: TerminalInput): InputResult = input match
-    case TerminalInput.Key(TerminalKey.Up, _)                                             => moveSelection(-1)
-    case TerminalInput.Key(TerminalKey.Down, _)                                           => moveSelection(1)
-    case TerminalInput.Key(TerminalKey.Enter, _)                                          => activateSelected()
-    case TerminalInput.Key(TerminalKey.Character(" "), _)                                 => activateSelected()
-    case TerminalInput.Key(TerminalKey.Escape, _)                                         =>
+    case TerminalInput.Key(TerminalKey.Up, _)                                  => moveSelection(-1)
+    case TerminalInput.Key(TerminalKey.Down, _)                                => moveSelection(1)
+    case TerminalInput.Key(TerminalKey.Enter, _)                               => activateSelected()
+    case TerminalInput.Key(TerminalKey.Character(" "), _)                      => activateSelected()
+    case TerminalInput.Key(TerminalKey.Escape, _)                              =>
       onCancel()
       InputResult.Render
     case TerminalInput.Key(TerminalKey.Backspace, _)
@@ -176,11 +177,18 @@ final class SettingsList(
       filterQuery += text
       clampSelection()
       InputResult.Render
-    case TerminalInput.Paste(text) if options.effectiveFiltering.enabled && text.nonEmpty =>
-      filterQuery += text.replace('\n', ' ').replace('\r', ' ')
+    case TerminalInput.PasteStart if options.effectiveFiltering.enabled        =>
+      pasteDecoder.clear()
+      InputResult.NoRender
+    case TerminalInput.PasteChunk(chunk) if options.effectiveFiltering.enabled =>
+      filterQuery += pasteDecoder.process(chunk).replace('\n', ' ').replace('\r', ' ')
       clampSelection()
       InputResult.Render
-    case _                                                                                => InputResult.Ignored
+    case TerminalInput.PasteEnd if options.effectiveFiltering.enabled          =>
+      filterQuery += pasteDecoder.flush().replace('\n', ' ').replace('\r', ' ')
+      clampSelection()
+      InputResult.Render
+    case _                                                                     => InputResult.Ignored
 
   override def render(width: Int): Vector[String] =
     val safeWidth = math.max(0, width)

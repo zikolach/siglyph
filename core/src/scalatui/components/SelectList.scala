@@ -25,25 +25,29 @@ final class SelectList private (
   private var selectedIndex                         = 0
   private var scrollOffset                          = 0
   private var filterQuery                           = ""
+  private val pasteDecoder                          = scalatui.terminal.TerminalUtf8Decoder()
 
   def selected: Option[SelectItem] = filteredItems.lift(selectedIndex)
 
   def query: String = filterQuery
 
   override def handleInput(input: TerminalInput): Unit = input match
-    case TerminalInput.Key(TerminalKey.Up, _)                                             => moveSelection(-1)
-    case TerminalInput.Key(TerminalKey.Down, _)                                           => moveSelection(1)
-    case TerminalInput.Key(TerminalKey.Enter, _)                                          => selected.foreach(onSelect)
-    case TerminalInput.Key(TerminalKey.Escape, _)                                         => onCancel()
+    case TerminalInput.Key(TerminalKey.Up, _)                                  => moveSelection(-1)
+    case TerminalInput.Key(TerminalKey.Down, _)                                => moveSelection(1)
+    case TerminalInput.Key(TerminalKey.Enter, _)                               => selected.foreach(onSelect)
+    case TerminalInput.Key(TerminalKey.Escape, _)                              => onCancel()
     case TerminalInput.Key(TerminalKey.Backspace, _)
         if options.effectiveFiltering.enabled && filterQuery.nonEmpty =>
       updateFilter(dropLastGrapheme(filterQuery))
     case TerminalInput.Key(TerminalKey.Character(text), modifiers)
         if options.effectiveFiltering.enabled && !modifiers.ctrl && !modifiers.alt && !modifiers.superKey && text.nonEmpty =>
       updateFilter(filterQuery + text)
-    case TerminalInput.Paste(text) if options.effectiveFiltering.enabled && text.nonEmpty =>
-      updateFilter(filterQuery + text.replace('\n', ' ').replace('\r', ' '))
-    case _                                                                                => ()
+    case TerminalInput.PasteStart if options.effectiveFiltering.enabled        => pasteDecoder.clear()
+    case TerminalInput.PasteChunk(chunk) if options.effectiveFiltering.enabled =>
+      updateFilter(filterQuery + pasteDecoder.process(chunk).replace('\n', ' ').replace('\r', ' '))
+    case TerminalInput.PasteEnd if options.effectiveFiltering.enabled          =>
+      updateFilter(filterQuery + pasteDecoder.flush().replace('\n', ' ').replace('\r', ' '))
+    case _                                                                     => ()
 
   /** Move selection up/down by logical items. */
   def moveSelectionBy(delta: Int): Unit = moveSelection(delta)

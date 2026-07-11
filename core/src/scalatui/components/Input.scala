@@ -22,6 +22,7 @@ final class Input(
   private var currentValue     = initialValue
   private var cursorCluster    = Unicode.graphemeClusters(initialValue).length
   private var isFocused        = false
+  private val pasteDecoder     = scalatui.terminal.TerminalUtf8Decoder()
   private val undoStack        = UndoStack[Input.State]()
   private val killRing         = KillRing()
   private var lastAction       = Option.empty[Input.Action]
@@ -114,11 +115,15 @@ final class Input(
       insert("\n")
     else
       input match
-        case TerminalInput.Paste(text) => insert(text.replace('\n', ' ').replace('\r', ' '))
+        case TerminalInput.PasteStart        => pasteDecoder.clear()
+        case TerminalInput.PasteChunk(chunk) =>
+          insert(pasteDecoder.process(chunk).replace('\n', ' ').replace('\r', ' '))
+        case TerminalInput.PasteEnd          =>
+          insert(pasteDecoder.flush().replace('\n', ' ').replace('\r', ' '))
         case TerminalInput.Key(TerminalKey.Character(text), modifiers)
             if !modifiers.ctrl && !modifiers.alt && !modifiers.superKey =>
           insert(text)
-        case _                         => ()
+        case _                               => ()
 
   override def render(width: Int): Vector[String] =
     val cs     = clusters

@@ -118,24 +118,33 @@ final class EditorBuffer private (
 
   /** Insert pasted text, preserving normalized logical newlines and Unicode content. */
   def insertPaste(text: String): Unit =
-    val normalized = normalizeNewlines(text)
-    if isLargePaste(normalized) then insertLargePasteMarker(normalized)
-    else
-      val parts = normalized.split("\n", -1).toVector
-      if parts.length === 1 then insertClusters(Unicode.graphemeClusters(parts.head))
-      else
-        val cs          = currentLineClusters
-        val prefix      = cs.take(currentCursor.column).mkString
-        val suffix      = cs.drop(currentCursor.column).mkString
-        val replacement = Vector(prefix + parts.head) ++ parts.slice(
-          1,
-          parts.length - 1
-        ) ++ Vector(parts.last + suffix)
-        currentLines = currentLines.patch(currentCursor.line, replacement, 1)
-        currentCursor = EditorCursor(
-          currentCursor.line + parts.length - 1,
-          Unicode.graphemeClusters(parts.last).length
-        )
+    val normalized    = normalizeNewlines(text)
+    val lineCount     = normalized.count(_ === '\n').toLong + 1L
+    val graphemeCount = Unicode.graphemeClusters(normalized).length.toLong
+    if isLargePaste(lineCount, graphemeCount) then
+      insertLargePasteMarker(normalized, lineCount, graphemeCount)
+    else insertPasteChunks(Vector(normalized))
+
+  private[scalatui] def insertPasteChunks(chunks: Vector[String]): Unit =
+    if chunks.exists(_.nonEmpty) then
+      val pastedLines = scala.collection.mutable.ArrayBuffer(StringBuilder())
+      chunks.foreach { chunk =>
+        var start = 0
+        var index = chunk.indexOf('\n')
+        while index >= 0 do
+          pastedLines.last.append(chunk.substring(start, index))
+          pastedLines += StringBuilder()
+          start = index + 1
+          index = chunk.indexOf('\n', start)
+        pastedLines.last.append(chunk.substring(start))
+      }
+      insertPasteLines(pastedLines.map(_.result()).toVector)
+
+  private[scalatui] def insertLargePaste(
+      value: String,
+      lineCount: Long,
+      graphemeCount: Long
+  ): Unit = insertLargePasteMarker(value, lineCount, graphemeCount)
 
   /** Replace all large-paste markers with their original logical pasted content. */
   def expandPasteMarkersInBuffer(): Unit =
@@ -251,19 +260,39 @@ final class EditorBuffer private (
   private def normalizeNewlines(value: String): String =
     value.replace("\r\n", "\n").replace('\r', '\n')
 
-  private def isLargePaste(value: String): Boolean =
-    value.split("\n", -1).length > EditorBuffer.LargePasteLineThreshold ||
-      Unicode.graphemeClusters(value).length > EditorBuffer.LargePasteCharacterThreshold
+  private def isLargePaste(lineCount: Long, graphemeCount: Long): Boolean =
+    lineCount > EditorBuffer.LargePasteLineThreshold ||
+      graphemeCount > EditorBuffer.LargePasteCharacterThreshold
 
-  private def insertLargePasteMarker(value: String): Unit =
+  private def insertLargePasteMarker(
+      value: String,
+      lineCount: Long,
+      graphemeCount: Long
+  ): Unit =
     pasteCounter += 1
     val id     = pasteCounter
-    val lines  = value.split("\n", -1).length
     currentPastes = currentPastes.updated(id, value)
     val marker =
-      if lines > EditorBuffer.LargePasteLineThreshold then s"[paste #$id +$lines lines]"
-      else s"[paste #$id ${Unicode.graphemeClusters(value).length} chars]"
+      if lineCount > EditorBuffer.LargePasteLineThreshold then
+        s"[paste #$id +$lineCount lines]"
+      else s"[paste #$id $graphemeCount chars]"
     insertClusters(Vector(marker))
+
+  private def insertPasteLines(parts: Vector[String]): Unit =
+    if parts.length === 1 then insertClusters(Unicode.graphemeClusters(parts.head))
+    else
+      val cs          = currentLineClusters
+      val prefix      = cs.take(currentCursor.column).mkString
+      val suffix      = cs.drop(currentCursor.column).mkString
+      val replacement = Vector(prefix + parts.head) ++ parts.slice(
+        1,
+        parts.length - 1
+      ) ++ Vector(parts.last + suffix)
+      currentLines = currentLines.patch(currentCursor.line, replacement, 1)
+      currentCursor = EditorCursor(
+        currentCursor.line + parts.length - 1,
+        Unicode.graphemeClusters(parts.last).length
+      )
 
   private def expandPasteMarkers(value: String): String =
     currentPastes.foldLeft(value) { case (result, (id, paste)) =>

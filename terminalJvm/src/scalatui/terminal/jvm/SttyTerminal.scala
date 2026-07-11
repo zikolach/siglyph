@@ -44,10 +44,6 @@ final class SttyTerminal(
 
   override def start(onInput: scalatui.terminal.TerminalInput => Unit, onResize: () => Unit): Unit =
     if savedState.isEmpty then
-      if System.console() == null then
-        throw IllegalStateException(
-          "JVM stty backend requires an interactive TTY; use StreamTerminal for non-interactive streams"
-        )
       resizeHandler = onResize
       savedState = Some(runStty("-g"))
       try
@@ -59,20 +55,42 @@ final class SttyTerminal(
       catch
         case e: Throwable =>
           stopResizePolling()
-          write("\u001b[?2004l")
-          savedState.foreach(state => scala.util.Try(runStty(state)))
-          savedState = None
+          def attempt(action: => Unit): Unit =
+            try action
+            catch case cleanupFailure: Throwable => e.addSuppressed(cleanupFailure)
+          attempt(write("\u001b[?2004l"))
+          attempt(super.stop())
+          val state                          = savedState
+          state.foreach(value =>
+            attempt {
+              runStty(value)
+              savedState = None
+            }
+          )
           throw e
 
   override def stop(): Unit =
     stopResizePolling()
     if savedState.isEmpty then super.stop()
     else
-      disableKittyKeyboardProtocol()
-      write("\u001b[?2004l")
-      super.stop()
-      savedState.foreach(state => scala.util.Try(runStty(state)))
-      savedState = None
+      var failure                        = Option.empty[Throwable]
+      def attempt(action: => Unit): Unit =
+        try action
+        catch
+          case error: Throwable => failure match
+              case Some(first) => first.addSuppressed(error)
+              case None        => failure = Some(error)
+      attempt(disableKittyKeyboardProtocol())
+      attempt(write("\u001b[?2004l"))
+      attempt(super.stop())
+      val state                          = savedState
+      state.foreach(value =>
+        attempt {
+          runStty(value)
+          savedState = None
+        }
+      )
+      failure.foreach(throw _)
 
   override def columns: Int = currentColumns
   override def rows: Int    = currentRows

@@ -1,5 +1,7 @@
 package scalatui.components
 
+import scalatui.TestInputStreams
+
 import scalatui.ansi.Ansi
 import scalatui.core.CursorMarker
 import scalatui.terminal.{
@@ -45,7 +47,7 @@ class ComponentsSuite extends munit.FunSuite:
     input.handleInput(TerminalInput.Key(TerminalKey.Character("🙂")))
     input.handleInput(TerminalInput.Key(TerminalKey.Left))
     input.handleInput(TerminalInput.Key(TerminalKey.Backspace))
-    input.handleInput(TerminalInput.Paste("x\ny"))
+    TestInputStreams.paste("x\ny").foreach(input.handleInput)
 
     var submitted = ""
     input.onSubmit = value => submitted = value
@@ -53,6 +55,17 @@ class ComponentsSuite extends munit.FunSuite:
 
     assertEquals(input.value, "x y🙂")
     assertEquals(submitted, "x y🙂")
+
+  test("input consumes streaming paste chunks incrementally across UTF-8 boundaries"):
+    val input = Input()
+    val bytes = "界🙂".getBytes(java.nio.charset.StandardCharsets.UTF_8)
+    input.handleInput(TerminalInput.PasteStart)
+    bytes.foreach(byte =>
+      input.handleInput(TerminalInput.PasteChunk(scalatui.terminal.TerminalInputChunk(Array(byte))))
+    )
+    input.handleInput(TerminalInput.PasteEnd)
+
+    assertEquals(input.value, "界🙂")
 
   test("input submit keybinding is configurable"):
     val input     = Input(

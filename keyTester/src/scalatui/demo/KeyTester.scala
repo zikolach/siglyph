@@ -25,6 +25,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 private def describe(input: TerminalInput): String = input match
   case TerminalInput.KeyEvent(key, modifiers, eventType) =>
     s"key=$key modifiers=$modifiers event=$eventType"
-  case TerminalInput.Paste(text)                         => s"paste ${text.length} chars: ${text.take(80)}"
-  case TerminalInput.Raw(data)                           =>
-    s"raw ${data.toCharArray.map(ch => f"U+${ch.toInt}%04X").mkString(" ")}"
+  case TerminalInput.PasteStart                          => "paste start"
+  case TerminalInput.PasteChunk(chunk)                   => s"paste chunk ${chunk.length} bytes"
+  case TerminalInput.PasteEnd                            => "paste end"
+  case TerminalInput.RawStart(kind)                      => s"raw start kind=$kind"
+  case TerminalInput.RawChunk(chunk)                     =>
+    s"raw chunk ${chunk.toArray.map(byte => f"0x${byte & 0xff}%02X").mkString(" ")}"
+  case TerminalInput.RawEnd(termination)                 => s"raw end termination=$termination"

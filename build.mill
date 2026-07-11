@@ -115,11 +115,30 @@ object terminalJvm extends SiglyphPublishModule {
 object coreNative extends SiglyphNativePublishModule {
   def artifactName = "siglyph-core"
   def sources      = Task.Sources(workspaceRoot / "core" / "src")
+
+  object test extends ScalaNativeTests {
+    def sources       = Task.Sources(
+      workspaceRoot / "core" / "test" / "src" / "scalatui" / "TestInputStreams.scala",
+      workspaceRoot / "core" / "test" / "src" / "scalatui" / "components" / "EditorSuite.scala",
+      workspaceRoot / "core" / "test" / "src" / "scalatui" / "core" / "TUIConcurrencySuite.scala",
+      workspaceRoot / "core" / "test" / "src" / "scalatui" / "editing" / "EditorBufferSuite.scala",
+      workspaceRoot / "core" / "test" / "src" / "scalatui" / "terminal" / "TerminalInputBufferSuite.scala",
+      workspaceRoot / "core" / "test" / "src" / "scalatui" / "terminal" / "TerminalInputParserSuite.scala"
+    )
+    def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
+    def testFramework = "munit.Framework"
+  }
 }
 
 object terminalNative extends SiglyphNativePublishModule {
   def artifactName = "siglyph-terminal-native"
   def moduleDeps   = Seq(coreNative)
+
+  object test extends ScalaNativeTests {
+    def sources       = Task.Sources(workspaceRoot / "terminalNative" / "test" / "src")
+    def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
+    def testFramework = "munit.Framework"
+  }
 }
 
 object markdown extends SiglyphPublishModule {

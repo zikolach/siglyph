@@ -84,3 +84,31 @@ class SttyTerminalSuite extends munit.FunSuite:
     do Thread.sleep(1)
 
     assertEquals(terminal.keyboardProtocolState, KittyKeyboardProtocolState.Inactive)
+
+  test("interactive start and output-side operations do not synchronously deliver callbacks"):
+    val terminal        = SttyTerminal()
+    val caller          = Thread.currentThread()
+    var inlineCallbacks = 0
+    terminal.start(
+      _ => if Thread.currentThread() eq caller then inlineCallbacks += 1,
+      () => if Thread.currentThread() eq caller then inlineCallbacks += 1
+    )
+    try
+      terminal.write("")
+      terminal.hideCursor()
+      terminal.showCursor()
+      terminal.clearLine()
+      terminal.clearFromCursor()
+      terminal.clearScreen()
+      terminal.moveBy(1)
+      terminal.drainInput()
+      Terminal.setTitle(terminal, "test")
+      Terminal.setProgress(terminal, active = true)
+      terminal.requestKittyKeyboardProtocol(timeoutMillis = 100)
+      terminal.acceptKittyKeyboardProtocolResponse(
+        "\u001b[?3u",
+        nowMillis = System.currentTimeMillis()
+      )
+      terminal.disableKittyKeyboardProtocol()
+      assertEquals(inlineCallbacks, 0)
+    finally terminal.stop()
