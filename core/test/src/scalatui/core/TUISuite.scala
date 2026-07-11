@@ -30,6 +30,7 @@ import scalatui.terminal.{
   VirtualTerminal
 }
 
+import java.util.concurrent.{CountDownLatch, TimeUnit}
 import java.util.concurrent.atomic.AtomicReference
 
 class TUISuite extends munit.FunSuite:
@@ -39,19 +40,50 @@ class TUISuite extends munit.FunSuite:
   final class MutableFrame(var values: Vector[String]) extends Component:
     override def render(width: Int): Vector[String] = values
 
-  final class AsyncStartupTerminal(inputs: Vector[TerminalInput], publishResize: Boolean = false)
-      extends Terminal:
-    private val writesBuffer = scala.collection.mutable.ArrayBuffer.empty[String]
-    private var inputHandler = Option.empty[TerminalInput => Unit]
+  final class AsyncStartupTerminal(
+      inputs: Vector[TerminalInput],
+      publishResize: Boolean = false,
+      gatePublication: Boolean = false
+  ) extends Terminal:
+    private val writesBuffer        = scala.collection.mutable.ArrayBuffer.empty[String]
+    private val publicationStarted  = CountDownLatch(1)
+    private val publicationGate     = CountDownLatch(if gatePublication then 1 else 0)
+    private val publicationComplete = CountDownLatch(1)
+    private val publicationFailure  = AtomicReference[Throwable]()
+    private val publicationThread   = AtomicReference[Thread]()
+    private var inputHandler        = Option.empty[TerminalInput => Unit]
 
     override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
       inputHandler = Some(onInput)
-      val publisher = Thread(() => {
-        if publishResize then onResize()
-        inputs.foreach(onInput)
-      })
+      val publisher = Thread(() =>
+        try
+          publicationStarted.countDown()
+          publicationGate.await()
+          if publishResize then onResize()
+          inputs.foreach(onInput)
+        catch case failure: Throwable => publicationFailure.set(failure)
+        finally publicationComplete.countDown()
+      )
+      publisher.setDaemon(true)
+      publicationThread.set(publisher)
       publisher.start()
-      publisher.join()
+
+    def awaitPublicationStart(): Unit =
+      assert(publicationStarted.await(1, TimeUnit.SECONDS), "startup publisher did not start")
+
+    def releasePublication(): Unit = publicationGate.countDown()
+
+    def joinPublisher(): Unit =
+      val publisher = publicationThread.get()
+      if publisher != null then
+        publisher.join(1000)
+        assert(!publisher.isAlive, "startup publisher did not terminate")
+
+    def publicationFinished: Boolean = publicationComplete.getCount <= 0L
+
+    def awaitPublication(): Unit =
+      assert(publicationComplete.await(1, TimeUnit.SECONDS), "startup publication did not finish")
+      Option(publicationFailure.get()).foreach(throw _)
 
     def emit(input: TerminalInput): Unit = inputHandler.foreach(handler => handler(input))
 
@@ -261,11 +293,35 @@ class TUISuite extends munit.FunSuite:
     tui.addChild(MutableLine("hello"))
 
     tui.start()
+    terminal.awaitPublication()
 
     val output = terminal.output
     assert(output.startsWith(TUI.AlternateScreenEnter), output)
     assert(output.indexOf(TUI.AlternateScreenEnter) < output.indexOf(TUI.SyncStart), output)
     assert(output.contains("hello" + TUI.LineReset), output)
+
+  test("start returns while independent startup publication remains gated"):
+    val terminal      = AsyncStartupTerminal(Vector.empty, gatePublication = true)
+    val tui           = TUI(terminal)
+    val startReturned = CountDownLatch(1)
+    val startFailure  = AtomicReference[Throwable]()
+    val startThread   = Thread(() =>
+      try tui.start()
+      catch case failure: Throwable => startFailure.set(failure)
+      finally startReturned.countDown()
+    )
+
+    startThread.start()
+    try
+      terminal.awaitPublicationStart()
+      assert(startReturned.await(1, TimeUnit.SECONDS), "TUI start waited for startup publisher")
+      Option(startFailure.get()).foreach(throw _)
+      assert(!terminal.publicationFinished, "startup publication completed while gated")
+    finally
+      terminal.releasePublication()
+      terminal.joinPublisher()
+      startThread.join(1000)
+      assert(!startThread.isAlive, "TUI start thread did not terminate")
 
   test("independent startup input publication preserves input order"):
     val terminal  = AsyncStartupTerminal(Vector(
@@ -287,6 +343,7 @@ class TUISuite extends munit.FunSuite:
     tui.setFocus(component)
 
     tui.start()
+    terminal.awaitPublication()
 
     assertEquals(received.toVector, Vector("a", "b", "c"))
 
@@ -312,6 +369,7 @@ class TUISuite extends munit.FunSuite:
     tui.setFocus(component)
 
     tui.start()
+    terminal.awaitPublication()
 
     assertEquals(received.toVector, Vector("a", "b"))
 

@@ -281,6 +281,11 @@ At EOF, finite StreamTerminal input SHALL deliver the complete final non-paste e
 ### Requirement: Backend cleanup obligations are independently retained
 JVM and Native terminal backends SHALL retain and retry each failed cleanup obligation independently, SHALL not repeat successful obligations, and SHALL reject restart while any obligation remains.
 
+#### Scenario: Duplicate running start takes precedence
+- **WHILE** SttyTerminal is running
+- **WHEN** `start` is called again
+- **THEN** it throws an explicit already-running error instead of an incomplete-cleanup error
+
 #### Scenario: One cleanup obligation fails
 - **WHEN** one cleanup obligation fails after another succeeds
 - **THEN** retry executes only the failed obligation and restart remains rejected until it succeeds

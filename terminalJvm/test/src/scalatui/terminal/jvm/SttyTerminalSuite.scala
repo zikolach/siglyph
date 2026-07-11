@@ -164,6 +164,32 @@ class SttyTerminalSuite extends munit.FunSuite:
       assertEquals(inlineCallbacks, 0)
     finally terminal.stop()
 
+  test("duplicate running start is distinct from incomplete cleanup rejection"):
+    val terminal = SttyTerminal(
+      input = InputStream.nullInputStream(),
+      output = ByteArrayOutputStream(),
+      columnsOverride = Some(80),
+      rowsOverride = Some(24),
+      sizeQuery = () => Some(24 -> 80)
+    )
+    terminal.start(_ => (), () => ())
+    try
+      val duplicate = intercept[IllegalStateException](terminal.start(_ => (), () => ()))
+      assertEquals(duplicate.getMessage, "SttyTerminal is already running")
+
+      terminal.cleanupFailureForTesting = name =>
+        Option.when(name == "input")(RuntimeException("injected input cleanup failure"))
+      intercept[RuntimeException](terminal.stop())
+
+      val incompleteCleanup = intercept[IllegalStateException](terminal.start(_ => (), () => ()))
+      assertEquals(
+        incompleteCleanup.getMessage,
+        "cannot start SttyTerminal while cleanup from the previous generation remains incomplete"
+      )
+    finally
+      terminal.cleanupFailureForTesting = _ => None
+      terminal.stop()
+
   test("restart rejects the actual old JVM resize worker until its callback returns"):
     val sizeQueries   = AtomicInteger(0)
     val resizeStarted = CountDownLatch(1)

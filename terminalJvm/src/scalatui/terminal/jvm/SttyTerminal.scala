@@ -39,6 +39,7 @@ final class SttyTerminal(
       TerminalProgressSupport:
   @volatile private var savedState: Option[String]                       = None
   @volatile private var resizePolling                                    = false
+  private var sttyRunning                                                = false
   private var inputCleanupPending                                        = false
   private var pasteCleanupPending                                        = false
   private var kittyCleanupPending                                        = false
@@ -55,6 +56,7 @@ final class SttyTerminal(
 
   override def start(onInput: scalatui.terminal.TerminalInput => Unit, onResize: () => Unit): Unit =
     synchronized {
+      if sttyRunning then throw IllegalStateException("SttyTerminal is already running")
       reapResizeThread()
       if hasCleanupObligations then
         throw IllegalStateException(
@@ -81,15 +83,18 @@ final class SttyTerminal(
         write("\u001b[?2004h")
         inputCleanupPending = true
         super.start(onInput, onResize)
+        sttyRunning = true
         startResizePolling()
       catch
         case e: Throwable =>
+          sttyRunning = false
           stopResizePolling()
           cleanup().foreach(e.addSuppressed)
           throw e
     }
 
   override def stop(): Unit = synchronized {
+    sttyRunning = false
     stopResizePolling()
     cleanup().foreach(throw _)
   }

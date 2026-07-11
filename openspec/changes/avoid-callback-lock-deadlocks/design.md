@@ -166,3 +166,7 @@ Deterministic tests inspect the canonical package-scoped session to prove one ap
 ## Demo query invocation failure ownership
 
 If demo query invocation throws before cancellation installation, the subscription clears the active slot only when that query ID still owns it and rethrows the same failure. Synchronous completion may clear the slot and establish a newer query before the invocation throws; in that case, failure cleanup does not clear the newer ownership.
+
+## Duplicate backend start and independent fixture publication
+
+SttyTerminal checks its current running generation before checking retained cleanup obligations. A duplicate start while running reports `SttyTerminal is already running`; incomplete cleanup remains a distinct restart rejection after stop. Contract fixtures that publish startup callbacks use daemon workers and return from `start` without waiting for publication. Tests use explicit completion gates to observe publication and prevent worker activity from racing later tests.

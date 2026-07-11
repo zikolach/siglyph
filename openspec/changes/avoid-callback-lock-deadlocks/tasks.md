@@ -129,3 +129,9 @@ Manual JVM and Scala Native resize smoke was not run during the independent vali
 ## 15. Demo query invocation failure ownership
 
 - [x] 15.1 Release only the throwing demo query's active ownership, rethrow the original failure unchanged, and add recovery and stale-ownership regressions.
+
+## 16. Copilot review fixes
+
+- [x] 16.1 Reject duplicate SttyTerminal start as already running before evaluating cleanup obligations, and test the distinct errors.
+- [x] 16.2 Make the asynchronous startup fixture return without waiting for its daemon publisher, and use explicit publication completion gates in affected tests.
+- [x] 16.3 Clarify duplicate-running precedence and independent fixture publication, then run focused and required validation.
