@@ -7,6 +7,12 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Added
+
+- Added opt-in typed SGR mouse input with coordinate-aware component and overlay
+  routing, retained layout bounds, and wheel scrolling for editors, autocomplete
+  suggestions, select lists, and settings lists. #19
+
 ## [0.6.0] - 2026-07-18
 
 ### Added
