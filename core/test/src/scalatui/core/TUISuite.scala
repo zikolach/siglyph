@@ -263,7 +263,7 @@ class TUISuite extends munit.FunSuite:
     override def clearLine(): Unit        = ()
     override def clearFromCursor(): Unit  = ()
     override def clearScreen(): Unit      = ()
-  final class StartupFailingMouseTerminal extends Terminal,
+  final class StartupFailingMouseTerminal  extends Terminal,
         scalatui.terminal.TerminalMouseProtocolSupport:
     private var mouseReportingEnabled = false
     val writes                        = scala.collection.mutable.ArrayBuffer.empty[String]
