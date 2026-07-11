@@ -11,6 +11,7 @@ import scalatui.terminal.{
   TerminalInput,
   TerminalInputChunk,
   TerminalInputBuffer,
+  OrderedInputDelivery,
   TerminalProgressSupport,
   TerminalTitleSupport
 }
@@ -29,7 +30,9 @@ import scala.scalanative.libc.stdlib
  * Scala Native POSIX terminal backend for macOS/Linux.
  *
  * It configures stdin raw mode via termios, reads stdin on a background thread, writes to stdout,
- * queries dimensions through ioctl, and polls for live resize changes while running.
+ * queries dimensions through ioctl, and polls for live resize changes while running. After
+ * [[stop]], [[start]] requires the prior stdin reader to have terminated before raw mode is enabled
+ * again.
  */
 final class PosixTerminal(
     initialColumns: Int = PosixTerminal.envInt("COLUMNS").getOrElse(80),
@@ -51,14 +54,17 @@ final class PosixTerminal(
   private var flushThread: Thread | Null                    = null
   private var savedState: Ptr[termios.termios]              = null
   private val inputBuffer                                   = TerminalInputBuffer()
-  private val inputLock                                     = Object()
-  private val inputDeliveryLock                             = Object()
-  private var nextInputBatchId                              = 0L
-  private var nextDeliveredBatchId                          = 0L
+  private val inputDelivery                                 = OrderedInputDelivery()
+  private var inputGeneration                               = 0L
   private val keyboardProtocolNegotiator                    = KittyKeyboardProtocolNegotiator()
 
-  override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
+  override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit = synchronized {
     if !running then
+      reapInputThread()
+      if inputThread ne null then
+        throw IllegalStateException(
+          "cannot restart PosixTerminal while the previous stdin reader is still alive"
+        )
       if unistd.isatty(unistd.STDIN_FILENO) == 0 then
         throw IllegalStateException(
           "Scala Native POSIX backend requires stdin to be an interactive TTY"
@@ -69,9 +75,11 @@ final class PosixTerminal(
       try
         enableRawMode()
         write("\u001b[?2004h")
+        inputGeneration = inputDelivery.start(inputBuffer.clear())
         running = true
-        val thread  = Thread(() => readLoop(), "scala-tui-posix-terminal-input")
-        val flusher = Thread(() => flushLoop(), "scala-tui-posix-terminal-flush")
+        val generation = inputGeneration
+        val thread     = Thread(() => readLoop(generation), "scala-tui-posix-terminal-input")
+        val flusher    = Thread(() => flushLoop(generation), "scala-tui-posix-terminal-flush")
         thread.setDaemon(true)
         flusher.setDaemon(true)
         inputThread = thread
@@ -82,27 +90,31 @@ final class PosixTerminal(
       catch
         case e: Throwable =>
           running = false
+          inputDelivery.stop(inputGeneration, inputBuffer.clear())
           stopResizePolling()
           Option(inputThread).foreach(_.interrupt())
           Option(flushThread).foreach(_.interrupt())
-          inputThread = null
-          flushThread = null
+          reapInputThread()
+          reapFlushThread()
           def attempt(action: => Unit): Unit =
             try action
             catch case cleanupFailure: Throwable => e.addSuppressed(cleanupFailure)
           attempt(write("\u001b[?2004l"))
-          attempt(inputLock.synchronized(inputBuffer.clear()))
+          attempt(inputDelivery.clear(inputBuffer.clear()))
           attempt(restoreMode())
           throw e
 
-  override def stop(): Unit =
+  }
+
+  override def stop(): Unit = synchronized {
     if running || savedState != null then
       running = false
+      inputDelivery.stop(inputGeneration, inputBuffer.clear())
       stopResizePolling()
       Option(inputThread).foreach(_.interrupt())
       Option(flushThread).foreach(_.interrupt())
-      inputThread = null
-      flushThread = null
+      reapInputThread()
+      reapFlushThread()
       var failure                        = Option.empty[Throwable]
       def attempt(action: => Unit): Unit =
         try action
@@ -112,12 +124,13 @@ final class PosixTerminal(
               case None        => failure = Some(error)
       attempt(disableKittyKeyboardProtocol())
       attempt(write("\u001b[?2004l"))
-      attempt(inputLock.synchronized(inputBuffer.clear()))
       attempt(restoreMode())
       failure.foreach(throw _)
 
+  }
+
   override def drainInput(maxMillis: Long, idleMillis: Long): Unit =
-    inputLock.synchronized(inputBuffer.clear())
+    inputDelivery.clear(inputBuffer.clear())
 
   override def write(data: String): Unit =
     System.out.print(data)
@@ -239,52 +252,61 @@ final class PosixTerminal(
         case _: InterruptedException => resizePolling = false
         case _: Throwable            => ()
 
-  private def readLoop(): Unit =
-    val buffer = stackalloc[CChar](4096)
-    while running do
-      val read = unistd.read(unistd.STDIN_FILENO, buffer, 4096.toUSize)
-      if read < 0 then running = false
-      else if read == 0 then ()
-      else
-        val bytes = Array.ofDim[Byte](read)
-        var i     = 0
-        while i < read do
-          bytes(i) = (!(buffer + i)).toByte
-          i += 1
-        val chunk = TerminalInputChunk(bytes)
-        parseAndDeliver(inputBuffer.process(chunk))
-
-  private def flushLoop(): Unit =
-    while running do
-      try
-        Thread.sleep(PosixTerminal.IncompleteEscapeFlushMillis)
-        flushPending()
-      catch
-        case _: InterruptedException => running = false
-        case _: Throwable            => ()
-
-  private def flushPending(): Unit = parseAndDeliver(inputBuffer.flush())
-
-  private def parseAndDeliver(parse: => Vector[TerminalInput]): Unit =
-    val (batchId, inputs) = inputLock.synchronized {
-      val parsed = parse
-      val id     = nextInputBatchId
-      nextInputBatchId += 1
-      id -> parsed
-    }
-    var interrupted       = false
-    inputDeliveryLock.synchronized {
-      while batchId !== nextDeliveredBatchId do
-        try inputDeliveryLock.wait()
-        catch case _: InterruptedException => interrupted = true
-    }
-    try inputs.foreach(inputHandler)
+  private def readLoop(generation: Long): Unit =
+    try
+      val buffer = stackalloc[CChar](4096)
+      while inputDelivery.isActive(generation) do
+        val read = unistd.read(unistd.STDIN_FILENO, buffer, 4096.toUSize)
+        if read < 0 then terminateGeneration(generation)
+        else if read == 0 then ()
+        else
+          val bytes = Array.ofDim[Byte](read)
+          var i     = 0
+          while i < read do
+            bytes(i) = (!(buffer + i)).toByte
+            i += 1
+          val chunk = TerminalInputChunk(bytes)
+          parseAndDeliver(generation, inputBuffer.process(chunk))
     finally
-      inputDeliveryLock.synchronized {
-        nextDeliveredBatchId += 1
-        inputDeliveryLock.notifyAll()
+      terminateGeneration(generation)
+      clearInputThread(Thread.currentThread())
+
+  private def flushLoop(generation: Long): Unit =
+    try
+      while inputDelivery.isActive(generation) do
+        try
+          Thread.sleep(PosixTerminal.IncompleteEscapeFlushMillis)
+          flushPending(generation)
+        catch
+          case _: InterruptedException => terminateGeneration(generation)
+          case _: Throwable            => ()
+    finally clearFlushThread(Thread.currentThread())
+
+  private def flushPending(generation: Long): Unit =
+    parseAndDeliver(generation, inputBuffer.flush())
+
+  private def parseAndDeliver(generation: Long, parse: => Vector[TerminalInput]): Unit =
+    inputDelivery.parseAndDeliver(generation, parse)(inputHandler)
+
+  private def terminateGeneration(generation: Long): Unit =
+    if inputDelivery.stop(generation, inputBuffer.clear()) then
+      synchronized {
+        if inputGeneration === generation then running = false
       }
-      if interrupted then Thread.currentThread().interrupt()
+
+  private def reapInputThread(): Unit =
+    if Option(inputThread).exists(!_.isAlive) then inputThread = null
+
+  private def reapFlushThread(): Unit =
+    if Option(flushThread).exists(!_.isAlive) then flushThread = null
+
+  private def clearInputThread(thread: Thread): Unit = synchronized {
+    if inputThread eq thread then inputThread = null
+  }
+
+  private def clearFlushThread(thread: Thread): Unit = synchronized {
+    if flushThread eq thread then flushThread = null
+  }
 
   private def clearFlags(value: termios.tcflag_t, mask: Int): termios.tcflag_t =
     (value.toInt & ~mask).toUInt

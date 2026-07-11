@@ -1,4 +1,5 @@
 package scalatui.terminal
+import scalatui.syntax.Equality.*
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream}
 import java.util.concurrent.{CountDownLatch, TimeUnit}
@@ -13,9 +14,16 @@ class StreamTerminalSuite extends munit.FunSuite:
   test("stream terminal parses input without raw mode"):
     val in       = ByteArrayInputStream("x".getBytes("UTF-8"))
     val terminal = StreamTerminal(input = in)
+    val observed = CountDownLatch(1)
     var inputs   = Vector.empty[TerminalInput]
-    terminal.start(input => inputs :+= input, () => ())
-    Thread.sleep(50)
+    terminal.start(
+      input => {
+        inputs :+= input
+        observed.countDown()
+      },
+      () => ()
+    )
+    assert(observed.await(1, TimeUnit.SECONDS))
     terminal.stop()
     assertEquals(inputs, Vector(TerminalInput.Key(TerminalKey.Character("x"))))
 
@@ -155,6 +163,235 @@ class StreamTerminalSuite extends munit.FunSuite:
         TerminalInput.Key(TerminalKey.Character("x"))
       )
     )
+
+  test("ordered delivery stop releases a waiting batch and isolates the next generation"):
+    val delivery      = OrderedInputDelivery()
+    val firstStarted  = CountDownLatch(1)
+    val releaseFirst  = CountDownLatch(1)
+    val secondParsed  = CountDownLatch(1)
+    val oldFinished   = CountDownLatch(2)
+    val nextDelivered = CountDownLatch(2)
+    val observedLock  = Object()
+    var observed      = Vector.empty[String]
+    val oldGeneration = delivery.start(())
+    val first         = Thread(() =>
+      try
+        delivery.parseAndDeliver(
+          oldGeneration,
+          Vector(TerminalInput.Key(TerminalKey.Character("first")))
+        ) { _ =>
+          firstStarted.countDown()
+          releaseFirst.await()
+          observedLock.synchronized(observed :+= "first")
+        }
+      finally oldFinished.countDown()
+    )
+    val second        = Thread(() =>
+      try
+        delivery.parseAndDeliver(
+          oldGeneration, {
+            secondParsed.countDown()
+            Vector(TerminalInput.Key(TerminalKey.Character("second")))
+          }
+        )(_ => observedLock.synchronized(observed :+= "second"))
+      finally oldFinished.countDown()
+    )
+    first.start()
+    assert(firstStarted.await(1, TimeUnit.SECONDS))
+    second.start()
+    assert(secondParsed.await(1, TimeUnit.SECONDS))
+
+    delivery.stop(oldGeneration, ())
+    releaseFirst.countDown()
+    assert(oldFinished.await(1, TimeUnit.SECONDS))
+    assertEquals(observedLock.synchronized(observed), Vector("first"))
+
+    val nextGeneration = delivery.start(())
+    Vector("third", "fourth").foreach { value =>
+      delivery.parseAndDeliver(
+        nextGeneration,
+        Vector(TerminalInput.Key(TerminalKey.Character(value)))
+      ) { _ =>
+        observedLock.synchronized(observed :+= value)
+        nextDelivered.countDown()
+      }
+    }
+    assert(nextDelivered.await(1, TimeUnit.SECONDS))
+    assertEquals(observedLock.synchronized(observed), Vector("first", "third", "fourth"))
+
+    delivery.parseAndDeliver(
+      oldGeneration,
+      Vector(TerminalInput.Key(TerminalKey.Character("stale")))
+    )(_ => observedLock.synchronized(observed :+= "stale"))
+    assertEquals(observedLock.synchronized(observed), Vector("first", "third", "fourth"))
+
+  test("ordered delivery restores waiter interruption when callback throws and keeps ordering"):
+    val delivery       = OrderedInputDelivery()
+    val firstStarted   = CountDownLatch(1)
+    val releaseFirst   = CountDownLatch(1)
+    val waiterStarted  = CountDownLatch(1)
+    val waiterFinished = CountDownLatch(1)
+    val laterDelivered = CountDownLatch(1)
+    val restored       = java.util.concurrent.atomic.AtomicBoolean(false)
+    val generation     = delivery.start(())
+    val first          = Thread(() =>
+      delivery.parseAndDeliver(generation, Vector(TerminalInput.PasteStart)) { _ =>
+        firstStarted.countDown()
+        releaseFirst.await()
+      }
+    )
+    val waiter         = Thread(() =>
+      try
+        delivery.parseAndDeliver(
+          generation, {
+            waiterStarted.countDown()
+            Vector(TerminalInput.PasteEnd)
+          }
+        )(_ => throw RuntimeException("delivery failed"))
+      catch case _: RuntimeException => ()
+      finally
+        restored.set(Thread.currentThread().isInterrupted)
+        waiterFinished.countDown()
+    )
+    first.start()
+    assert(firstStarted.await(1, TimeUnit.SECONDS))
+    waiter.start()
+    assert(waiterStarted.await(1, TimeUnit.SECONDS))
+    waiter.interrupt()
+    releaseFirst.countDown()
+    assert(waiterFinished.await(1, TimeUnit.SECONDS))
+    assert(restored.get())
+
+    delivery.parseAndDeliver(generation, Vector(TerminalInput.PasteStart))(_ =>
+      laterDelivered.countDown()
+    )
+    assert(laterDelivered.await(1, TimeUnit.SECONDS))
+
+  test("stopped generation cannot continue a stale flush loop after restart"):
+    val delivery          = OrderedInputDelivery()
+    val staleMayCheck     = CountDownLatch(1)
+    val staleFinished     = CountDownLatch(1)
+    val staleParsed       = CountDownLatch(1)
+    val oldGeneration     = delivery.start(())
+    val staleFlushThread  = Thread(() =>
+      staleMayCheck.await()
+      if delivery.isActive(oldGeneration) then
+        delivery.parseAndDeliver(
+          oldGeneration, {
+            staleParsed.countDown()
+            Vector(TerminalInput.PasteEnd)
+          }
+        )(_ => ())
+      staleFinished.countDown()
+    )
+    staleFlushThread.start()
+    delivery.stop(oldGeneration, ())
+    val currentGeneration = delivery.start(())
+    staleMayCheck.countDown()
+    assert(staleFinished.await(1, TimeUnit.SECONDS))
+    assertEquals(staleParsed.getCount, 1L)
+    assert(delivery.isActive(currentGeneration))
+
+  test("stale generation does not parse or consume current pending input after restart"):
+    val delivery      = OrderedInputDelivery()
+    val inputBuffer   = TerminalInputBuffer()
+    val staleMayRun   = CountDownLatch(1)
+    val staleFinished = CountDownLatch(1)
+    val staleParsed   = CountDownLatch(1)
+    val observed      = scala.collection.mutable.ArrayBuffer.empty[TerminalInput]
+    val oldGeneration = delivery.start(inputBuffer.clear())
+    val stale         = Thread(() =>
+      try
+        staleMayRun.await()
+        delivery.parseAndDeliver(
+          oldGeneration, {
+            staleParsed.countDown()
+            inputBuffer.flush()
+          }
+        )(observed += _)
+      finally staleFinished.countDown()
+    )
+    stale.start()
+
+    delivery.stop(oldGeneration, inputBuffer.clear())
+    val currentGeneration = delivery.start(inputBuffer.clear())
+    delivery.parseAndDeliver(
+      currentGeneration,
+      inputBuffer.process(TerminalInputChunk(Array(0x1b.toByte)))
+    )(observed += _)
+
+    staleMayRun.countDown()
+    assert(staleFinished.await(1, TimeUnit.SECONDS))
+    assertEquals(staleParsed.getCount, 1L)
+
+    delivery.parseAndDeliver(
+      currentGeneration,
+      inputBuffer.process(TerminalInputChunk(Array('x'.toByte)))
+    )(observed += _)
+    assertEquals(
+      observed.toVector,
+      Vector(TerminalInput.Key(TerminalKey.Character("x"), KeyModifiers(alt = true)))
+    )
+
+  test("stream terminal rejects restart until an interrupt-ignoring reader terminates"):
+    val oldReadStarted     = CountDownLatch(1)
+    val releaseOldRead     = CountDownLatch(1)
+    val releaseCurrentRead = CountDownLatch(1)
+    val input              = new java.io.InputStream:
+      private var reads = 0
+
+      override def read(): Int = -1
+
+      override def read(buffer: Array[Byte], offset: Int, length: Int): Int = synchronized {
+        reads += 1
+        if reads === 1 then
+          oldReadStarted.countDown()
+          var released = false
+          while !released do
+            try
+              releaseOldRead.await()
+              released = true
+            catch case _: InterruptedException => ()
+          -1
+        else if reads === 2 then
+          buffer(offset) = 'x'.toByte
+          1
+        else
+          releaseCurrentRead.await()
+          -1
+      }
+
+    val terminal = StreamTerminal(input = input)
+    terminal.start(_ => (), () => ())
+    assert(oldReadStarted.await(1, TimeUnit.SECONDS))
+    terminal.stop()
+    interceptMessage[IllegalStateException](
+      "cannot restart StreamTerminal while the previous input reader is still alive"
+    )(terminal.start(_ => (), () => ()))
+
+    releaseOldRead.countDown()
+    val delivered = CountDownLatch(1)
+    val deadline  = System.nanoTime() + TimeUnit.SECONDS.toNanos(1)
+    var started   = false
+    while !started && System.nanoTime() < deadline do
+      try
+        terminal.start(
+          {
+            case TerminalInput.Key(TerminalKey.Character("x"), _) => delivered.countDown()
+            case _                                                => ()
+          },
+          () => ()
+        )
+        started = true
+      catch case _: IllegalStateException => Thread.onSpinWait()
+    assert(started, "old input reader did not terminate before the restart deadline")
+    assert(delivered.await(1, TimeUnit.SECONDS))
+    assertEquals(
+      intercept[IllegalStateException](terminal.start(_ => (), () => ())).getMessage,
+      "StreamTerminal is already running"
+    )
+    releaseCurrentRead.countDown()
+    terminal.stop()
 
   test("stream terminal drain discards pending escape without dispatching input"):
     val drained                         = CountDownLatch(1)

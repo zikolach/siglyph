@@ -24,14 +24,13 @@ final class TerminalInputBuffer:
         out += TerminalInputParser.parseTyped(candidate.toArray).get
       case Mode.Normal if candidate.nonEmpty                               =>
         emitRaw(candidate.toArray, kindOf(candidate), TerminalRawTermination.Incomplete, out)
-      case Mode.Paste                                                      =>
-        emitPaste(pasteTail.toArray, out)
+      case Mode.Paste                                                      => ()
       case Mode.Raw(kind, exceeded, _)                                     =>
         emitRawChunk(candidate.toArray, out)
         out += TerminalInput.RawEnd(if exceeded then TerminalRawTermination.LimitExceeded(false)
         else TerminalRawTermination.Incomplete)
       case _                                                               => ()
-    clear()
+    if mode !== Mode.Paste then clear()
     out.result()
 
   def clear(): Unit =

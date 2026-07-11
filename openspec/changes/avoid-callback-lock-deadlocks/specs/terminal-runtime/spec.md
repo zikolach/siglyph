@@ -126,6 +126,28 @@ VirtualTerminal, StreamTerminal, SttyTerminal, and PosixTerminal SHALL satisfy s
 #### Scenario: Portable and backend contract suites execute
 - **WHEN** JVM and Scala Native terminal tests run
 - **THEN** controlled callback probes show no synchronous callback from `start` or any output-side method
+#### Scenario: Stop invalidates ordered input delivery
+- **WHILE** a read or flush batch waits behind an earlier callback
+- **WHEN** stop invalidates its terminal-start generation
+- **THEN** the waiter returns without callback or counter advancement, and a later start uses reset counters and rejects old-generation delivery
+#### Scenario: Stale input parsing is rejected before evaluation
+- **WHILE** an old read or flush thread retains a parse operation
+- **WHEN** stop and start replace its generation
+- **THEN** the old parse operation is not evaluated and cannot consume or mutate the new generation's parser state
+#### Scenario: Old loops cannot affect a restarted backend
+- **WHILE** a read or flush loop belongs to an invalidated start generation
+- **WHEN** a later generation is active
+- **THEN** the old loop stops without parsing, delivering callbacks, or changing the later generation's running state
+
+#### Scenario: Restart waits for exclusive input-reader ownership
+- **WHILE** a stopped generation's input reader remains alive
+- **WHEN** restart is requested
+- **THEN** the backend throws `IllegalStateException` before creating another reader, and restart succeeds after the old reader terminates
+
+#### Scenario: Interrupted ordered delivery callback fails
+- **WHILE** an ordered delivery waiter has observed interruption
+- **WHEN** its accepted callback throws
+- **THEN** batch ordering advances and the thread's interrupted status is restored
 
 ### Requirement: Terminal input parsing is bounded byte streaming
 The runtime SHALL parse `TerminalInputChunk` values without whole-stream strings, retain at most 4096 typed-candidate bytes, five paste-end prefix bytes, and three incomplete UTF-8 bytes, and emit exact ordered bounded stream events.
@@ -134,6 +156,10 @@ The runtime SHALL parse `TerminalInputChunk` values without whole-stream strings
 - **WHILE** paste mode is active
 - **WHEN** arbitrary bytes arrive, including markers split at any boundary
 - **THEN** start and end markers are omitted, every data byte appears once in chunks of at most 4096 bytes, and complete paste content is never retained
+#### Scenario: Periodic flush preserves active paste
+- **WHILE** paste mode is active
+- **WHEN** periodic fragment flush runs with paste content or a partial end marker buffered
+- **THEN** flush emits nothing and preserves paste mode and the partial marker until later bytes complete the end marker
 
 #### Scenario: Typed protocol exceeds its bound
 - **WHEN** byte 4097 arrives before an incomplete typed protocol terminates

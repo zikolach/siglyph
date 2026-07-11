@@ -78,3 +78,18 @@ Manual JVM and Scala Native resize smoke was not run during the independent vali
 - [x] 8.2 Add shared portable maximal replay and stop-discard regressions, including exact 4096 one-byte chunk order and blocked-publisher wakeup.
 - [x] 8.3 Update design and terminal-runtime requirements for replay continuation ownership, bounds, linearization, ordering, and stop behavior.
 - [x] 8.4 Run focused, full JVM, full Native, PTY backend, compile, format, lint, strict OpenSpec, and diff validation. Keep manual smoke status unchanged unless run in this pass.
+
+## 9. PR review fixes
+
+- [x] 9.1 Preserve bracketed-paste mode and partial end-marker state across periodic parser flushes, while keeping explicit clear behavior.
+- [x] 9.2 Centralize generation-aware ordered input delivery for StreamTerminal and PosixTerminal so stop releases waiters and restart rejects stale batches.
+- [x] 9.3 Add portable gated regressions for paste flush, stop release, stale-generation rejection, and clean next-generation ordering.
+- [x] 9.4 Serialize parser state and generation lifecycle under one lock, reject stale parse operations before evaluation, and add deterministic restart coverage.
+
+## 10. Focused restart and interruption review blockers
+
+- [x] 10.1 Make StreamTerminal and PosixTerminal read and flush loops generation-specific, retain live reader references across stop, and reject restart until the old reader terminates.
+- [x] 10.2 Restore interrupted status from ordered delivery even when an accepted callback throws, while preserving callback isolation and counter advancement.
+- [x] 10.3 Add portable deterministic ordered-delivery, stale-flush, and interrupt restoration tests plus the interrupt-ignoring StreamTerminal restart regression.
+- [x] 10.4 Document the backend restart precondition in Scaladoc and terminal-runtime requirements.
+- [x] 10.5 Run focused, full JVM, full Native, PTY backend, compile, format, lint, strict OpenSpec, and diff validation.

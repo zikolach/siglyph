@@ -53,6 +53,35 @@ class TerminalInputBufferSuite extends munit.FunSuite:
       8192
     )
 
+  test("flush preserves active paste content until the end marker"):
+    val buffer = TerminalInputBuffer()
+    assertEquals(
+      buffer.process(chunk("\u001b[200~hello")),
+      Vector(TerminalInput.PasteStart) ++ "hello".map(value =>
+        TerminalInput.PasteChunk(TerminalInputChunk(Array(value.toByte)))
+      )
+    )
+    assertEquals(buffer.flush(), Vector.empty)
+    assertEquals(buffer.process(chunk(" world\u001b[201~")).last, TerminalInput.PasteEnd)
+
+  test("flush preserves a partial paste end marker"):
+    val buffer = TerminalInputBuffer()
+    assertEquals(buffer.process(chunk("\u001b[200~value\u001b[20")).head, TerminalInput.PasteStart)
+    assertEquals(buffer.flush(), Vector.empty)
+    assertEquals(buffer.process(chunk("1~")), Vector(TerminalInput.PasteEnd))
+
+  test("clear still discards active paste state"):
+    val buffer = TerminalInputBuffer()
+    buffer.process(chunk("\u001b[200~value\u001b[20"))
+    buffer.clear()
+    assertEquals(
+      buffer.process(chunk("1~")),
+      Vector(
+        TerminalInput.Key(TerminalKey.Character("1")),
+        TerminalInput.Key(TerminalKey.Character("~"))
+      )
+    )
+
   test("flush emits incomplete escape as exact raw stream"):
     val buffer = TerminalInputBuffer()
     assertEquals(buffer.process(chunk("\u001b[1;")), Vector.empty)
