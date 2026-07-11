@@ -7,6 +7,20 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Changed
+
+- Replaced blocking terminal color queries with dependency-free cancellable
+  callbacks, changed paste and raw input to bounded streaming events, and made TUI
+  root child removal an asynchronous `Unit` operation. #33
+
+### Fixed
+
+- Prevented lifecycle-lock and application-lock deadlocks by serializing callbacks,
+  rendering, terminal output, and cleanup through explicit runtime ownership. #33
+- Bounded terminal input parsing and queueing while preserving exact malformed
+  input, whole-paste editor semantics, resize liveness, and JVM and Scala Native
+  terminal restoration. #33
+
 ## [0.4.0] - 2026-07-06
 
 ### Added
