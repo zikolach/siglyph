@@ -41,36 +41,64 @@ class TerminalInputBufferSuite extends munit.FunSuite:
       )
     }
 
-  test("streams paste larger than 4096 without retaining the paste"):
-    val buffer = TerminalInputBuffer()
-    val start  = buffer.process(chunk("\u001b[200~"))
-    val data   = Array.fill[Byte](TerminalInputChunk.MaxBytes)(0x61)
-    val first  = buffer.process(TerminalInputChunk(data))
-    val second = buffer.process(TerminalInputChunk(data))
-    assertEquals(start, Vector(TerminalInput.PasteStart))
+  test("large paste emits bounded chunks without event amplification"):
+    val buffer  = TerminalInputBuffer()
+    val payload = Array.tabulate[Byte](TerminalInputChunk.MaxBytes * 2 + 17)(index =>
+      ('a' + index % 26).toByte
+    )
+    val bytes   = "\u001b[200~".getBytes(java.nio.charset.StandardCharsets.UTF_8) ++
+      payload ++ "\u001b[201~".getBytes(java.nio.charset.StandardCharsets.UTF_8)
+    val events  = bytes.grouped(TerminalInputChunk.MaxBytes).flatMap(part =>
+      buffer.process(TerminalInputChunk(part))
+    ).toVector
+    val chunks  = events.collect { case TerminalInput.PasteChunk(value) => value }
+
+    assertEquals(events.head, TerminalInput.PasteStart)
+    assertEquals(events.last, TerminalInput.PasteEnd)
     assertEquals(
-      (first ++ second).collect { case TerminalInput.PasteChunk(value) => value.length }.sum,
-      8192
+      chunks.length,
+      (payload.length + TerminalInputChunk.MaxBytes - 1) / TerminalInputChunk.MaxBytes
+    )
+    assert(chunks.forall(value => value.length >= 1 && value.length <= TerminalInputChunk.MaxBytes))
+    assertEquals(chunks.flatMap(_.toArray).toArray.toVector, payload.toVector)
+    assert(payload.length > 4096)
+    assert(
+      events.length < 4096,
+      s"${payload.length} payload bytes amplified to ${events.length} events"
     )
 
   test("flush preserves active paste content until the end marker"):
     val buffer = TerminalInputBuffer()
+    assertEquals(buffer.process(chunk("\u001b[200~hello")), Vector(TerminalInput.PasteStart))
+    assertEquals(buffer.flush(), Vector.empty)
     assertEquals(
-      buffer.process(chunk("\u001b[200~hello")),
-      Vector(TerminalInput.PasteStart) ++ "hello".map(value =>
-        TerminalInput.PasteChunk(TerminalInputChunk(Array(value.toByte)))
+      buffer.process(chunk(" world\u001b[201~")),
+      Vector(
+        TerminalInput.PasteChunk(
+          TerminalInputChunk("hello world".getBytes(java.nio.charset.StandardCharsets.UTF_8))
+        ),
+        TerminalInput.PasteEnd
       )
     )
-    assertEquals(buffer.flush(), Vector.empty)
-    assertEquals(buffer.process(chunk(" world\u001b[201~")).last, TerminalInput.PasteEnd)
 
-  test("flush preserves a partial paste end marker"):
+  test("flush preserves confirmed paste bytes and a partial end marker"):
     val buffer = TerminalInputBuffer()
-    assertEquals(buffer.process(chunk("\u001b[200~value\u001b[20")).head, TerminalInput.PasteStart)
+    assertEquals(
+      buffer.process(chunk("\u001b[200~value\u001b[20")),
+      Vector(TerminalInput.PasteStart)
+    )
     assertEquals(buffer.flush(), Vector.empty)
-    assertEquals(buffer.process(chunk("1~")), Vector(TerminalInput.PasteEnd))
+    assertEquals(
+      buffer.process(chunk("1~")),
+      Vector(
+        TerminalInput.PasteChunk(
+          TerminalInputChunk("value".getBytes(java.nio.charset.StandardCharsets.UTF_8))
+        ),
+        TerminalInput.PasteEnd
+      )
+    )
 
-  test("clear still discards active paste state"):
+  test("clear discards confirmed paste bytes and a partial end marker"):
     val buffer = TerminalInputBuffer()
     buffer.process(chunk("\u001b[200~value\u001b[20"))
     buffer.clear()
@@ -81,6 +109,7 @@ class TerminalInputBufferSuite extends munit.FunSuite:
         TerminalInput.Key(TerminalKey.Character("~"))
       )
     )
+    assertEquals(buffer.flush(), Vector.empty)
 
   test("flush emits incomplete escape as exact raw stream"):
     val buffer = TerminalInputBuffer()
@@ -132,10 +161,10 @@ class TerminalInputBufferSuite extends munit.FunSuite:
     val events = bytes.flatMap(byte => buffer.process(TerminalInputChunk(Array(byte)))).toVector
     assertEquals(events.head, TerminalInput.PasteStart)
     assertEquals(events.last, TerminalInput.PasteEnd)
-    assertEquals(
-      events.collect { case TerminalInput.PasteChunk(chunk) => chunk.toArray }.flatten.toVector,
-      data.toVector
-    )
+    val chunks = events.collect { case TerminalInput.PasteChunk(chunk) => chunk }
+    assertEquals(chunks.length, 2)
+    assert(chunks.forall(chunk => chunk.length >= 1 && chunk.length <= TerminalInputChunk.MaxBytes))
+    assertEquals(chunks.flatMap(_.toArray).toVector, data.toVector)
 
   test("raw terminators split at every boundary preserve introducer data and terminator"):
     val values = Vector(

@@ -138,8 +138,10 @@ class EditorSuite extends munit.FunSuite:
     assertEquals(empty.count { case InputResult.Render => true; case _ => false }, 0)
     assertEquals(editor.undo(), false)
 
-    val unfinished = "\u001b[200~x\r\ny".getBytes(java.nio.charset.StandardCharsets.UTF_8)
-    feedTerminalBytes(editor, unfinished, chunkSize = 1)
+    editor.handleInputResult(TerminalInput.PasteStart)
+    editor.handleInputResult(
+      TerminalInput.PasteChunk(TerminalInputChunk("x\r\ny".getBytes("UTF-8")))
+    )
     assertEquals(editor.text, "base")
     assertEquals(
       editor.handleInputResult(TerminalInput.Key(TerminalKey.Character("!"))),

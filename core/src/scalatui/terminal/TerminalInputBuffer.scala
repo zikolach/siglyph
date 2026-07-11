@@ -8,9 +8,10 @@ import scala.collection.mutable.ArrayBuffer
 final class TerminalInputBuffer:
   import TerminalInputBuffer.*
 
-  private var mode: Mode = Mode.Normal
-  private val candidate  = ArrayBuffer.empty[Byte]
-  private val pasteTail  = ArrayBuffer.empty[Byte]
+  private var mode: Mode     = Mode.Normal
+  private val candidate      = ArrayBuffer.empty[Byte]
+  private val pasteTail      = ArrayBuffer.empty[Byte]
+  private val confirmedPaste = ArrayBuffer.empty[Byte]
 
   def process(chunk: TerminalInputChunk): Vector[TerminalInput] =
     val out = Vector.newBuilder[TerminalInput]
@@ -37,6 +38,7 @@ final class TerminalInputBuffer:
     mode = Mode.Normal
     candidate.clear()
     pasteTail.clear()
+    confirmedPaste.clear()
 
   private def accept(byte: Byte, out: Builder): Unit = mode match
     case Mode.Paste                            => acceptPaste(byte, out)
@@ -100,9 +102,11 @@ final class TerminalInputBuffer:
   private def acceptPaste(byte: Byte, out: Builder): Unit =
     pasteTail += byte
     while pasteTail.nonEmpty && !isPrefixOf(PasteEnd, pasteTail) do
-      emitPaste(Array(pasteTail.remove(0)), out)
+      confirmedPaste += pasteTail.remove(0)
+      if confirmedPaste.length === TerminalInputChunk.MaxBytes then emitConfirmedPaste(out)
     if pasteTail.length === PasteEnd.length then
       pasteTail.clear()
+      emitConfirmedPaste(out)
       mode = Mode.Normal
       out += TerminalInput.PasteEnd
 
@@ -128,8 +132,10 @@ final class TerminalInputBuffer:
       mode = Mode.Normal
     else mode = Mode.Raw(kind, exceeded, previousEsc = byte === Esc)
 
-  private def emitPaste(bytes: Array[Byte], out: Builder): Unit =
-    if bytes.nonEmpty then out += TerminalInput.PasteChunk(TerminalInputChunk(bytes))
+  private def emitConfirmedPaste(out: Builder): Unit =
+    if confirmedPaste.nonEmpty then
+      out += TerminalInput.PasteChunk(TerminalInputChunk(confirmedPaste.toArray))
+      confirmedPaste.clear()
 
   private def emitRaw(
       bytes: Array[Byte],
