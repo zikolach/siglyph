@@ -91,6 +91,13 @@ class EditorBufferSuite extends munit.FunSuite:
     assertEquals(buffer.cursor, EditorCursor(2, 1))
     assertEquals(buffer.text, "aX\n界e\u0301\nYb")
 
+  test("chunked paste insertion preserves boundaries without a whole-paste string"):
+    val buffer = EditorBuffer.fromText("ab", EditorCursor(0, 1))
+    buffer.insertPasteChunks(Vector("e", "\u0301\n👨‍", "👩‍👧‍👦\n🇦", "🇹"))
+
+    assertEquals(buffer.text, "ae\u0301\n👨‍👩‍👧‍👦\n🇦🇹b")
+    assertEquals(buffer.cursor, EditorCursor(2, 1))
+
   test("large paste inserts compact marker and submit expands logical text"):
     val pasted = (1 to 11).map(i => s"line$i").mkString("\n")
     val buffer = EditorBuffer.fromText("ab", EditorCursor(0, 1))

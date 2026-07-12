@@ -1,5 +1,7 @@
 package scalatui.components
 
+import scalatui.TestInputStreams
+
 import scalatui.ansi.Ansi
 import scalatui.core.CursorMarker
 import scalatui.terminal.{
@@ -45,7 +47,7 @@ class ComponentsSuite extends munit.FunSuite:
     input.handleInput(TerminalInput.Key(TerminalKey.Character("🙂")))
     input.handleInput(TerminalInput.Key(TerminalKey.Left))
     input.handleInput(TerminalInput.Key(TerminalKey.Backspace))
-    input.handleInput(TerminalInput.Paste("x\ny"))
+    TestInputStreams.paste("x\ny").foreach(input.handleInput)
 
     var submitted = ""
     input.onSubmit = value => submitted = value
@@ -53,6 +55,26 @@ class ComponentsSuite extends munit.FunSuite:
 
     assertEquals(input.value, "x y🙂")
     assertEquals(submitted, "x y🙂")
+
+  test("input consumes streaming paste chunks incrementally across UTF-8 boundaries"):
+    val input = Input()
+    val bytes = "界🙂".getBytes(java.nio.charset.StandardCharsets.UTF_8)
+    input.handleInput(TerminalInput.PasteStart)
+    bytes.foreach(byte =>
+      input.handleInput(TerminalInput.PasteChunk(scalatui.terminal.TerminalInputChunk(Array(byte))))
+    )
+    input.handleInput(TerminalInput.PasteEnd)
+
+    assertEquals(input.value, "界🙂")
+
+  test("input keeps combining grapheme cursor across multiple paste chunks at varied positions"):
+    assertPasteBoundaryGrapheme("e", "\u0301\u0327")
+
+  test("input keeps ZWJ grapheme cursor across multiple paste chunks at varied positions"):
+    assertPasteBoundaryGrapheme("👩", "\u200d💻")
+
+  test("input keeps regional-indicator grapheme cursor across multiple chunks at varied positions"):
+    assertPasteBoundaryGrapheme("🇦", "🇹")
 
   test("input submit keybinding is configurable"):
     val input     = Input(
@@ -169,3 +191,38 @@ class ComponentsSuite extends munit.FunSuite:
     input.handleInput(TerminalInput.Key(TerminalKey.Right, KeyModifiers(alt = true)))
     input.handleInput(TerminalInput.Key(TerminalKey.Character("d"), KeyModifiers(alt = true)))
     assertEquals(input.value, "hello, again")
+
+  private def assertPasteBoundaryGrapheme(firstPart: String, remaining: String): Unit =
+    val charset        = java.nio.charset.StandardCharsets.UTF_8
+    val firstBytes     = firstPart.getBytes(charset)
+    val remainingBytes = remaining.getBytes(charset)
+    val fillerBytes    = Array.fill[Byte](4096 - firstBytes.length)('x'.toByte)
+    val chunks         = Vector(
+      fillerBytes ++ firstBytes,
+      remainingBytes.take(1),
+      remainingBytes.slice(1, remainingBytes.length - 1),
+      remainingBytes.takeRight(1)
+    ).filter(_.nonEmpty)
+    val pasted         = "x" * fillerBytes.length + firstPart + remaining
+
+    Vector(0, 1, 2).foreach { insertionPosition =>
+      val input = Input("AB")
+      input.handleInput(TerminalInput.Key(TerminalKey.Character("a"), KeyModifiers(ctrl = true)))
+      (0 until insertionPosition).foreach(_ =>
+        input.handleInput(TerminalInput.Key(TerminalKey.Right))
+      )
+      input.handleInput(TerminalInput.PasteStart)
+      chunks.foreach(bytes =>
+        input.handleInput(TerminalInput.PasteChunk(scalatui.terminal.TerminalInputChunk(bytes)))
+      )
+      input.handleInput(TerminalInput.PasteEnd)
+
+      val before = "AB".take(insertionPosition)
+      val after  = "AB".drop(insertionPosition)
+      assertEquals(input.value, before + pasted + after)
+
+      input.handleInput(TerminalInput.Key(TerminalKey.Backspace))
+      assertEquals(input.value, before + "x" * fillerBytes.length + after)
+      assert(input.undo())
+      assertEquals(input.value, before + pasted + after)
+    }

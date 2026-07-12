@@ -8,7 +8,9 @@ import java.io.{InputStream, OutputStream}
  * Stream-backed terminal for non-interactive output and tests.
  *
  * It does not configure raw mode. Dimensions are provided explicitly or read from COLUMNS/LINES
- * environment variables.
+ * environment variables. After [[stop]], [[start]] requires the prior input reader and periodic
+ * flush worker to have terminated; a callback or input stream that ignores interruption must
+ * unblock before this terminal can restart.
  */
 class StreamTerminal(
     input: InputStream = InputStream.nullInputStream(),
@@ -22,31 +24,47 @@ class StreamTerminal(
   private var inputThread: Thread | Null                    = null
   private var flushThread: Thread | Null                    = null
   private val inputBuffer                                   = TerminalInputBuffer()
-  private val inputLock                                     = Object()
+  private val inputDelivery                                 = OrderedInputDelivery()
+  private var inputGeneration                               = 0L
 
-  override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
+  override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit = synchronized {
+    if running then throw IllegalStateException("StreamTerminal is already running")
+    reapInputThread()
+    reapFlushThread()
+    if inputThread ne null then
+      throw IllegalStateException(
+        "cannot restart StreamTerminal while the previous input reader is still alive"
+      )
+    if flushThread ne null then
+      throw IllegalStateException(
+        "cannot restart StreamTerminal while the previous flush worker is still alive"
+      )
     inputHandler = onInput
+    inputGeneration = inputDelivery.start(inputBuffer.clear())
     running = true
-    val thread  = Thread(() => readLoop(), "scala-tui-stream-terminal-input")
-    val flusher = Thread(() => flushLoop(), "scala-tui-stream-terminal-flush")
+    val generation = inputGeneration
+    val thread     = Thread(() => readLoop(generation), "scala-tui-stream-terminal-input")
+    val flusher    = Thread(() => flushLoop(generation), "scala-tui-stream-terminal-flush")
     thread.setDaemon(true)
     flusher.setDaemon(true)
     inputThread = thread
     flushThread = flusher
     thread.start()
     flusher.start()
+  }
 
-  override def stop(): Unit =
-    if running || (inputThread ne null) then
+  override def stop(): Unit = synchronized {
+    if running || (inputThread ne null) || (flushThread ne null) then
       running = false
+      inputDelivery.stop(inputGeneration, inputBuffer.clear())
       Option(inputThread).foreach(_.interrupt())
       Option(flushThread).foreach(_.interrupt())
-      inputThread = null
-      flushThread = null
-      inputLock.synchronized(inputBuffer.clear())
+      reapInputThread()
+      reapFlushThread()
+  }
 
   override def drainInput(maxMillis: Long, idleMillis: Long): Unit =
-    inputLock.synchronized(inputBuffer.clear())
+    inputDelivery.clear(inputBuffer.clear())
 
   override def write(data: String): Unit =
     val bytes = data.getBytes(java.nio.charset.StandardCharsets.UTF_8)
@@ -66,29 +84,59 @@ class StreamTerminal(
   override def clearFromCursor(): Unit = write("\u001b[J")
   override def clearScreen(): Unit     = write("\u001b[2J\u001b[H")
 
-  private def readLoop(): Unit =
-    val buffer = Array.ofDim[Byte](4096)
-    while running do
-      try
-        val read = input.read(buffer)
-        if read < 0 then running = false
-        else if read === 0 then flushPending()
-        else
-          val data   = String(buffer, 0, read, java.nio.charset.StandardCharsets.UTF_8)
-          val inputs = inputLock.synchronized(inputBuffer.process(data))
-          inputs.foreach(inputHandler)
-      catch case _: InterruptedException => running = false
+  private def readLoop(generation: Long): Unit =
+    try
+      val buffer = Array.ofDim[Byte](4096)
+      while inputDelivery.isActive(generation) do
+        try
+          val read = input.read(buffer)
+          if read < 0 then
+            flushPending(generation)
+            terminateGeneration(generation)
+          else if read === 0 then flushPending(generation)
+          else
+            val chunk = TerminalInputChunk(buffer, 0, read)
+            parseAndDeliver(generation, inputBuffer.process(chunk))
+        catch case _: InterruptedException => terminateGeneration(generation)
+    finally
+      terminateGeneration(generation)
+      clearInputThread(Thread.currentThread())
 
-  private def flushLoop(): Unit =
-    while running do
-      try
-        Thread.sleep(StreamTerminal.IncompleteEscapeFlushMillis)
-        flushPending()
-      catch case _: InterruptedException => running = false
+  private def flushLoop(generation: Long): Unit =
+    try
+      while inputDelivery.isActive(generation) do
+        try
+          Thread.sleep(StreamTerminal.IncompleteEscapeFlushMillis)
+          flushPending(generation)
+        catch
+          case _: InterruptedException => terminateGeneration(generation)
+    finally clearFlushThread(Thread.currentThread())
 
-  private def flushPending(): Unit =
-    val inputs = inputLock.synchronized(inputBuffer.flush())
-    inputs.foreach(inputHandler)
+  private def flushPending(generation: Long): Unit =
+    parseAndDeliver(generation, inputBuffer.flush())
+
+  private def parseAndDeliver(generation: Long, parse: => Vector[TerminalInput]): Unit =
+    inputDelivery.parseAndDeliver(generation, parse)(inputHandler)
+
+  private def terminateGeneration(generation: Long): Unit =
+    if inputDelivery.stop(generation, inputBuffer.clear()) then
+      synchronized {
+        if inputGeneration === generation then running = false
+      }
+
+  private def reapInputThread(): Unit =
+    if Option(inputThread).exists(!_.isAlive) then inputThread = null
+
+  private def reapFlushThread(): Unit =
+    if Option(flushThread).exists(!_.isAlive) then flushThread = null
+
+  private def clearInputThread(thread: Thread): Unit = synchronized {
+    if inputThread eq thread then inputThread = null
+  }
+
+  private def clearFlushThread(thread: Thread): Unit = synchronized {
+    if flushThread eq thread then flushThread = null
+  }
 
 object StreamTerminal:
   private val IncompleteEscapeFlushMillis = 75L

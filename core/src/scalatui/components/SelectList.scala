@@ -1,7 +1,7 @@
 package scalatui.components
 
 import scalatui.ansi.Ansi
-import scalatui.core.Component
+import scalatui.core.{Component, InputResult}
 import scalatui.matching.FuzzyMatcher
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{TerminalInput, TerminalKey}
@@ -25,25 +25,46 @@ final class SelectList private (
   private var selectedIndex                         = 0
   private var scrollOffset                          = 0
   private var filterQuery                           = ""
+  private var pasteSession                          = Option.empty[FilterPasteSession]
 
-  def selected: Option[SelectItem] = filteredItems.lift(selectedIndex)
+  def selected: Option[SelectItem] = filteredItems(filterQuery).lift(selectedIndex)
 
-  def query: String = filterQuery
+  def query: String = pasteSession.fold(filterQuery)(_.query)
 
-  override def handleInput(input: TerminalInput): Unit = input match
-    case TerminalInput.Key(TerminalKey.Up, _)                                             => moveSelection(-1)
-    case TerminalInput.Key(TerminalKey.Down, _)                                           => moveSelection(1)
-    case TerminalInput.Key(TerminalKey.Enter, _)                                          => selected.foreach(onSelect)
-    case TerminalInput.Key(TerminalKey.Escape, _)                                         => onCancel()
+  override def handleInput(input: TerminalInput): Unit =
+    handleInputResult(input)
+    ()
+
+  override def handleInputResult(input: TerminalInput): InputResult = input match
+    case TerminalInput.PasteStart if options.effectiveFiltering.enabled        =>
+      val changed = commitPaste()
+      pasteSession = Some(FilterPasteSession(filterQuery))
+      if changed then InputResult.Render else InputResult.NoRender
+    case TerminalInput.PasteChunk(chunk) if options.effectiveFiltering.enabled =>
+      pasteSession match
+        case Some(session) =>
+          session.append(chunk)
+          InputResult.NoRender
+        case None          => InputResult.Ignored
+    case TerminalInput.PasteEnd if options.effectiveFiltering.enabled          =>
+      if commitPaste() then InputResult.Render else InputResult.NoRender
+    case _                                                                     =>
+      commitPaste()
+      handleNonPasteInput(input)
+      InputResult.Render
+
+  private def handleNonPasteInput(input: TerminalInput): Unit = input match
+    case TerminalInput.Key(TerminalKey.Up, _)     => moveSelection(-1)
+    case TerminalInput.Key(TerminalKey.Down, _)   => moveSelection(1)
+    case TerminalInput.Key(TerminalKey.Enter, _)  => selected.foreach(onSelect)
+    case TerminalInput.Key(TerminalKey.Escape, _) => onCancel()
     case TerminalInput.Key(TerminalKey.Backspace, _)
         if options.effectiveFiltering.enabled && filterQuery.nonEmpty =>
       updateFilter(dropLastGrapheme(filterQuery))
     case TerminalInput.Key(TerminalKey.Character(text), modifiers)
         if options.effectiveFiltering.enabled && !modifiers.ctrl && !modifiers.alt && !modifiers.superKey && text.nonEmpty =>
       updateFilter(filterQuery + text)
-    case TerminalInput.Paste(text) if options.effectiveFiltering.enabled && text.nonEmpty =>
-      updateFilter(filterQuery + text.replace('\n', ' ').replace('\r', ' '))
-    case _                                                                                => ()
+    case _                                        => ()
 
   /** Move selection up/down by logical items. */
   def moveSelectionBy(delta: Int): Unit = moveSelection(delta)
@@ -63,7 +84,7 @@ final class SelectList private (
     val safeWidth = math.max(0, width)
     if safeWidth <= 0 then Vector("")
     else
-      val matchingItems = filteredItems
+      val matchingItems = filteredItems(filterQuery)
       if matchingItems.isEmpty then
         Vector(fit(options.theme.noMatchText(options.noMatchText), safeWidth))
       else
@@ -90,7 +111,7 @@ final class SelectList private (
     else rows
 
   private def moveSelection(delta: Int): Unit =
-    val currentItems = filteredItems
+    val currentItems = filteredItems(filterQuery)
     if currentItems.nonEmpty then
       val before = currentItems.lift(selectedIndex)
       selectedIndex = math.max(0, math.min(currentItems.length - 1, selectedIndex + delta))
@@ -113,10 +134,10 @@ final class SelectList private (
     math.max(0, math.min(offset, maxOffset))
 
   private def updateFilter(value: String): Unit =
-    val previousItems        = filteredItems
+    val previousItems        = filteredItems(filterQuery)
     val selectedBeforeFilter = previousItems.lift(selectedIndex)
     filterQuery = value
-    val candidates           = filteredItems
+    val candidates           = filteredItems(filterQuery)
     selectedIndex = selectedBeforeFilter.flatMap(item =>
       candidates.indexWhere(_ === item) match
         case -1    => None
@@ -128,15 +149,26 @@ final class SelectList private (
   private def notifySelectionChange(before: Option[SelectItem], after: Option[SelectItem]): Unit =
     if before !== after then onSelectionChange(after)
 
-  private def filteredItems: Vector[SelectItem] =
+  private def filteredItems(queryValue: String): Vector[SelectItem] =
     options.effectiveFiltering match
       case SelectListFiltering.Disabled    => items
-      case _ if filterQuery.isEmpty        => items
+      case _ if queryValue.isEmpty         => items
       case SelectListFiltering.Containment =>
-        val needle = TextCase.lowercase(filterQuery)
+        val needle = TextCase.lowercase(queryValue)
         items.filter(item => TextCase.lowercase(searchableText(item)).indexOf(needle) >= 0)
       case SelectListFiltering.Fuzzy       =>
-        FuzzyMatcher.filter(filterQuery, items)(searchableText).map(_.item)
+        FuzzyMatcher.filter(queryValue, items)(searchableText).map(_.item)
+
+  private def commitPaste(): Boolean =
+    pasteSession match
+      case None          => false
+      case Some(session) =>
+        pasteSession = None
+        session.finish()
+        if session.changed then
+          updateFilter(session.query)
+          true
+        else false
 
   private def searchableText(item: SelectItem): String =
     item.value + "\n" + item.label + "\n" + item.description.getOrElse("")

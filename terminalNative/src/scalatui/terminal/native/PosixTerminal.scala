@@ -9,13 +9,17 @@ import scalatui.terminal.{
   Terminal,
   TerminalInputDrainSupport,
   TerminalInput,
+  TerminalInputChunk,
   TerminalInputBuffer,
+  OrderedInputDelivery,
   TerminalProgressSupport,
   TerminalTitleSupport
 }
 
 import scala.scalanative.unsafe.*
 import scala.scalanative.unsigned.*
+import java.io.IOException
+
 import scala.scalanative.posix.termios
 import scala.scalanative.posix.termios.*
 import scala.scalanative.posix.termiosOps.*
@@ -28,7 +32,10 @@ import scala.scalanative.libc.stdlib
  * Scala Native POSIX terminal backend for macOS/Linux.
  *
  * It configures stdin raw mode via termios, reads stdin on a background thread, writes to stdout,
- * queries dimensions through ioctl, and polls for live resize changes while running.
+ * queries dimensions through ioctl, and polls for live resize changes while running. After
+ * [[stop]], [[start]] requires the previous stdin reader, input flush worker, and resize worker to
+ * have terminated. Start is also rejected while any cleanup obligation from the previous run
+ * remains incomplete.
  */
 final class PosixTerminal(
     initialColumns: Int = PosixTerminal.envInt("COLUMNS").getOrElse(80),
@@ -39,22 +46,48 @@ final class PosixTerminal(
       TerminalTitleSupport,
       TerminalProgressSupport:
   private type Winsize = CStruct4[CUnsignedShort, CUnsignedShort, CUnsignedShort, CUnsignedShort]
-  @volatile private var running                             = false
-  @volatile private var resizePolling                       = false
-  @volatile private var inputHandler: TerminalInput => Unit = _ => ()
-  @volatile private var resizeHandler: () => Unit           = () => ()
-  @volatile private var currentColumns                      = initialColumns
-  @volatile private var currentRows                         = initialRows
-  private var inputThread: Thread | Null                    = null
-  private var resizeThread: Thread | Null                   = null
-  private var flushThread: Thread | Null                    = null
-  private var savedState: Ptr[termios.termios]              = null
-  private val inputBuffer                                   = TerminalInputBuffer()
-  private val inputLock                                     = Object()
-  private val keyboardProtocolNegotiator                    = KittyKeyboardProtocolNegotiator()
+  @volatile private var running                                             = false
+  @volatile private var resizePolling                                       = false
+  @volatile private var inputHandler: TerminalInput => Unit                 = _ => ()
+  @volatile private var resizeHandler: () => Unit                           = () => ()
+  @volatile private var currentColumns                                      = initialColumns
+  @volatile private var currentRows                                         = initialRows
+  private var inputThread: Thread | Null                                    = null
+  private var resizeThread: Thread | Null                                   = null
+  private var flushThread: Thread | Null                                    = null
+  private var savedState: Ptr[termios.termios]                              = null
+  private val inputBuffer                                                   = TerminalInputBuffer()
+  private val inputDelivery                                                 = OrderedInputDelivery()
+  private var inputGeneration                                               = 0L
+  private var inputCleanupPending                                           = false
+  private var pasteCleanupPending                                           = false
+  private var kittyCleanupPending                                           = false
+  private[native] var cleanupFailureForTesting: String => Option[Throwable] = _ => None
+  private[native] var writeFailureForTesting: String => Option[Throwable]   = _ => None
+  private val keyboardProtocolNegotiator                                    = KittyKeyboardProtocolNegotiator()
 
-  override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
-    if !running then
+  override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit = synchronized {
+    if running then throw IllegalStateException("PosixTerminal is already running")
+    else
+      reapInputThread()
+      reapFlushThread()
+      reapResizeThread()
+      if hasCleanupObligations then
+        throw IllegalStateException(
+          "cannot start PosixTerminal while cleanup from the previous generation remains incomplete"
+        )
+      if inputThread ne null then
+        throw IllegalStateException(
+          "cannot restart PosixTerminal while the previous stdin reader is still alive"
+        )
+      if flushThread ne null then
+        throw IllegalStateException(
+          "cannot restart PosixTerminal while the previous flush worker is still alive"
+        )
+      if resizeThread ne null then
+        throw IllegalStateException(
+          "cannot restart PosixTerminal while the previous resize worker is still alive"
+        )
       if unistd.isatty(unistd.STDIN_FILENO) == 0 then
         throw IllegalStateException(
           "Scala Native POSIX backend requires stdin to be an interactive TTY"
@@ -64,10 +97,14 @@ final class PosixTerminal(
       refreshSize(notify = false)
       try
         enableRawMode()
+        pasteCleanupPending = true
         write("\u001b[?2004h")
+        inputGeneration = inputDelivery.start(inputBuffer.clear())
+        inputCleanupPending = true
         running = true
-        val thread  = Thread(() => readLoop(), "scala-tui-posix-terminal-input")
-        val flusher = Thread(() => flushLoop(), "scala-tui-posix-terminal-flush")
+        val generation = inputGeneration
+        val thread     = Thread(() => readLoop(generation), "scala-tui-posix-terminal-input")
+        val flusher    = Thread(() => flushLoop(generation), "scala-tui-posix-terminal-flush")
         thread.setDaemon(true)
         flusher.setDaemon(true)
         inputThread = thread
@@ -77,30 +114,33 @@ final class PosixTerminal(
         startResizePolling()
       catch
         case e: Throwable =>
+          running = false
           stopResizePolling()
-          write("\u001b[?2004l")
-          restoreMode()
+          cleanup().foreach(e.addSuppressed)
           throw e
 
-  override def stop(): Unit =
-    if running || savedState != null then
-      disableKittyKeyboardProtocol()
-      write("\u001b[?2004l")
+  }
+
+  override def stop(): Unit = synchronized {
+    if running || hasCleanupObligations || (inputThread ne null) || (flushThread ne null) then
       running = false
       stopResizePolling()
-      Option(inputThread).foreach(_.interrupt())
-      Option(flushThread).foreach(_.interrupt())
-      inputThread = null
-      flushThread = null
-      inputLock.synchronized(inputBuffer.clear())
-      restoreMode()
+      cleanup().foreach(throw _)
+
+  }
 
   override def drainInput(maxMillis: Long, idleMillis: Long): Unit =
-    inputLock.synchronized(inputBuffer.clear())
+    inputDelivery.clear(inputBuffer.clear())
 
   override def write(data: String): Unit =
-    System.out.print(data)
-    System.out.flush()
+    val stream = System.out
+    stream.print(data)
+    writeFailureForTesting(data).foreach(throw _)
+    stream.flush()
+    if stream.checkError() then
+      throw IOException(
+        "PosixTerminal output PrintStream reported a suppressed output failure; check stdout"
+      )
 
   override def columns: Int =
     refreshSize(notify = false)
@@ -138,13 +178,16 @@ final class PosixTerminal(
       nowMillis: Long
   ): Boolean =
     val accepted = keyboardProtocolNegotiator.receiveResponse(response, nowMillis)
-    if accepted then write(KittyKeyboardProtocol.EnableSequence)
+    if accepted then
+      kittyCleanupPending = true
+      write(KittyKeyboardProtocol.EnableSequence)
     accepted
 
   override def disableKittyKeyboardProtocol(): Unit =
     if keyboardProtocolState !== KittyKeyboardProtocolState.Inactive then
       write(KittyKeyboardProtocol.DisableSequence)
     keyboardProtocolNegotiator.disable()
+    kittyCleanupPending = false
 
   private def enableRawMode(): Unit =
     if savedState == null then
@@ -170,9 +213,12 @@ final class PosixTerminal(
 
   private def restoreMode(): Unit =
     if savedState != null then
-      termios.tcsetattr(unistd.STDIN_FILENO, TCSAFLUSH, savedState)
-      stdlib.free(savedState.asInstanceOf[Ptr[Byte]])
-      savedState = null
+      val state    = savedState
+      val restored = termios.tcsetattr(unistd.STDIN_FILENO, TCSAFLUSH, state) === 0
+      if restored then
+        stdlib.free(state.asInstanceOf[Ptr[Byte]])
+        savedState = null
+      else throw IllegalStateException("tcsetattr restore mode failed")
 
   private def refreshSize(notify: Boolean): Boolean =
     val winsize = stackalloc[Winsize]()
@@ -204,45 +250,116 @@ final class PosixTerminal(
   private def stopResizePolling(): Unit =
     resizePolling = false
     Option(resizeThread).foreach(_.interrupt())
-    resizeThread = null
+
+  private def reapResizeThread(): Unit =
+    if Option(resizeThread).exists(!_.isAlive) then resizeThread = null
 
   private def resizeLoop(): Unit =
-    while resizePolling do
+    try
+      while resizePolling do
+        try
+          Thread.sleep(PosixTerminal.ResizePollMillis)
+          refreshSize(notify = true)
+        catch
+          case _: InterruptedException => resizePolling = false
+          case _: Throwable            => ()
+    finally clearResizeThread(Thread.currentThread())
+
+  private def readLoop(generation: Long): Unit =
+    try
+      val buffer = stackalloc[CChar](4096)
+      while inputDelivery.isActive(generation) do
+        val read = unistd.read(unistd.STDIN_FILENO, buffer, 4096.toUSize)
+        if read < 0 then terminateGeneration(generation)
+        else if read == 0 then ()
+        else
+          val bytes = Array.ofDim[Byte](read)
+          var i     = 0
+          while i < read do
+            bytes(i) = (!(buffer + i)).toByte
+            i += 1
+          val chunk = TerminalInputChunk(bytes)
+          parseAndDeliver(generation, inputBuffer.process(chunk))
+    finally
+      terminateGeneration(generation)
+      clearInputThread(Thread.currentThread())
+
+  private def flushLoop(generation: Long): Unit =
+    try
+      while inputDelivery.isActive(generation) do
+        try
+          Thread.sleep(PosixTerminal.IncompleteEscapeFlushMillis)
+          flushPending(generation)
+        catch
+          case _: InterruptedException => terminateGeneration(generation)
+          case _: Throwable            => ()
+    finally clearFlushThread(Thread.currentThread())
+
+  private def flushPending(generation: Long): Unit =
+    parseAndDeliver(generation, inputBuffer.flush())
+
+  private def parseAndDeliver(generation: Long, parse: => Vector[TerminalInput]): Unit =
+    inputDelivery.parseAndDeliver(generation, parse)(inputHandler)
+
+  private def terminateGeneration(generation: Long): Unit =
+    if inputDelivery.stop(generation, inputBuffer.clear()) then
+      synchronized {
+        if inputGeneration === generation then running = false
+      }
+
+  private def hasCleanupObligations: Boolean =
+    inputCleanupPending || kittyCleanupPending || pasteCleanupPending || savedState != null
+
+  private def cleanup(): Option[Throwable] =
+    var failure                                      = Option.empty[Throwable]
+    def attempt(name: String)(action: => Unit): Unit =
       try
-        Thread.sleep(PosixTerminal.ResizePollMillis)
-        refreshSize(notify = true)
+        cleanupFailureForTesting(name).foreach(throw _)
+        action
       catch
-        case _: InterruptedException => resizePolling = false
-        case _: Throwable            => ()
+        case error: Throwable => failure match
+            case Some(first) => first.addSuppressed(error)
+            case None        => failure = Some(error)
 
-  private def readLoop(): Unit =
-    val buffer = stackalloc[CChar](4096)
-    while running do
-      val read = unistd.read(unistd.STDIN_FILENO, buffer, 4096.toUSize)
-      if read < 0 then running = false
-      else if read == 0 then ()
-      else
-        val bytes  = Array.ofDim[Byte](read)
-        var i      = 0
-        while i < read do
-          bytes(i) = (!(buffer + i)).toByte
-          i += 1
-        val data   = String(bytes, java.nio.charset.StandardCharsets.UTF_8)
-        val inputs = inputLock.synchronized(inputBuffer.process(data))
-        inputs.foreach(inputHandler)
+    if inputCleanupPending then
+      attempt("input") {
+        inputDelivery.stop(inputGeneration, inputBuffer.clear())
+        Option(inputThread).foreach(_.interrupt())
+        Option(flushThread).foreach(_.interrupt())
+        reapInputThread()
+        reapFlushThread()
+        inputCleanupPending = false
+      }
+    if kittyCleanupPending then attempt("kitty")(disableKittyKeyboardProtocol())
+    if pasteCleanupPending then
+      attempt("paste") {
+        write("\u001b[?2004l")
+        pasteCleanupPending = false
+      }
+    if savedState != null then attempt("termios")(restoreMode())
+    failure
 
-  private def flushLoop(): Unit =
-    while running do
-      try
-        Thread.sleep(PosixTerminal.IncompleteEscapeFlushMillis)
-        flushPending()
-      catch
-        case _: InterruptedException => running = false
-        case _: Throwable            => ()
+  private def reapInputThread(): Unit =
+    if Option(inputThread).exists(!_.isAlive) then inputThread = null
 
-  private def flushPending(): Unit =
-    val inputs = inputLock.synchronized(inputBuffer.flush())
-    inputs.foreach(inputHandler)
+  private def reapFlushThread(): Unit =
+    if Option(flushThread).exists(!_.isAlive) then flushThread = null
+
+  private def clearInputThread(thread: Thread): Unit = synchronized {
+    if inputThread eq thread then inputThread = null
+  }
+
+  private def clearFlushThread(thread: Thread): Unit = synchronized {
+    if flushThread eq thread then flushThread = null
+  }
+
+  private def clearResizeThread(thread: Thread): Unit = synchronized {
+    if resizeThread eq thread then resizeThread = null
+  }
+
+  private[native] def retainFlushThreadForTesting(thread: Thread): Unit = synchronized {
+    flushThread = thread
+  }
 
   private def clearFlags(value: termios.tcflag_t, mask: Int): termios.tcflag_t =
     (value.toInt & ~mask).toUInt

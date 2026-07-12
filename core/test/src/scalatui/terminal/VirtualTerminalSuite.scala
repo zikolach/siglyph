@@ -40,3 +40,25 @@ class VirtualTerminalSuite extends munit.FunSuite:
     terminal.setTitle("safe\u001btitle\u0007")
 
     assertEquals(terminal.output, "\u001b]0;safetitle\u0007")
+
+  test("start and output-side operations do not synchronously deliver registered callbacks"):
+    val terminal        = VirtualTerminal(80, 24)
+    val caller          = Thread.currentThread()
+    var inlineCallbacks = 0
+    terminal.start(
+      _ => if Thread.currentThread() eq caller then inlineCallbacks += 1,
+      () => if Thread.currentThread() eq caller then inlineCallbacks += 1
+    )
+
+    terminal.write("output")
+    terminal.moveBy(1)
+    terminal.hideCursor()
+    terminal.showCursor()
+    terminal.clearLine()
+    terminal.clearFromCursor()
+    terminal.clearScreen()
+    Terminal.setTitle(terminal, "title")
+    Terminal.setProgress(terminal, active = true)
+
+    assertEquals(inlineCallbacks, 0)
+    terminal.stop()

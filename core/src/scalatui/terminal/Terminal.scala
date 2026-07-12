@@ -1,7 +1,20 @@
 package scalatui.terminal
 
-/** Backend abstraction for terminal lifecycle, input, output, and dimensions. */
+/**
+ * Backend abstraction for terminal lifecycle, input, output, and dimensions.
+ *
+ * [[start]] MUST return without synchronously invoking either registered callback on its calling
+ * stack. A backend may deliver callbacks independently from another thread, including before
+ * [[start]] returns. Output, cursor, title, progress, drain, and protocol methods MUST also return
+ * without synchronously invoking registered input or resize callbacks.
+ */
 trait Terminal:
+  /**
+   * Start terminal control and register callback delivery.
+   *
+   * This method MUST return without invoking either callback synchronously on its calling stack.
+   * Callback delivery may begin independently on another thread before this method returns.
+   */
   def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit
   def stop(): Unit
 
@@ -30,7 +43,7 @@ trait TerminalInputDrainSupport:
 
 /** Optional terminal capability for backends that can set the terminal window title. */
 trait TerminalTitleSupport:
-  /** Set the terminal window title. Callers use [[Terminal.setTitle]] to detect support. */
+  /** Set the title without synchronously delivering registered input or resize callbacks. */
   def setTitle(title: String): Unit
 
 /** Optional terminal capability for backends that can set terminal progress state. */
@@ -39,7 +52,8 @@ trait TerminalProgressSupport:
    * Set terminal progress state.
    *
    * Implementations emit fire-and-forget terminal protocol output. They do not guarantee that the
-   * terminal displays or retains the progress indicator.
+   * terminal displays or retains the progress indicator. This method must not synchronously deliver
+   * registered input or resize callbacks.
    */
   def setProgress(active: Boolean): Unit
 

@@ -59,7 +59,10 @@ object KittyKeyboardProtocol:
 
   private[terminal] val Response = "\u001b\\[\\?(\\d+)u".r
 
-/** Optional terminal capability for interactive backends with Kitty keyboard protocol hooks. */
+/**
+ * Optional terminal capability for interactive backends with Kitty keyboard protocol hooks.
+ * Output-side requests and state changes must not synchronously deliver terminal callbacks.
+ */
 trait KittyKeyboardProtocolTerminal:
   def keyboardProtocolState: KittyKeyboardProtocolState
   def requestKittyKeyboardProtocol(timeoutMillis: Long = 100L): Unit

@@ -29,9 +29,9 @@ import scalatui.components.{
   SelectListTheme,
   Text
 }
-import scalatui.core.{Component, ComponentFrameBuilder, TUI}
+import scalatui.core.{Component, ComponentFrameBuilder, TUI, TerminalQueryResult}
 import scalatui.syntax.Equality.*
-import scalatui.terminal.{TerminalInput, TerminalKey}
+import scalatui.terminal.{RgbColor, TerminalColorScheme, TerminalInput, TerminalKey}
 
 import java.io.File
 import scala.io.Source
@@ -72,7 +72,8 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
   private var mode                               = DemoMode.EditorMode
   private var focus                              = Focus.EditorPane
   private var terminalSchemeNotificationsEnabled = false
-  private var terminalQueryCounter               = 0
+  private val backgroundQuerySubscription        = DemoQuerySubscription()
+  private val schemeQuerySubscription            = DemoQuerySubscription()
 
   // ---------- Shared editor showcase ----------
   private val workspaceRoot = DemoRoot.findWorkspaceRoot(File(System.getProperty("user.dir")))
@@ -216,9 +217,12 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
       case "clear"                  =>
         clearDemoMessages()
       case "large-paste"            =>
-        editor.handleInput(
-          TerminalInput.Paste((1 to 12).map(i => s"pasted line $i").mkString("\n"))
+        val bytes = (1 to 12).map(i => s"pasted line $i").mkString("\n").getBytes(
+          java.nio.charset.StandardCharsets.UTF_8
         )
+        editor.handleInput(TerminalInput.PasteStart)
+        editor.handleInput(TerminalInput.PasteChunk(scalatui.terminal.TerminalInputChunk(bytes)))
+        editor.handleInput(TerminalInput.PasteEnd)
         focus = Focus.EditorPane
         updateEditorFocus()
       case "expand-paste"           =>
@@ -239,14 +243,12 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
           s"Terminal progress off ${supportLabel(tui.setTerminalProgress(active = false))}"
         )
       case "terminal-background"    =>
-        runTerminalQuery("background color") {
-          tui.queryTerminalBackgroundColor(timeoutMillis = 500).fold("no reply") { color =>
-            s"rgb(${color.red}, ${color.green}, ${color.blue})"
-          }
+        runTerminalQuery("background color", backgroundQuerySubscription) { onComplete =>
+          tui.queryTerminalBackgroundColor(result => onComplete(formatBackgroundResult(result)))
         }
       case "terminal-scheme"        =>
-        runTerminalQuery("color scheme") {
-          tui.queryTerminalColorScheme(timeoutMillis = 500).fold("no reply")(_.value)
+        runTerminalQuery("color scheme", schemeQuerySubscription) { onComplete =>
+          tui.queryTerminalColorScheme(result => onComplete(formatSchemeResult(result)))
         }
       case "terminal-notifications" =>
         terminalSchemeNotificationsEnabled = !terminalSchemeNotificationsEnabled
@@ -686,21 +688,32 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
     messages = Vector.empty
   }
 
-  private def runTerminalQuery(label: String)(query: => String): Unit =
-    terminalQueryCounter += 1
-    val queryId = terminalQueryCounter
-    addDemoMessage(s"Terminal $label query #$queryId started")
-    val thread  = Thread(
-      () =>
-        val result = query
-        addDemoMessage(s"Terminal $label query #$queryId: $result")
-        tui.requestRender()
-        tui.flushRender()
-      ,
-      s"siglyph-demo-terminal-$label-query-$queryId"
-    )
-    thread.setDaemon(true)
-    thread.start()
+  private def runTerminalQuery(label: String, subscription: DemoQuerySubscription)(
+      query: (String => Unit) => (() => Unit)
+  ): Unit =
+    subscription.start(query)(queryId =>
+      addDemoMessage(s"Terminal $label query #$queryId started")
+    ) { (queryId, result) =>
+      addDemoMessage(s"Terminal $label query #$queryId: $result")
+      tui.requestRender()
+      tui.flushRender()
+    } match
+      case Some(_) => ()
+      case None    => addDemoMessage(s"Terminal $label query already pending")
+
+  private def formatBackgroundResult(result: TerminalQueryResult[RgbColor]): String = result match
+    case TerminalQueryResult.Success(color)  =>
+      s"rgb(${color.red}, ${color.green}, ${color.blue})"
+    case TerminalQueryResult.InvalidResponse => "invalid response"
+    case TerminalQueryResult.Stopped         => "stopped"
+    case TerminalQueryResult.Failed(cause)   => s"failed: ${cause.getMessage}"
+
+  private def formatSchemeResult(result: TerminalQueryResult[TerminalColorScheme]): String =
+    result match
+      case TerminalQueryResult.Success(scheme) => scheme.value
+      case TerminalQueryResult.InvalidResponse => "invalid response"
+      case TerminalQueryResult.Stopped         => "stopped"
+      case TerminalQueryResult.Failed(cause)   => s"failed: ${cause.getMessage}"
 
   private def supportLabel(applied: Boolean): String =
     if applied then "supported" else "unsupported"
@@ -721,6 +734,52 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
 
   private def fit(value: String, width: Int): String =
     Ansi.truncateToWidth(value, width, "")
+
+private[demo] final class DemoQuerySubscription:
+  private var nextQueryId = 0L
+  private var active      = Option.empty[(Long, () => Unit)]
+
+  def start(
+      query: (String => Unit) => (() => Unit)
+  )(onStarted: Long => Unit)(onComplete: (Long, String) => Unit): Option[Long] =
+    val queryId = synchronized {
+      if active.nonEmpty then None
+      else
+        nextQueryId += 1
+        active = Some(nextQueryId -> (() => ()))
+        Some(nextQueryId)
+    }
+    queryId.map { id =>
+      onStarted(id)
+      val cancel =
+        try query(result => complete(id, result, onComplete))
+        catch
+          case failure: Throwable =>
+            synchronized {
+              if active.exists(_._1 === id) then active = None
+            }
+            throw failure
+      synchronized {
+        if active.exists(_._1 === id) then active = Some(id -> cancel)
+      }
+      id
+    }
+
+  private[demo] def cancelActive(): Unit =
+    val cancel = synchronized {
+      val retained = active.map(_._2)
+      active = None
+      retained
+    }
+    cancel.foreach(_())
+
+  private def complete(queryId: Long, result: String, onComplete: (Long, String) => Unit): Unit =
+    val ownsCompletion = synchronized {
+      val owns = active.exists(_._1 === queryId)
+      if owns then active = None
+      owns
+    }
+    if ownsCompletion then onComplete(queryId, result)
 
 private object DemoRoot:
   private val Tags = Vector("#bug", "#docs", "#demo", "#release-notes")

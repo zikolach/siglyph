@@ -63,6 +63,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
   private var historyIndex                                       = -1
   private val maxHistorySize                                     = 100
   private var jumpMode                                           = Option.empty[Editor.JumpDirection]
+  private var pasteSession                                       = Option.empty[Editor.PasteSession]
 
   /** Current editor text joined with `\n` separators. */
   def text: String = synchronized(buffer.text)
@@ -221,14 +222,24 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
   }
 
   private def handleInputLocked(input: TerminalInput): InputResult =
-    if currentAutocomplete.nonEmpty then
-      handleAutocompleteInput(input)
-    else
-      input match
-        case _ if keybindings.matches(input, KeybindingCommand.InputTab) && provider.nonEmpty =>
-          requestAutocomplete(force = true)
-          InputResult.Render
-        case _                                                                                => handleEditingInput(input)
+    val pasteCommit = input match
+      case TerminalInput.PasteStart | TerminalInput.PasteChunk(_) | TerminalInput.PasteEnd =>
+        InputResult.Ignored
+      case _ if pasteSession.nonEmpty                                                      =>
+        commitPaste()
+      case _                                                                               =>
+        InputResult.Ignored
+    val result      =
+      if currentAutocomplete.nonEmpty then
+        handleAutocompleteInput(input)
+      else
+        input match
+          case _ if keybindings.matches(input, KeybindingCommand.InputTab) && provider.nonEmpty =>
+            requestAutocomplete(force = true)
+            InputResult.Render
+          case _                                                                                =>
+            handleEditingInput(input)
+    combineInputResults(pasteCommit, result)
 
   private def handleAutocompleteInput(input: TerminalInput): InputResult =
     currentAutocomplete match
@@ -281,7 +292,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     if jumpMode.nonEmpty then
       handleJumpInput(input)
     else
-      input match
+      input match {
         case TerminalInput.Key(TerminalKey.Enter, modifiers)                                    =>
           handleEnter(modifiers)
         case _ if keybindings.matches(input, KeybindingCommand.EditorCursorUp)                  =>
@@ -339,10 +350,15 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
           killDeleteToStartOfLine()
         case _ if keybindings.matches(input, KeybindingCommand.EditorDeleteToLineEnd)           =>
           killDeleteToEndOfLine()
-        case TerminalInput.Paste(text)                                                          =>
-          val result = mutate(_.insertPaste(text), refreshAutocomplete = false)
-          refreshAutocompleteIfActive()
-          result
+        case TerminalInput.PasteStart                                                           =>
+          val previous = commitPaste()
+          pasteSession = Some(Editor.PasteSession(buffer.snapshot))
+          previous
+        case TerminalInput.PasteChunk(chunk)                                                    =>
+          pasteSession.foreach(_.process(chunk))
+          InputResult.NoRender
+        case TerminalInput.PasteEnd                                                             =>
+          commitPaste()
         case TerminalInput.Key(TerminalKey.Character(text), modifiers)
             if !modifiers.ctrl && !modifiers.alt && !modifiers.superKey =>
           val result = mutate(_.insert(text), refreshAutocomplete = false)
@@ -378,6 +394,38 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
         case TerminalInput.Key(TerminalKey.Down, _)                                             =>
           move(_.moveDown())
         case _                                                                                  => InputResult.Ignored
+      }
+
+  private def commitPaste(): InputResult =
+    pasteSession match
+      case None          => InputResult.NoRender
+      case Some(session) =>
+        pasteSession = None
+        session.finish()
+        if session.isEmpty then InputResult.NoRender
+        else
+          if session.isLarge then
+            buffer.insertLargePaste(
+              session.materialize(),
+              session.lineCount,
+              session.graphemeCount
+            )
+          else buffer.insertPasteChunks(session.chunks)
+          pushUndoSnapshot(session.baseSnapshot)
+          resetEditingAction()
+          historyIndex = -1
+          onChange(buffer.text)
+          refreshAutocompleteIfActive()
+          InputResult.Render
+
+  private def combineInputResults(first: InputResult, second: InputResult): InputResult =
+    (first, second) match
+      case (InputResult.Exit, _) | (_, InputResult.Exit)                   => InputResult.Exit
+      case (InputResult.Handled(true), _) | (_, InputResult.Handled(true)) => InputResult.Render
+      case (InputResult.Handled(false), InputResult.Ignored)               => InputResult.NoRender
+      case (InputResult.Ignored, InputResult.Handled(false))               => InputResult.NoRender
+      case (InputResult.Handled(false), InputResult.Handled(false))        => InputResult.NoRender
+      case (InputResult.Ignored, InputResult.Ignored)                      => InputResult.Ignored
 
   private def handleEnter(modifiers: KeyModifiers): InputResult = enterBehavior match
     case EditorEnterBehavior.SubmitOnEnter(newlineModifiers) =>
@@ -862,6 +910,74 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     s"$before${CursorMarker.Sequence}\u001b[7m$cursorCluster\u001b[27m$after"
 
 object Editor:
+  private final class PasteSession(val baseSnapshot: EditorBuffer.Snapshot):
+    private val decoder         = scalatui.terminal.TerminalUtf8Decoder()
+    private val graphemeCounter = Unicode.IncrementalGraphemeCounter()
+    private val blocks          = scala.collection.mutable.ArrayBuffer(StringBuilder())
+    private var pendingCr       = false
+    private var newlineCount    = 0L
+    private var contentLength   = 0L
+
+    def process(chunk: scalatui.terminal.TerminalInputChunk): Unit =
+      appendDecoded(decoder.process(chunk))
+
+    def finish(): Unit =
+      appendDecoded(decoder.flush())
+      if pendingCr then
+        pendingCr = false
+        appendNormalized("\n")
+
+    def isEmpty: Boolean = contentLength === 0L
+
+    def lineCount: Long = newlineCount + 1L
+
+    def graphemeCount: Long = graphemeCounter.count
+
+    def isLarge: Boolean =
+      lineCount > EditorBuffer.LargePasteLineThreshold ||
+        graphemeCount > EditorBuffer.LargePasteCharacterThreshold
+
+    def chunks: Vector[String] = blocks.iterator.filter(_.nonEmpty).map(_.result()).toVector
+
+    def materialize(): String =
+      val result = StringBuilder()
+      blocks.foreach(result.append)
+      result.result()
+
+    private def appendDecoded(value: String): Unit =
+      if value.nonEmpty then
+        val normalized = StringBuilder()
+        var index      = 0
+        if pendingCr then
+          pendingCr = false
+          normalized += '\n'
+          if value.head === '\n' then index = 1
+        while index < value.length do
+          value.charAt(index) match
+            case '\r' =>
+              if index + 1 < value.length then
+                normalized += '\n'
+                if value.charAt(index + 1) === '\n' then index += 1
+              else pendingCr = true
+            case char => normalized += char
+          index += 1
+        appendNormalized(normalized.result())
+
+    private def appendNormalized(value: String): Unit =
+      if value.nonEmpty then
+        graphemeCounter.process(value)
+        newlineCount += value.count(_ === '\n').toLong
+        contentLength += value.length
+        var index = 0
+        while index < value.length do
+          val count = Character.charCount(value.codePointAt(index))
+          if blocks.last.nonEmpty && blocks.last.length + count > Editor.PasteBlockSize then
+            blocks += StringBuilder()
+          blocks.last.append(value.substring(index, index + count))
+          index += count
+
+  private val PasteBlockSize = 4096
+
   private enum Action derives CanEqual:
     case Kill, Yank
 

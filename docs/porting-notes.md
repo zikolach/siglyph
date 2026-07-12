@@ -53,4 +53,26 @@ When porting a feature:
 - Terminal title and progress are optional backend capabilities rather than required `Terminal` methods. `TUI.setTerminalTitle` and `TUI.setTerminalProgress` return `false` on unsupported terminals such as `StreamTerminal` and emit no unsupported escape sequences.
 - Terminal input draining is an optional backend capability rather than a required `Terminal` method. `TUI.stop()` invokes it when a backend supports bounded draining and skips it for unsupported backends.
 - Insert-key input now has the typed `TerminalKey.Insert` identity instead of requiring `TerminalKey.Unknown("insert")` for supported standard and modified Insert sequences.
-- Terminal background color and color-scheme queries are owned by `TUI`, not individual backends. Backends write query bytes and deliver raw replies; `TUI` parses OSC 11 and color-scheme reports, applies timeouts, consumes protocol replies before component input routing, and returns `None` when no valid reply arrives.
+- Terminal background color and color-scheme queries are owned by `TUI`, not individual backends. Backends write query bytes and deliver raw replies. `TUI` exposes dependency-free callbacks with `Success`, `InvalidResponse`, `Stopped`, and `Failed` results, uses one wire flight per protocol, preserves subscription order, and returns an independently cancellable idempotent silent function. Applications own timeout scheduling; core has no query timer, executor, `Future`, effect type, compatibility overload, or optional effect module.
+- Runtime input, callbacks, rendering, retained title/progress output, and cleanup progression use one
+  synchronous owner drain. The short lifecycle lock only publishes state; application code,
+  dimensions, query waits, and terminal operations run outside it. A separate non-nested backend
+  edge lock serializes TUI-owned output.
+- Resize attempts snapshot generation and dimensions and reject candidates known to be stale before
+  output or differential-baseline mutation. Normal-screen width or height redraw clears normal
+  scrollback; alternate-screen redraw clears only the alternate viewport.
+- Callback color queries reserve direct request emission and correlate replies under short lifecycle
+  state without invoking application code on ingress. Completion batches share accepted FIFO order
+  with ordinary input and notifications, while the drain claims and invokes subscribers outside
+  runtime locks. Stop discards queued ordinary work but retains accepted query completions required
+  before cleanup.
+- Ordinary terminal ingress is lossless and bounded at 4096 events. Correlation-only raw fragments
+  consume no slot, a recognized protocol callback/notification batch consumes one slot, and each
+  reconstructed ordinary raw event consumes one slot. A full queue backpressures output-producing
+  publication until dequeue or lifecycle rejection; resize is coalesced without a queue slot.
+- Editor bracketed paste remains byte-streamed through parser and runtime transit but is one logical
+  edit. Newline normalization, grapheme and line marker thresholds, cursor placement, undo,
+  `onChange`, autocomplete refresh, and rendering apply once across the whole stream.
+- `Terminal.start` does not invoke registered callbacks synchronously on its call stack. Backends may
+  publish independently from another thread before it returns. This strengthened contract replaces
+  startup callback replay accommodation and complements output-side callback separation.

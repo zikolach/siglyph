@@ -4,9 +4,6 @@ import scalatui.syntax.Equality.*
 
 /** Parser for common terminal escape sequences into typed terminal input. */
 object TerminalInputParser:
-  private val PasteStart = "\u001b[200~"
-  private val PasteEnd   = "\u001b[201~"
-
   private val SimpleKeys: Map[String, TerminalInput] = Map(
     "\r"           -> key(TerminalKey.Enter),
     "\n"           -> key(TerminalKey.Enter),
@@ -55,25 +52,14 @@ object TerminalInputParser:
   private val CsiU            = "\u001b\\[(\\d+)(?::(\\d*))?(?::(\\d+))?(?:;(\\d+))?(?::(\\d+))?u".r
   private val ModifyOtherKeys = "\u001b\\[27;(\\d+);(\\d+)~".r
 
-  def parse(data: String): Vector[TerminalInput] =
-    if data.isEmpty then Vector.empty
-    else parsePaste(data).getOrElse(Vector(parseOne(data)))
+  private[terminal] def parseTyped(bytes: Array[Byte]): Option[TerminalInput] =
+    val data = String(bytes, java.nio.charset.StandardCharsets.UTF_8)
+    SimpleKeys.get(data).orElse(parseModified(data)).orElse(parsePrintable(data))
 
-  def parseOne(data: String): TerminalInput =
-    SimpleKeys.getOrElse(
-      data,
-      parseModified(data).getOrElse(parsePrintable(data).getOrElse(TerminalInput.Raw(data)))
-    )
+  private def parseModified(data: String): Option[TerminalInput] =
+    scala.util.Try(parseModifiedUnsafe(data)).toOption.flatten
 
-  private def parsePaste(data: String): Option[Vector[TerminalInput]] =
-    if data.startsWith(PasteStart) && data.endsWith(PasteEnd) then
-      Some(Vector(TerminalInput.Paste(data.substring(
-        PasteStart.length,
-        data.length - PasteEnd.length
-      ))))
-    else None
-
-  private def parseModified(data: String): Option[TerminalInput] = data match
+  private def parseModifiedUnsafe(data: String): Option[TerminalInput] = data match
     case ModifiedArrow(modText, code)                         =>
       Some(key(arrowKey(code), decodeModifiers(modText.toInt - 1)))
     case ModifiedFunc(numText, modText)                       =>

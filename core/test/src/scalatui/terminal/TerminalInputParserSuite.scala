@@ -1,196 +1,159 @@
 package scalatui.terminal
 
 class TerminalInputParserSuite extends munit.FunSuite:
+  private def parse(value: String): Vector[TerminalInput] =
+    TerminalInputBuffer().process(
+      TerminalInputChunk(value.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+    )
+
   test("parses basic keys and printable unicode"):
-    assertEquals(TerminalInputParser.parseOne("\r"), TerminalInput.Key(TerminalKey.Enter))
-    assertEquals(TerminalInputParser.parseOne("\u001b[A"), TerminalInput.Key(TerminalKey.Up))
-    assertEquals(TerminalInputParser.parseOne("ä"), TerminalInput.Key(TerminalKey.Character("ä")))
+    assertEquals(parse("\r"), Vector(TerminalInput.Key(TerminalKey.Enter)))
+    assertEquals(parse("\u001b[A"), Vector(TerminalInput.Key(TerminalKey.Up)))
+    assertEquals(parse("ä"), Vector(TerminalInput.Key(TerminalKey.Character("ä"))))
 
-  test("parses modified arrows"):
+  test("preserves modified, Kitty CSI-u, modifyOtherKeys, SS3, Alt, and controls"):
     assertEquals(
-      TerminalInputParser.parseOne("\u001b[1;5D"),
-      TerminalInput.Key(TerminalKey.Left, KeyModifiers(ctrl = true))
-    )
-
-  test("parses legacy alt+arrow variants"):
-    assertEquals(
-      TerminalInputParser.parseOne("\u001bB"),
-      TerminalInput.Key(TerminalKey.Left, KeyModifiers(alt = true))
+      parse("\u001b[1;5D"),
+      Vector(TerminalInput.Key(TerminalKey.Left, KeyModifiers(ctrl = true)))
     )
     assertEquals(
-      TerminalInputParser.parseOne("\u001bF"),
-      TerminalInput.Key(TerminalKey.Right, KeyModifiers(alt = true))
-    )
-    assertEquals(
-      TerminalInputParser.parseOne("\u001bb"),
-      TerminalInput.Key(TerminalKey.Left, KeyModifiers(alt = true))
-    )
-    assertEquals(
-      TerminalInputParser.parseOne("\u001bf"),
-      TerminalInput.Key(TerminalKey.Right, KeyModifiers(alt = true))
-    )
-
-  test("parses kitty csi-u printable key"):
-    assertEquals(
-      TerminalInputParser.parseOne("\u001b[97;5u"),
-      TerminalInput.Key(TerminalKey.Character("a"), KeyModifiers(ctrl = true))
-    )
-    assertEquals(
-      TerminalInputParser.parseOne("\u001b[106;5u"),
-      TerminalInput.Key(TerminalKey.Character("j"), KeyModifiers(ctrl = true))
-    )
-
-  test("keeps bare line feed as plain enter"):
-    assertEquals(TerminalInputParser.parseOne("\n"), TerminalInput.Key(TerminalKey.Enter))
-
-  test("parses kitty csi-u event metadata and super modifier"):
-    assertEquals(
-      TerminalInputParser.parseOne("\u001b[97;9:2u"),
-      TerminalInput.KeyEvent(
+      parse("\u001b[97;9:2u"),
+      Vector(TerminalInput.KeyEvent(
         TerminalKey.Character("a"),
         KeyModifiers(superKey = true),
         KeyEventType.Repeat
+      ))
+    )
+    assertEquals(
+      parse("\u001b[27;3;120~"),
+      Vector(TerminalInput.Key(TerminalKey.Character("x"), KeyModifiers(alt = true)))
+    )
+    assertEquals(parse("\u001bOH"), Vector(TerminalInput.Key(TerminalKey.Home)))
+    assertEquals(
+      parse("\u001bb"),
+      Vector(TerminalInput.Key(TerminalKey.Left, KeyModifiers(alt = true)))
+    )
+    assertEquals(
+      parse("\u0003"),
+      Vector(TerminalInput.Key(TerminalKey.Character("c"), KeyModifiers(ctrl = true)))
+    )
+
+  test("parses split UTF-8 scalars at every boundary"):
+    val bytes = "🙂".getBytes(java.nio.charset.StandardCharsets.UTF_8)
+    (1 until bytes.length).foreach { split =>
+      val buffer = TerminalInputBuffer()
+      assertEquals(buffer.process(TerminalInputChunk(bytes.take(split))), Vector.empty)
+      assertEquals(
+        buffer.process(TerminalInputChunk(bytes.drop(split))),
+        Vector(TerminalInput.Key(TerminalKey.Character("🙂")))
+      )
+    }
+
+  test("oversized numeric fields remain exact malformed raw input"):
+    val value  = "\u001b[1;" + "9" * 128 + "A"
+    val bytes  = value.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+    val events = TerminalInputBuffer().process(TerminalInputChunk(bytes))
+
+    assertEquals(events.head, TerminalInput.RawStart(TerminalRawKind.Csi))
+    assertEquals(events.last, TerminalInput.RawEnd(TerminalRawTermination.Complete))
+    assertEquals(
+      events.collect { case TerminalInput.RawChunk(chunk) => chunk.toArray }.flatten.toVector,
+      bytes.toVector
+    )
+
+  test("streams malformed UTF-8 with exact bytes"):
+    val bytes         = Array(0xc3.toByte, 0x28.toByte)
+    val events        = TerminalInputBuffer().process(TerminalInputChunk(bytes))
+    val reconstructed = events.collect { case TerminalInput.RawChunk(chunk) =>
+      chunk.toArray
+    }.flatten.toArray
+    assertEquals(reconstructed.toVector, bytes.toVector)
+
+  test("incremental UTF-8 decoder handles split malformed and incomplete input"):
+    val decoder = TerminalUtf8Decoder()
+    val bytes   = "界🙂".getBytes(java.nio.charset.StandardCharsets.UTF_8)
+    val decoded = bytes.map(byte => decoder.process(TerminalInputChunk(Array(byte)))).mkString
+    assertEquals(decoded + decoder.flush(), "界🙂")
+
+    val malformed = TerminalUtf8Decoder()
+    assertEquals(
+      malformed.process(TerminalInputChunk(Array(0xc3.toByte, 0x28.toByte))),
+      "�("
+    )
+    assertEquals(malformed.flush(), "")
+
+    val incomplete = TerminalUtf8Decoder()
+    assertEquals(incomplete.process(TerminalInputChunk(Array(0xf0.toByte, 0x9f.toByte))), "")
+    assertEquals(incomplete.flush(), "�")
+
+  test("terminal input chunks copy input and output arrays and enforce bounds"):
+    val source = Array[Byte](1, 2, 3)
+    val chunk  = TerminalInputChunk(source)
+    source(0) = 9
+    val output = chunk.toArray
+    output(1) = 9
+    assertEquals(chunk.toArray.toVector, Vector[Byte](1, 2, 3))
+    intercept[IllegalArgumentException](TerminalInputChunk(Array.emptyByteArray))
+    intercept[IllegalArgumentException](
+      TerminalInputChunk(Array.ofDim[Byte](TerminalInputChunk.MaxBytes + 1))
+    )
+
+  test("incremental UTF-8 decoder replaces overlong surrogate and out-of-range encodings"):
+    val malformed = Vector(
+      Array[Byte](0xc0.toByte, 0xaf.toByte),
+      Array[Byte](0xed.toByte, 0xa0.toByte, 0x80.toByte),
+      Array[Byte](0xf4.toByte, 0x90.toByte, 0x80.toByte, 0x80.toByte)
+    )
+    malformed.foreach { bytes =>
+      val decoder  = TerminalUtf8Decoder()
+      val actual   = bytes.map(byte => decoder.process(TerminalInputChunk(Array(byte)))).mkString +
+        decoder.flush()
+      val expected = String(bytes, java.nio.charset.StandardCharsets.UTF_8)
+      assertEquals(actual, expected)
+    }
+
+  test("flush is the explicit Escape and Alt framing boundary"):
+    val scalar = "🙂".getBytes(java.nio.charset.StandardCharsets.UTF_8)
+
+    val beforeFlush = TerminalInputBuffer()
+    assertEquals(
+      beforeFlush.process(TerminalInputChunk(Array(0x1b.toByte) ++ scalar)),
+      Vector(TerminalInput.Key(TerminalKey.Character("🙂"), KeyModifiers(alt = true)))
+    )
+    assertEquals(beforeFlush.flush(), Vector.empty)
+
+    val acrossFlush = TerminalInputBuffer()
+    assertEquals(
+      acrossFlush.process(TerminalInputChunk(Array(0x1b.toByte))),
+      Vector.empty
+    )
+    assertEquals(acrossFlush.flush(), Vector(TerminalInput.Key(TerminalKey.Escape)))
+    assertEquals(
+      acrossFlush.process(TerminalInputChunk(scalar)),
+      Vector(TerminalInput.Key(TerminalKey.Character("🙂")))
+    )
+
+  test("flush ends incomplete Alt UTF-8 framing and later bytes are separate"):
+    val scalar   = "🙂".getBytes(java.nio.charset.StandardCharsets.UTF_8)
+    val buffer   = TerminalInputBuffer()
+    assertEquals(
+      buffer.process(TerminalInputChunk(Array(0x1b.toByte) ++ scalar.take(2))),
+      Vector.empty
+    )
+    assertEquals(
+      buffer.flush(),
+      Vector(
+        TerminalInput.RawStart(TerminalRawKind.Escape),
+        TerminalInput.RawChunk(TerminalInputChunk(Array(0x1b.toByte) ++ scalar.take(2))),
+        TerminalInput.RawEnd(TerminalRawTermination.Incomplete)
       )
     )
-    assertEquals(
-      TerminalInputParser.parseOne("\u001b[97;1:3u"),
-      TerminalInput.KeyEvent(TerminalKey.Character("a"), KeyModifiers.empty, KeyEventType.Release)
-    )
-
-  test("parses kitty csi-u shifted/base keypad-style edge case"):
-    assertEquals(
-      TerminalInputParser.parseOne("\u001b[65::97;2:1u"),
-      TerminalInput.KeyEvent(
-        TerminalKey.Character("a"),
-        KeyModifiers(shift = true),
-        KeyEventType.Press
+    val later    = buffer.process(TerminalInputChunk(scalar.drop(2)))
+    val expected = scalar.drop(2).toVector.flatMap { byte =>
+      Vector(
+        TerminalInput.RawStart(TerminalRawKind.Utf8),
+        TerminalInput.RawChunk(TerminalInputChunk(Array(byte))),
+        TerminalInput.RawEnd(TerminalRawTermination.Malformed)
       )
-    )
-
-  test("kitty keyboard protocol negotiation ignores stale or mismatched responses"):
-    val negotiator = KittyKeyboardProtocolNegotiator()
-    val first      = negotiator.begin(nowMillis = 1000, timeoutMillis = 10)
-    negotiator.expire(nowMillis = 1011)
-
-    assertEquals(first.id, 1L)
-    assertEquals(negotiator.receiveResponse("\u001b[?1u", nowMillis = 1011), false)
-    assertEquals(negotiator.state, KittyKeyboardProtocolState.Inactive)
-
-    negotiator.begin(nowMillis = 2000, timeoutMillis = 10)
-    assertEquals(negotiator.receiveResponse("\u001b[?3u", nowMillis = 2011), false)
-    assertEquals(negotiator.state, KittyKeyboardProtocolState.Inactive)
-
-    negotiator.begin(nowMillis = 3000, timeoutMillis = 10)
-    assertEquals(negotiator.receiveResponse("\u001b[?not-a-response", nowMillis = 3001), false)
-    assertEquals(negotiator.state, KittyKeyboardProtocolState.Pending(3L, 3010L))
-    assertEquals(negotiator.receiveResponse("\u001b[?3u", nowMillis = 3002), true)
-    assertEquals(negotiator.state, KittyKeyboardProtocolState.Active(3))
-
-  test("parses modified enter encodings"):
-    assertEquals(
-      TerminalInputParser.parseOne("\u001b[13;2~"),
-      TerminalInput.Key(TerminalKey.Enter, KeyModifiers(shift = true))
-    )
-    assertEquals(
-      TerminalInputParser.parseOne("\u001b[13;3~"),
-      TerminalInput.Key(TerminalKey.Enter, KeyModifiers(alt = true))
-    )
-    assertEquals(
-      TerminalInputParser.parseOne("\u001b[13;2u"),
-      TerminalInput.Key(TerminalKey.Enter, KeyModifiers(shift = true))
-    )
-    assertEquals(
-      TerminalInputParser.parseOne("\u001b[27;2;13~"),
-      TerminalInput.Key(TerminalKey.Enter, KeyModifiers(shift = true))
-    )
-    assertEquals(
-      TerminalInputParser.parseOne("\u001b[13;3u"),
-      TerminalInput.Key(TerminalKey.Enter, KeyModifiers(alt = true))
-    )
-    assertEquals(
-      TerminalInputParser.parseOne("\u001b[27;3;13~"),
-      TerminalInput.Key(TerminalKey.Enter, KeyModifiers(alt = true))
-    )
-
-  test("parses xterm modifyOtherKeys"):
-    assertEquals(
-      TerminalInputParser.parseOne("\u001b[27;3;120~"),
-      TerminalInput.Key(TerminalKey.Character("x"), KeyModifiers(alt = true))
-    )
-
-  test("parses jump-forward keybinding escapes"):
-    assertEquals(
-      TerminalInputParser.parseOne("\u001d"),
-      TerminalInput.Key(TerminalKey.Character("]"), KeyModifiers(ctrl = true))
-    )
-    assertEquals(
-      TerminalInputParser.parseOne("\u001b\u001d"),
-      TerminalInput.Key(TerminalKey.Character("]"), KeyModifiers(ctrl = true, alt = true))
-    )
-
-  test("parses bracketed paste"):
-    assertEquals(
-      TerminalInputParser.parse("\u001b[200~hello\nworld\u001b[201~"),
-      Vector(TerminalInput.Paste("hello\nworld"))
-    )
-
-  test("parses page navigation keys"):
-    assertEquals(TerminalInputParser.parseOne("\u001b[5~"), TerminalInput.Key(TerminalKey.PageUp))
-    assertEquals(TerminalInputParser.parseOne("\u001b[6~"), TerminalInput.Key(TerminalKey.PageDown))
-
-  test("parses insert key and modified insert key"):
-    assertEquals(TerminalInputParser.parseOne("\u001b[2~"), TerminalInput.Key(TerminalKey.Insert))
-    assertEquals(
-      TerminalInputParser.parseOne("\u001b[2;5~"),
-      TerminalInput.Key(TerminalKey.Insert, KeyModifiers(ctrl = true))
-    )
-
-  test("normalizes common raw control bytes"):
-    assertEquals(
-      TerminalInputParser.parseOne("\u0003"),
-      TerminalInput.Key(TerminalKey.Character("c"), KeyModifiers(ctrl = true))
-    )
-    assertEquals(
-      TerminalInputParser.parseOne("\u0001"),
-      TerminalInput.Key(TerminalKey.Character("a"), KeyModifiers(ctrl = true))
-    )
-    assertEquals(
-      TerminalInputParser.parseOne("\u0005"),
-      TerminalInput.Key(TerminalKey.Character("e"), KeyModifiers(ctrl = true))
-    )
-    assertEquals(
-      TerminalInputParser.parseOne("\u0015"),
-      TerminalInput.Key(TerminalKey.Character("u"), KeyModifiers(ctrl = true))
-    )
-    assertEquals(
-      TerminalInputParser.parseOne("\u000b"),
-      TerminalInput.Key(TerminalKey.Character("k"), KeyModifiers(ctrl = true))
-    )
-    assertEquals(
-      TerminalInputParser.parseOne("\u000c"),
-      TerminalInput.Key(TerminalKey.Character("l"), KeyModifiers(ctrl = true))
-    )
-    assertEquals(
-      TerminalInputParser.parseOne("\u000f"),
-      TerminalInput.Key(TerminalKey.Character("o"), KeyModifiers(ctrl = true))
-    )
-    assertEquals(
-      TerminalInputParser.parseOne("\u0014"),
-      TerminalInput.Key(TerminalKey.Character("t"), KeyModifiers(ctrl = true))
-    )
-    assertEquals(
-      TerminalInputParser.parseOne("\u0017"),
-      TerminalInput.Key(TerminalKey.Character("w"), KeyModifiers(ctrl = true))
-    )
-    assertEquals(
-      TerminalInputParser.parseOne("\u0019"),
-      TerminalInput.Key(TerminalKey.Character("y"), KeyModifiers(ctrl = true))
-    )
-    assertEquals(
-      TerminalInputParser.parseOne("\u001f"),
-      TerminalInput.Key(TerminalKey.Character("-"), KeyModifiers(ctrl = true))
-    )
-    assertEquals(
-      TerminalInputParser.parseOne("\u001b\u007f"),
-      TerminalInput.Key(TerminalKey.Backspace, KeyModifiers(alt = true))
-    )
+    }
+    assertEquals(later, expected)

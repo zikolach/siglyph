@@ -12,10 +12,16 @@ import scalatui.terminal.{
   TerminalTitleSupport
 }
 
-import java.io.{InputStream, OutputStream}
+import java.io.{IOException, InputStream, OutputStream, PrintStream}
 import scala.sys.process.*
 
-/** Unix JVM terminal backend using `stty` for interactive raw mode. */
+/**
+ * Unix JVM terminal backend using `stty` for interactive raw mode.
+ *
+ * After [[stop]], [[start]] requires the previous input reader, input flush worker, and resize
+ * worker to have terminated. Start is also rejected while any cleanup obligation from the previous
+ * run remains incomplete.
+ */
 final class SttyTerminal(
     input: InputStream = System.in,
     output: OutputStream = System.out,
@@ -31,48 +37,76 @@ final class SttyTerminal(
       KittyKeyboardProtocolTerminal,
       TerminalTitleSupport,
       TerminalProgressSupport:
-  @volatile private var savedState: Option[String] = None
-  @volatile private var resizePolling              = false
-  @volatile private var currentColumns             = columnsOverride
+  @volatile private var savedState: Option[String]                       = None
+  @volatile private var resizePolling                                    = false
+  private var sttyRunning                                                = false
+  private var inputCleanupPending                                        = false
+  private var pasteCleanupPending                                        = false
+  private var kittyCleanupPending                                        = false
+  private[jvm] var cleanupFailureForTesting: String => Option[Throwable] = _ => None
+  private[jvm] var sttyFailureForTesting: String => Option[Throwable]    = _ => None
+  @volatile private var currentColumns                                   = columnsOverride
     .orElse(StreamTerminal.envInt("COLUMNS"))
     .getOrElse(80)
-  @volatile private var currentRows                =
+  @volatile private var currentRows                                      =
     rowsOverride.orElse(StreamTerminal.envInt("LINES")).getOrElse(24)
-  private var resizeHandler: () => Unit            = () => ()
-  private var resizeThread: Thread | Null          = null
-  private val keyboardProtocolNegotiator           = KittyKeyboardProtocolNegotiator()
+  private var resizeHandler: () => Unit                                  = () => ()
+  private var resizeThread: Thread | Null                                = null
+  private val keyboardProtocolNegotiator                                 = KittyKeyboardProtocolNegotiator()
 
   override def start(onInput: scalatui.terminal.TerminalInput => Unit, onResize: () => Unit): Unit =
-    if savedState.isEmpty then
-      if System.console() == null then
+    synchronized {
+      if sttyRunning then throw IllegalStateException("SttyTerminal is already running")
+      reapResizeThread()
+      if hasCleanupObligations then
         throw IllegalStateException(
-          "JVM stty backend requires an interactive TTY; use StreamTerminal for non-interactive streams"
+          "cannot start SttyTerminal while cleanup from the previous generation remains incomplete"
+        )
+      if resizeThread ne null then
+        throw IllegalStateException(
+          "cannot restart SttyTerminal while the previous resize worker is still alive"
         )
       resizeHandler = onResize
-      savedState = Some(runStty("-g"))
+      val state =
+        try runStty("-g")
+        catch
+          case cause: Throwable =>
+            throw IllegalStateException(
+              "SttyTerminal requires accessible interactive /dev/tty; use StreamTerminal for non-interactive streams",
+              cause
+            )
+      savedState = Some(state)
       try
         refreshSize(notify = false)
         runStty("raw -echo min 1 time 0")
+        pasteCleanupPending = true
         write("\u001b[?2004h")
+        inputCleanupPending = true
         super.start(onInput, onResize)
+        sttyRunning = true
         startResizePolling()
       catch
         case e: Throwable =>
+          sttyRunning = false
           stopResizePolling()
-          write("\u001b[?2004l")
-          savedState.foreach(state => scala.util.Try(runStty(state)))
-          savedState = None
+          cleanup().foreach(e.addSuppressed)
           throw e
+    }
 
-  override def stop(): Unit =
+  override def stop(): Unit = synchronized {
+    sttyRunning = false
     stopResizePolling()
-    if savedState.isEmpty then super.stop()
-    else
-      disableKittyKeyboardProtocol()
-      write("\u001b[?2004l")
-      super.stop()
-      savedState.foreach(state => scala.util.Try(runStty(state)))
-      savedState = None
+    cleanup().foreach(throw _)
+  }
+
+  override def write(data: String): Unit =
+    super.write(data)
+    output match
+      case stream: PrintStream if stream.checkError() =>
+        throw IOException(
+          "SttyTerminal output PrintStream reported a suppressed output failure; check the configured output destination"
+        )
+      case _                                          => ()
 
   override def columns: Int = currentColumns
   override def rows: Int    = currentRows
@@ -95,13 +129,16 @@ final class SttyTerminal(
       nowMillis: Long
   ): Boolean =
     val accepted = keyboardProtocolNegotiator.receiveResponse(response, nowMillis)
-    if accepted then write(KittyKeyboardProtocol.EnableSequence)
+    if accepted then
+      kittyCleanupPending = true
+      write(KittyKeyboardProtocol.EnableSequence)
     accepted
 
   override def disableKittyKeyboardProtocol(): Unit =
     if keyboardProtocolState !== KittyKeyboardProtocolState.Inactive then
       write(KittyKeyboardProtocol.DisableSequence)
     keyboardProtocolNegotiator.disable()
+    kittyCleanupPending = false
 
   private[jvm] def refreshSizeForTesting(): Boolean = refreshSize(notify = true)
 
@@ -127,18 +164,58 @@ final class SttyTerminal(
   private def stopResizePolling(): Unit =
     resizePolling = false
     Option(resizeThread).foreach(_.interrupt())
-    resizeThread = null
+
+  private def reapResizeThread(): Unit =
+    if Option(resizeThread).exists(!_.isAlive) then resizeThread = null
 
   private def resizeLoop(): Unit =
-    while resizePolling do
+    try
+      while resizePolling do
+        try
+          Thread.sleep(SttyTerminal.ResizePollMillis)
+          refreshSize(notify = true)
+        catch
+          case _: InterruptedException => resizePolling = false
+          case _: Throwable            => ()
+    finally synchronized {
+        if resizeThread eq Thread.currentThread() then resizeThread = null
+      }
+
+  private def hasCleanupObligations: Boolean =
+    inputCleanupPending || kittyCleanupPending || pasteCleanupPending || savedState.nonEmpty
+
+  private def cleanup(): Option[Throwable] =
+    var failure                                      = Option.empty[Throwable]
+    def attempt(name: String)(action: => Unit): Unit =
       try
-        Thread.sleep(SttyTerminal.ResizePollMillis)
-        refreshSize(notify = true)
+        cleanupFailureForTesting(name).foreach(throw _)
+        action
       catch
-        case _: InterruptedException => resizePolling = false
-        case _: Throwable            => ()
+        case error: Throwable => failure match
+            case Some(first) => first.addSuppressed(error)
+            case None        => failure = Some(error)
+
+    if kittyCleanupPending then attempt("kitty") { disableKittyKeyboardProtocol() }
+    if pasteCleanupPending then
+      attempt("paste") {
+        write("\u001b[?2004l")
+        pasteCleanupPending = false
+      }
+    if inputCleanupPending then
+      attempt("input") {
+        super.stop()
+        inputCleanupPending = false
+      }
+    savedState.foreach { state =>
+      attempt("termios") {
+        runStty(state)
+        savedState = None
+      }
+    }
+    failure
 
   private def runStty(args: String): String =
+    sttyFailureForTesting(args).foreach(throw _)
     val command = Seq("sh", "-c", s"stty $args < /dev/tty")
     val output  = command.!!
     output.trim

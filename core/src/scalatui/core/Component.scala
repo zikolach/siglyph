@@ -9,7 +9,13 @@ import scalatui.terminal.TerminalInput
  * after ANSI/non-printing escapes are ignored.
  */
 trait Component:
-  /** Render this component into terminal lines that fit within `width` visible columns. */
+  /**
+   * Render this component into terminal lines that fit within `width` visible columns.
+   *
+   * The TUI serializes rendering with input callbacks and invokes it without holding the runtime
+   * lifecycle lock. A render may request or flush another render; that follow-up is coalesced and
+   * runs after the current render rather than recursively.
+   */
   def render(width: Int): Vector[String]
 
   /** Legacy/simple input hook for components that do not need result control. */
@@ -19,7 +25,8 @@ trait Component:
    * Handle typed terminal input and report runtime follow-up behavior.
    *
    * The default delegates to [[handleInput]] and requests a render, preserving the previous simple
-   * component contract.
+   * component contract. The callback runs without the TUI lifecycle lock. Reentrant render requests
+   * are queued for the current work-drain owner.
    */
   def handleInputResult(input: TerminalInput): InputResult =
     handleInput(input)

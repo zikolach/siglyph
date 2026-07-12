@@ -1,5 +1,7 @@
 package scalatui.core
 
+import scalatui.TestInputStreams
+
 import scalatui.ansi.Ansi
 import scalatui.components.{
   Editor,
@@ -28,6 +30,7 @@ import scalatui.terminal.{
   VirtualTerminal
 }
 
+import java.util.concurrent.{CountDownLatch, TimeUnit}
 import java.util.concurrent.atomic.AtomicReference
 
 class TUISuite extends munit.FunSuite:
@@ -37,68 +40,56 @@ class TUISuite extends munit.FunSuite:
   final class MutableFrame(var values: Vector[String]) extends Component:
     override def render(width: Int): Vector[String] = values
 
-  final class ImmediateResizeOnStartTerminal extends Terminal:
-    private val writesBuffer = scala.collection.mutable.ArrayBuffer.empty[String]
-
-    override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit = onResize()
-
-    override def stop(): Unit = ()
-
-    override def write(data: String): Unit = writesBuffer += data
-
-    override def columns: Int = 20
-    override def rows: Int    = 5
-
-    override def moveBy(lines: Int): Unit =
-      if lines > 0 then write(s"\u001b[${lines}B")
-      else if lines < 0 then write(s"\u001b[${-lines}A")
-
-    override def hideCursor(): Unit      = write("\u001b[?25l")
-    override def showCursor(): Unit      = write("\u001b[?25h")
-    override def clearLine(): Unit       = write("\u001b[K")
-    override def clearFromCursor(): Unit = write("\u001b[J")
-    override def clearScreen(): Unit     = write("\u001b[2J\u001b[H")
-
-    def output: String = writesBuffer.mkString
-
-  final class ImmediateInputsOnStartTerminal(inputs: Vector[TerminalInput]) extends Terminal:
-    private val writesBuffer = scala.collection.mutable.ArrayBuffer.empty[String]
-
-    override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
-      inputs.foreach(onInput)
-
-    override def stop(): Unit = ()
-
-    override def write(data: String): Unit = writesBuffer += data
-
-    override def columns: Int = 20
-    override def rows: Int    = 5
-
-    override def moveBy(lines: Int): Unit =
-      if lines > 0 then write(s"\u001b[${lines}B")
-      else if lines < 0 then write(s"\u001b[${-lines}A")
-
-    override def hideCursor(): Unit      = write("\u001b[?25l")
-    override def showCursor(): Unit      = write("\u001b[?25h")
-    override def clearLine(): Unit       = write("\u001b[K")
-    override def clearFromCursor(): Unit = write("\u001b[J")
-    override def clearScreen(): Unit     = write("\u001b[2J\u001b[H")
-
-    def output: String = writesBuffer.mkString
-
-  final class ReplayInputDuringStartupTerminal extends Terminal:
-    private val writesBuffer = scala.collection.mutable.ArrayBuffer.empty[String]
-    private var inputHandler = Option.empty[TerminalInput => Unit]
+  final class AsyncStartupTerminal(
+      inputs: Vector[TerminalInput],
+      publishResize: Boolean = false,
+      gatePublication: Boolean = false
+  ) extends Terminal:
+    private val writesBuffer        = scala.collection.mutable.ArrayBuffer.empty[String]
+    private val publicationStarted  = CountDownLatch(1)
+    private val publicationGate     = CountDownLatch(if gatePublication then 1 else 0)
+    private val publicationComplete = CountDownLatch(1)
+    private val publicationFailure  = AtomicReference[Throwable]()
+    private val publicationThread   = AtomicReference[Thread]()
+    private var inputHandler        = Option.empty[TerminalInput => Unit]
 
     override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
       inputHandler = Some(onInput)
-      emit(TerminalInput.Key(TerminalKey.Character("a")))
+      val publisher = Thread(() =>
+        try
+          publicationStarted.countDown()
+          publicationGate.await()
+          if publishResize then onResize()
+          inputs.foreach(onInput)
+        catch case failure: Throwable => publicationFailure.set(failure)
+        finally publicationComplete.countDown()
+      )
+      publisher.setDaemon(true)
+      publicationThread.set(publisher)
+      publisher.start()
+
+    def awaitPublicationStart(): Unit =
+      assert(publicationStarted.await(1, TimeUnit.SECONDS), "startup publisher did not start")
+
+    def releasePublication(): Unit = publicationGate.countDown()
+
+    def joinPublisher(): Unit =
+      val publisher = publicationThread.get()
+      if publisher != null then
+        publisher.join(1000)
+        assert(!publisher.isAlive, "startup publisher did not terminate")
+
+    def publicationFinished: Boolean = publicationComplete.getCount <= 0L
+
+    def awaitPublication(): Unit =
+      assert(publicationComplete.await(1, TimeUnit.SECONDS), "startup publication did not finish")
+      Option(publicationFailure.get()).foreach(throw _)
 
     def emit(input: TerminalInput): Unit = inputHandler.foreach(handler => handler(input))
 
     override def stop(): Unit = ()
 
-    override def write(data: String): Unit = writesBuffer += data
+    override def write(data: String): Unit = writesBuffer.synchronized(writesBuffer += data)
 
     override def columns: Int = 20
     override def rows: Int    = 5
@@ -113,7 +104,7 @@ class TUISuite extends munit.FunSuite:
     override def clearFromCursor(): Unit = write("\u001b[J")
     override def clearScreen(): Unit     = write("\u001b[2J\u001b[H")
 
-    def output: String = writesBuffer.mkString
+    def output: String = writesBuffer.synchronized(writesBuffer.mkString)
 
   final class StartFailingTerminal extends Terminal:
     private val writesBuffer = scala.collection.mutable.ArrayBuffer.empty[String]
@@ -296,20 +287,44 @@ class TUISuite extends munit.FunSuite:
     )
     assert(output.contains("hello" + TUI.LineReset), output)
 
-  test("alternate-screen mode enters before resize callback render during terminal start"):
-    val terminal = ImmediateResizeOnStartTerminal()
+  test("alternate-screen mode handles independent resize publication during terminal start"):
+    val terminal = AsyncStartupTerminal(Vector.empty, publishResize = true)
     val tui      = TUI(terminal, TUIOptions(screenMode = TUIScreenMode.Alternate))
     tui.addChild(MutableLine("hello"))
 
     tui.start()
+    terminal.awaitPublication()
 
     val output = terminal.output
     assert(output.startsWith(TUI.AlternateScreenEnter), output)
     assert(output.indexOf(TUI.AlternateScreenEnter) < output.indexOf(TUI.SyncStart), output)
     assert(output.contains("hello" + TUI.LineReset), output)
 
-  test("startup input buffering preserves input order"):
-    val terminal  = ImmediateInputsOnStartTerminal(Vector(
+  test("start returns while independent startup publication remains gated"):
+    val terminal      = AsyncStartupTerminal(Vector.empty, gatePublication = true)
+    val tui           = TUI(terminal)
+    val startReturned = CountDownLatch(1)
+    val startFailure  = AtomicReference[Throwable]()
+    val startThread   = Thread(() =>
+      try tui.start()
+      catch case failure: Throwable => startFailure.set(failure)
+      finally startReturned.countDown()
+    )
+
+    startThread.start()
+    try
+      terminal.awaitPublicationStart()
+      assert(startReturned.await(1, TimeUnit.SECONDS), "TUI start waited for startup publisher")
+      Option(startFailure.get()).foreach(throw _)
+      assert(!terminal.publicationFinished, "startup publication completed while gated")
+    finally
+      terminal.releasePublication()
+      terminal.joinPublisher()
+      startThread.join(1000)
+      assert(!startThread.isAlive, "TUI start thread did not terminate")
+
+  test("independent startup input publication preserves input order"):
+    val terminal  = AsyncStartupTerminal(Vector(
       TerminalInput.Key(TerminalKey.Character("a")),
       TerminalInput.Key(TerminalKey.Character("b")),
       TerminalInput.Key(TerminalKey.Character("c"))
@@ -328,11 +343,14 @@ class TUISuite extends munit.FunSuite:
     tui.setFocus(component)
 
     tui.start()
+    terminal.awaitPublication()
 
     assertEquals(received.toVector, Vector("a", "b", "c"))
 
-  test("startup input buffering preserves order for input emitted during replay"):
-    val terminal  = ReplayInputDuringStartupTerminal()
+  test("input emitted while startup input drains preserves order"):
+    val terminal  = AsyncStartupTerminal(Vector(
+      TerminalInput.Key(TerminalKey.Character("a"))
+    ))
     val received  = scala.collection.mutable.ArrayBuffer.empty[String]
     val component = new Component:
       override def render(width: Int): Vector[String] = Vector(received.mkString)
@@ -351,6 +369,7 @@ class TUISuite extends munit.FunSuite:
     tui.setFocus(component)
 
     tui.start()
+    terminal.awaitPublication()
 
     assertEquals(received.toVector, Vector("a", "b"))
 
@@ -775,7 +794,8 @@ class TUISuite extends munit.FunSuite:
     assert(terminal.output.contains("b Go"), terminal.output)
 
     terminal.clearWrites()
-    assertEquals(tui.removeChild(loader), true)
+    tui.removeChild(loader)
+    assert(!tui.children.exists(_ eq loader))
     loader.setMessage("detached")
     tui.flushRender()
     assertEquals(terminal.output, "")
@@ -1010,92 +1030,85 @@ class TUISuite extends munit.FunSuite:
     assert(terminal.output.contains("\u001b]9;4;3\u0007"), terminal.output)
     assert(terminal.output.contains("\u001b]9;4;0\u0007"), terminal.output)
 
-  test("TUI background color query writes OSC 11 and resolves valid response"):
+  test("TUI background color query completes with success"):
     val terminal = VirtualTerminal(20, 5)
     val tui      = TUI(terminal)
     tui.start()
     terminal.clearWrites()
+    var results  = Vector.empty[TerminalQueryResult[RgbColor]]
 
-    var result = Option.empty[RgbColor]
-    val thread = Thread(() => result = tui.queryTerminalBackgroundColor(timeoutMillis = 1000))
-    thread.start()
-    awaitOutput(terminal, TerminalColorProtocol.BackgroundColorQuery)
-    terminal.sendInput(TerminalInput.Raw("\u001b]11;#112233\u0007"))
-    thread.join(1000)
-
-    assertEquals(thread.isAlive, false)
-    assertEquals(result, Some(RgbColor(17, 34, 51)))
-
-  test("TUI background color query times out without valid response"):
-    val terminal = VirtualTerminal(20, 5)
-    val tui      = TUI(terminal)
-    tui.start()
-    terminal.clearWrites()
-
-    assertEquals(tui.queryTerminalBackgroundColor(timeoutMillis = 1), None)
+    tui.queryTerminalBackgroundColor(result => results :+= result)
     assert(terminal.output.contains(TerminalColorProtocol.BackgroundColorQuery), terminal.output)
+    TestInputStreams.parse("\u001b]11;#112233\u0007").foreach(terminal.sendInput)
 
-  test("TUI background color query returns none without writing when stopped"):
+    assertEquals(results, Vector(TerminalQueryResult.Success(RgbColor(17, 34, 51))))
+
+  test("TUI queries complete recognized malformed replies as invalid responses"):
+    val terminal   = VirtualTerminal(20, 5)
+    val tui        = TUI(terminal)
+    tui.start()
+    var background = Vector.empty[TerminalQueryResult[RgbColor]]
+    var scheme     = Vector.empty[TerminalQueryResult[TerminalColorScheme]]
+
+    tui.queryTerminalBackgroundColor(result => background :+= result)
+    TestInputStreams.parse("\u001b]11;not-a-color\u0007").foreach(terminal.sendInput)
+    tui.queryTerminalColorScheme(result => scheme :+= result)
+    TestInputStreams.parse("\u001b[?997;3n").foreach(terminal.sendInput)
+
+    assertEquals(background, Vector(TerminalQueryResult.InvalidResponse))
+    assertEquals(scheme, Vector(TerminalQueryResult.InvalidResponse))
+
+  test("TUI stopped query completes synchronously without writing"):
     val terminal = VirtualTerminal(20, 5)
     val tui      = TUI(terminal)
+    var result   = Option.empty[TerminalQueryResult[RgbColor]]
 
-    assertEquals(tui.queryTerminalBackgroundColor(timeoutMillis = 1000), None)
+    val cancel = tui.queryTerminalBackgroundColor(value => result = Some(value))
+
+    assertEquals(result, Some(TerminalQueryResult.Stopped))
     assertEquals(terminal.output, "")
+    cancel()
+    cancel()
 
+  test("TUI query cancellation is idempotent and silent"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal)
     tui.start()
-    tui.stop()
-    terminal.clearWrites()
+    var calls    = 0
 
-    assertEquals(tui.queryTerminalBackgroundColor(timeoutMillis = 1000), None)
-    assertEquals(terminal.output, "")
+    val cancel = tui.queryTerminalColorScheme(_ => calls += 1)
+    cancel()
+    cancel()
+    TestInputStreams.parse("\u001b[?997;2n").foreach(terminal.sendInput)
 
-  test("TUI background color query removes pending query when write fails"):
+    assertEquals(calls, 0)
+
+  test("TUI query emission failure completes with failed and stops"):
     val terminal = QueryFailingTerminal(TerminalColorProtocol.BackgroundColorQuery)
     val tui      = TUI(terminal)
     tui.start()
+    var result   = Option.empty[TerminalQueryResult[RgbColor]]
 
-    intercept[RuntimeException](tui.queryTerminalBackgroundColor(timeoutMillis = 1000))
+    tui.queryTerminalBackgroundColor(value => result = Some(value))
 
-    assertEquals(pendingQueryCount(tui, "pendingBackgroundColorQueries"), 0)
+    assert(result.exists {
+      case TerminalQueryResult.Failed(cause) => cause.getMessage.equals("write failed")
+      case _                                 => false
+    })
 
-  test("TUI color-scheme query writes DSR and resolves valid response"):
+  test("TUI color-scheme query completes with success"):
     val terminal = VirtualTerminal(20, 5)
     val tui      = TUI(terminal)
     tui.start()
-    terminal.clearWrites()
+    var results  = Vector.empty[TerminalQueryResult[TerminalColorScheme]]
 
-    var result = Option.empty[TerminalColorScheme]
-    val thread = Thread(() => result = tui.queryTerminalColorScheme(timeoutMillis = 1000))
-    thread.start()
-    awaitOutput(terminal, TerminalColorProtocol.ColorSchemeQuery)
-    terminal.sendInput(TerminalInput.Raw("\u001b[?997;2n"))
-    thread.join(1000)
+    tui.queryTerminalColorScheme(result => results :+= result)
+    TestInputStreams.parse("\u001b[?997;2n").foreach(terminal.sendInput)
 
-    assertEquals(thread.isAlive, false)
-    assertEquals(result, Some(TerminalColorScheme.Light))
-
-  test("TUI color-scheme query returns none without writing when stopped"):
-    val terminal = VirtualTerminal(20, 5)
-    val tui      = TUI(terminal)
-
-    assertEquals(tui.queryTerminalColorScheme(timeoutMillis = 1000), None)
-    assertEquals(terminal.output, "")
-
-    tui.start()
-    tui.stop()
-    terminal.clearWrites()
-
-    assertEquals(tui.queryTerminalColorScheme(timeoutMillis = 1000), None)
-    assertEquals(terminal.output, "")
-
-  test("TUI color-scheme query removes pending query when write fails"):
-    val terminal = QueryFailingTerminal(TerminalColorProtocol.ColorSchemeQuery)
-    val tui      = TUI(terminal)
-    tui.start()
-
-    intercept[RuntimeException](tui.queryTerminalColorScheme(timeoutMillis = 1000))
-
-    assertEquals(pendingQueryCount(tui, "pendingColorSchemeQueries"), 0)
+    assertEquals(
+      results,
+      Vector(TerminalQueryResult.Success(TerminalColorScheme.Light))
+    )
 
   test("color-scheme notifications can be enabled disabled and unsubscribed"):
     val terminal = VirtualTerminal(20, 5)
@@ -1105,7 +1118,7 @@ class TUISuite extends munit.FunSuite:
 
     tui.start()
     terminal.clearWrites()
-    terminal.sendInput(TerminalInput.Raw("\u001b[?997;1n"))
+    TestInputStreams.parse("\u001b[?997;1n").foreach(terminal.sendInput)
     assertEquals(schemes, Vector.empty)
 
     tui.setTerminalColorSchemeNotifications(enabled = true)
@@ -1113,12 +1126,12 @@ class TUISuite extends munit.FunSuite:
       terminal.output.contains(TerminalColorProtocol.EnableColorSchemeNotifications),
       terminal.output
     )
-    terminal.sendInput(TerminalInput.Raw("\u001b[?997;1n"))
+    TestInputStreams.parse("\u001b[?997;1n").foreach(terminal.sendInput)
     assertEquals(schemes, Vector(TerminalColorScheme.Dark))
 
     terminal.clearWrites()
     remove()
-    terminal.sendInput(TerminalInput.Raw("\u001b[?997;2n"))
+    TestInputStreams.parse("\u001b[?997;2n").foreach(terminal.sendInput)
     assertEquals(schemes, Vector(TerminalColorScheme.Dark))
 
     tui.setTerminalColorSchemeNotifications(enabled = false)
@@ -1140,7 +1153,7 @@ class TUISuite extends munit.FunSuite:
 
     tui.start()
     tui.setTerminalColorSchemeNotifications(enabled = true)
-    terminal.sendInput(TerminalInput.Raw("\u001b[?997;1n"))
+    TestInputStreams.parse("\u001b[?997;1n").foreach(terminal.sendInput)
 
     assertEquals(joined, true)
 
@@ -1157,9 +1170,10 @@ class TUISuite extends munit.FunSuite:
     tui.setFocus(component)
     tui.start()
 
-    terminal.sendInput(TerminalInput.Raw("\u001b]11;not-a-color\u0007"))
-    terminal.sendInput(TerminalInput.Raw("\u001b[?997;1n"))
-    terminal.sendInput(TerminalInput.Raw("\u001b[?997;3n"))
+    tui.queryTerminalBackgroundColor(_ => ())
+    TestInputStreams.parse("\u001b]11;not-a-color\u0007").foreach(terminal.sendInput)
+    TestInputStreams.parse("\u001b[?997;1n").foreach(terminal.sendInput)
+    TestInputStreams.parse("\u001b[?997;3n").foreach(terminal.sendInput)
     terminal.sendInput(TerminalInput.Key(TerminalKey.Character("x")))
 
     assertEquals(delivered, Vector(TerminalInput.Key(TerminalKey.Character("x"))))
@@ -1174,7 +1188,7 @@ class TUISuite extends munit.FunSuite:
     }
     tui.start()
 
-    terminal.sendInput(TerminalInput.Raw("\u001b[6;12;24t"))
+    TestInputStreams.parse("\u001b[6;12;24t").foreach(terminal.sendInput)
     terminal.sendInput(TerminalInput.Key(TerminalKey.Character("x")))
 
     assertEquals(delivered, Vector(TerminalInput.Key(TerminalKey.Character("x"))))
@@ -1192,7 +1206,7 @@ class TUISuite extends munit.FunSuite:
     tui.setFocus(component)
     tui.start()
 
-    terminal.sendInput(TerminalInput.Raw("\u001b[6;12;24t"))
+    TestInputStreams.parse("\u001b[6;12;24t").foreach(terminal.sendInput)
     assertEquals(delivered, Vector.empty)
     assertEquals(TerminalImageProtocol.cellDimensions, ImageCellDimensions(24, 12))
 
@@ -1207,7 +1221,7 @@ class TUISuite extends munit.FunSuite:
     tui.start()
     terminal.clearWrites()
 
-    terminal.sendInput(TerminalInput.Raw("\u001b[6;10;20t"))
+    TestInputStreams.parse("\u001b[6;10;20t").foreach(terminal.sendInput)
 
     assert(terminal.output.contains("20x10"), terminal.output)
 
@@ -1224,7 +1238,7 @@ class TUISuite extends munit.FunSuite:
     tui.setFocus(component)
     tui.start()
 
-    terminal.sendInput(TerminalInput.Raw("\u001b[6;0;24t"))
+    TestInputStreams.parse("\u001b[6;0;24t").foreach(terminal.sendInput)
     terminal.sendInput(TerminalInput.Key(TerminalKey.Character("x")))
 
     assertEquals(delivered, Vector(TerminalInput.Key(TerminalKey.Character("x"))))
@@ -1240,16 +1254,16 @@ class TUISuite extends munit.FunSuite:
     if needle.isEmpty then 0
     else value.sliding(needle.length).count(_ == needle)
 
-  private def awaitOutput(terminal: VirtualTerminal, expected: String): Unit =
-    val deadline = System.currentTimeMillis() + 1000L
-    while !terminal.output.contains(expected) && System.currentTimeMillis() < deadline do
-      Thread.sleep(1)
-    assert(terminal.output.contains(expected), terminal.output)
+  test("typed escape exits when configured"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal)
+    tui.exitsOnEscape = true
+    tui.start()
 
-  private def pendingQueryCount(tui: TUI, fieldName: String): Int =
-    val field = classOf[TUI].getDeclaredField(fieldName)
-    field.setAccessible(true)
-    field.get(tui).asInstanceOf[scala.collection.mutable.ArrayBuffer[?]].length
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Escape))
+    tui.run()
+
+    assertEquals(terminal.isRunning, false)
 
   test("run exits on ctrl+c and stop positions cursor below content"):
     val terminal = VirtualTerminal(20, 5)

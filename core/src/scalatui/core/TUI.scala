@@ -10,7 +10,10 @@ import scalatui.terminal.{
   TerminalColorScheme,
   TerminalImageProtocol,
   TerminalInput,
-  TerminalKey
+  TerminalInputChunk,
+  TerminalKey,
+  TerminalRawKind,
+  TerminalRawTermination
 }
 
 import scala.collection.mutable.ArrayBuffer
@@ -48,22 +51,49 @@ final case class TUIOptions(
     screenMode: TUIScreenMode = TUIScreenMode.Normal
 ) derives CanEqual
 
-/** Main terminal UI runtime with a small differential renderer. */
+/**
+ * Main terminal UI runtime with a differential renderer and a synchronous, single-owner work drain.
+ * Application callbacks run without the lifecycle lock; backend output is serialized by a separate
+ * write boundary that is never nested with that lock.
+ */
 final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     extends TUIContext,
       OverlayHost:
-  private val root                                    = Container()
-  private val lifecycleLock                           = Object()
-  private val overlayStack                            = ArrayBuffer.empty[TUI.OverlayEntry]
+  private val root                            = Container()
+  private val lifecycleLock                   = Object()
+  private val terminalWriteLock               = Object()
+  private val overlayStack                    = ArrayBuffer.empty[TUI.OverlayEntry]
+  private val pendingIngress                  = scala.collection.mutable.ArrayDeque.empty[TUI.Ingress]
+  private var replayContinuation              = Option.empty[TUI.ReplayContinuation]
+  private val retainedQueryCompletions        = ArrayBuffer.empty[TUI.QueryCompletion[?]]
+  private val postRestorationQueryCompletions = ArrayBuffer.empty[TUI.QueryCompletion[?]]
+  private var postRestorationCutoff           = false
+
+  private val pendingActions                          = ArrayBuffer.empty[() => Unit]
+  private val pendingControlOutput                    = ArrayBuffer.empty[() => Unit]
+  private val pendingStructural                       = ArrayBuffer.empty[TUI.StructuralOperation]
+  private var desiredChildren                         = Vector.empty[TUI.ChildEntry]
+  private var committedChildren                       = Vector.empty[TUI.ChildEntry]
+  private var nextChildEntryId                        = 0L
+  private var lifecycleState: TUI.LifecycleState      = TUI.LifecycleState.Stopped
+  private var startupOwner                            = false
+  private var drainOwned                              = false
+  private var lastOrdinaryCategory                    = TUI.OrdinaryCategory.Render
+  private var cleanupOwned                            = false
+  private var resizeGeneration                        = 0L
+  @volatile private var latestOverlayVisibility       = false
+  private var queryWriteReservations                  = 0
+  private var nextQueryFlightId                       = 0L
+  private var nextQuerySubscriberId                   = 0L
   private var previousLines                           = Vector.empty[String]
   private var previousWidth                           = 0
   private var previousHeight                          = 0
   private var cursorRow                               = 0
   private var focusedComponent: Option[Component]     = None
   private var baseFocusedComponent: Option[Component] = None
-  private var running                                 = false
   private var exitRequested                           = false
   private var renderRequested                         = false
+  private var forceRenderRequested                    = false
   private var clearRequested                          = false
   private var autoWrapRestoreNeeded                   = false
   private var alternateScreenEntered                  = false
@@ -72,8 +102,9 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   private var runtimeFailure                          = Option.empty[Throwable]
   private var nextOverlayId                           = 0L
   private var nextFocusOrder                          = 0L
-  private val pendingBackgroundColorQueries           = ArrayBuffer.empty[TUI.PendingQuery[RgbColor]]
-  private val pendingColorSchemeQueries               = ArrayBuffer.empty[TUI.PendingQuery[TerminalColorScheme]]
+  private var backgroundColorFlight                   = Option.empty[TUI.QueryFlight[RgbColor]]
+  private var colorSchemeFlight                       = Option.empty[TUI.QueryFlight[TerminalColorScheme]]
+  private var rawCorrelation                          = Option.empty[TUI.RawCorrelation]
   private val terminalColorSchemeListeners            = ArrayBuffer.empty[TerminalColorScheme => Unit]
   private var terminalColorSchemeNotificationsEnabled = false
   private val inputListeners                          = ArrayBuffer.empty[TerminalInput => InputResult]
@@ -82,19 +113,31 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   var exitsOnEscape: Boolean   = false
 
   def addChild(component: Component): Unit =
-    attachContext(component)
-    root.addChild(component)
+    publishStructural { () =>
+      nextChildEntryId += 1
+      val entry = TUI.ChildEntry(nextChildEntryId, component)
+      desiredChildren :+= entry
+      TUI.StructuralOperation.Add(entry)
+    }
 
-  def removeChild(component: Component): Boolean =
-    val removed = root.removeChild(component)
-    if removed then detachContext(component)
-    removed
+  def removeChild(component: Component): Unit =
+    publishStructural { () =>
+      desiredChildren.indexWhere(_.component eq component) match
+        case -1    => TUI.StructuralOperation.NoOp
+        case index =>
+          val entry = desiredChildren(index)
+          desiredChildren = desiredChildren.patch(index, Nil, 1)
+          TUI.StructuralOperation.Remove(entry.id)
+    }
 
   def clear(): Unit =
-    root.children.foreach(detachContext)
-    root.clear()
+    publishStructural { () =>
+      val ids = desiredChildren.map(_.id).toSet
+      desiredChildren = Vector.empty
+      TUI.StructuralOperation.Clear(ids)
+    }
 
-  def children: Vector[Component] = root.children
+  def children: Vector[Component] = lifecycleLock.synchronized(desiredChildren.map(_.component))
 
   /** Number of final rendered lines sanitized because they exceeded terminal width. */
   def sanitizedLineCount: Int = lifecycleLock.synchronized(sanitizationCount)
@@ -107,55 +150,68 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
    * Set the terminal window title when the backend supports title operations.
    *
    * Unsupported terminals return `false` and emit no title sequence. Control characters are removed
-   * before the backend writes the title protocol sequence.
+   * before the backend writes the title protocol sequence. During start or running, `true` means
+   * non-discardable output was accepted and will precede any later cleanup. Stopping rejects it;
+   * stopped runtimes apply supported output directly.
    */
-  def setTerminalTitle(title: String): Boolean = Terminal.setTitle(terminal, title)
+  def setTerminalTitle(title: String): Boolean =
+    scheduleControlOutput(terminal.isInstanceOf[scalatui.terminal.TerminalTitleSupport]) {
+      writeTerminal(Terminal.setTitle(terminal, title))
+      ()
+    }
 
   /**
    * Set terminal progress state when the backend supports progress operations.
    *
-   * The operation is fire-and-forget. Unsupported terminals return `false` and emit no progress
-   * sequence.
+   * Unsupported terminals return `false`. Active runtimes serialize accepted non-discardable output
+   * before later cleanup; stopping rejects it and stopped runtimes apply it directly.
    */
-  def setTerminalProgress(active: Boolean): Boolean = Terminal.setProgress(terminal, active)
+  def setTerminalProgress(active: Boolean): Boolean =
+    scheduleControlOutput(terminal.isInstanceOf[scalatui.terminal.TerminalProgressSupport]) {
+      writeTerminal(Terminal.setProgress(terminal, active))
+      ()
+    }
 
   /**
    * Query the terminal default background color using OSC 11.
    *
-   * `TUI` owns request/response correlation. Terminal backends only write requests and deliver raw
-   * protocol replies. Returns `None` without writing when the TUI is not running. Returns `None`
-   * when the terminal does not answer with a valid RGB response before `timeoutMillis` expires.
+   * Subscribers share one terminal request and complete in subscription order on the runtime drain.
+   * Completion may occur before this method returns. The returned cancellation is idempotent and
+   * silent; callers own any timeout scheduling. No request is emitted outside `Running`. In
+   * `Stopped`, `Stopped` completion is invoked synchronously because no runtime owner exists.
    */
-  def queryTerminalBackgroundColor(timeoutMillis: Long = 1000L): Option[RgbColor] =
-    val query = registerPendingQuery(
-      pendingBackgroundColorQueries,
-      TerminalColorProtocol.BackgroundColorQuery
+  def queryTerminalBackgroundColor(
+      onComplete: TerminalQueryResult[RgbColor] => Unit
+  ): () => Unit =
+    subscribeQuery(
+      () => backgroundColorFlight,
+      flight => backgroundColorFlight = flight,
+      TerminalColorProtocol.BackgroundColorQuery,
+      onComplete
     )
-    query.flatMap { pending =>
-      val result = pending.await(timeoutMillis)
-      if result.isEmpty then lifecycleLock.synchronized(pendingBackgroundColorQueries -= pending)
-      result
-    }
 
   /**
    * Query the terminal color scheme using DSR `CSI ? 996 n`.
    *
-   * Valid terminal reports are parsed as [[scalatui.terminal.TerminalColorScheme.Dark]] or
-   * [[scalatui.terminal.TerminalColorScheme.Light]]. Returns `None` without writing when the TUI is
-   * not running. Returns `None` when no valid report arrives before `timeoutMillis` expires.
+   * Subscribers share one terminal request and complete in subscription order on the runtime drain.
+   * Completion may occur before this method returns. The returned cancellation is idempotent and
+   * silent; callers own any timeout scheduling. No request is emitted outside `Running`. In
+   * `Stopped`, `Stopped` completion is invoked synchronously because no runtime owner exists.
    */
-  def queryTerminalColorScheme(timeoutMillis: Long = 1000L): Option[TerminalColorScheme] =
-    val query = registerPendingQuery(
-      pendingColorSchemeQueries,
-      TerminalColorProtocol.ColorSchemeQuery
+  def queryTerminalColorScheme(
+      onComplete: TerminalQueryResult[TerminalColorScheme] => Unit
+  ): () => Unit =
+    subscribeQuery(
+      () => colorSchemeFlight,
+      flight => colorSchemeFlight = flight,
+      TerminalColorProtocol.ColorSchemeQuery,
+      onComplete
     )
-    query.flatMap { pending =>
-      val result = pending.await(timeoutMillis)
-      if result.isEmpty then lifecycleLock.synchronized(pendingColorSchemeQueries -= pending)
-      result
-    }
 
-  /** Subscribe to terminal color-scheme reports. Returns a function that removes the listener. */
+  /**
+   * Subscribe to terminal color-scheme reports. Listeners run on the work drain without the
+   * lifecycle lock. Returns a function that removes the listener.
+   */
   def onTerminalColorSchemeChange(listener: TerminalColorScheme => Unit): () => Unit =
     lifecycleLock.synchronized(terminalColorSchemeListeners += listener)
     () => lifecycleLock.synchronized(terminalColorSchemeListeners -= listener)
@@ -167,17 +223,25 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
    * not running, the setting is applied on the next start. Unsupported terminals can ignore the
    * sequence; incoming color-scheme reports are still consumed before component input routing.
    */
-  def setTerminalColorSchemeNotifications(enabled: Boolean): Unit = lifecycleLock.synchronized {
-    if terminalColorSchemeNotificationsEnabled !== enabled then
-      terminalColorSchemeNotificationsEnabled = enabled
-      if running then
-        terminal.write(
+  def setTerminalColorSchemeNotifications(enabled: Boolean): Unit =
+    val publish = lifecycleLock.synchronized {
+      if terminalColorSchemeNotificationsEnabled === enabled then false
+      else
+        terminalColorSchemeNotificationsEnabled = enabled
+        lifecycleState === TUI.LifecycleState.Running
+    }
+    if publish then
+      scheduleControlOutput(supported = true) {
+        writeTerminal(terminal.write(
           if enabled then TerminalColorProtocol.EnableColorSchemeNotifications
           else TerminalColorProtocol.DisableColorSchemeNotifications
-        )
-  }
+        ))
+      }
 
   override def setFocus(component: Component | Null): Unit =
+    publishAction(() => setFocusNow(component))
+
+  private def setFocusNow(component: Component | Null): Unit =
     focusedComponent.foreach {
       case focusable: Focusable => focusable.focused = false
       case _                    => ()
@@ -195,30 +259,33 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
       component: Component,
       options: OverlayOptions = OverlayOptions()
   ): OverlayHandle =
-    lifecycleLock.synchronized {
-      attachContext(component)
+    val id    = lifecycleLock.synchronized {
       nextOverlayId += 1
+      OverlayId(nextOverlayId)
+    }
+    val entry = TUI.OverlayEntry(
+      id = id,
+      component = component,
+      options = options,
+      preFocus = None,
+      hidden = false,
+      focusOrder = 0L
+    )
+    publishAction(() => {
+      entry.preFocus = focusedComponent
       nextFocusOrder += 1
-      val entry = TUI.OverlayEntry(
-        id = OverlayId(nextOverlayId),
-        component = component,
-        options = options,
-        preFocus = focusedComponent,
-        hidden = false,
-        focusOrder = nextFocusOrder
-      )
+      entry.focusOrder = nextFocusOrder
+      attachContext(component)
       overlayStack += entry
       if entry.options.focusCapturing && isOverlayVisible(entry) then focusOverlay(entry)
+      latestOverlayVisibility = overlayStack.exists(isOverlayVisible)
       requestRender()
-      makeOverlayHandle(entry)
-    }
+    })
+    makeOverlayHandle(entry)
 
-  override def hideOverlay(): Unit = lifecycleLock.synchronized {
-    topVisibleOverlay.foreach(removeOverlay)
-  }
+  override def hideOverlay(): Unit = publishAction(() => topVisibleOverlay.foreach(removeOverlay))
 
-  override def hasOverlay: Boolean =
-    lifecycleLock.synchronized(overlayStack.exists(isOverlayVisible))
+  override def hasOverlay: Boolean = latestOverlayVisibility
 
   /**
    * Register a typed global input listener.
@@ -237,85 +304,57 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
 
   def start(): Unit =
     val shouldStart = lifecycleLock.synchronized {
-      if running then false
+      if (lifecycleState !== TUI.LifecycleState.Stopped) || drainOwned then false
       else
         exitRequested = false
         runtimeFailure = None
-        running = true
+        lifecycleState = TUI.LifecycleState.Starting
+        startupOwner = true
         true
     }
     if shouldStart then
-      var startupCallbacksReady                          = false
-      var startupInputs                                  = List.empty[TerminalInput]
-      var startupResizeRequested                         = false
-      def deferOrHandleInput(input: TerminalInput): Unit =
-        safeRuntimeCallback {
-          val shouldHandle = lifecycleLock.synchronized {
-            if startupCallbacksReady then true
-            else
-              startupInputs = input :: startupInputs
-              false
-          }
-          if shouldHandle then handleInput(input)
-        }
-      def deferOrHandleResize(): Unit                    =
-        safeRuntimeCallback {
-          val shouldHandle = lifecycleLock.synchronized {
-            if startupCallbacksReady then true
-            else
-              startupResizeRequested = true
-              false
-          }
-          if shouldHandle then
-            requestRender()
-            flushRender()
-        }
       try
-        terminal.start(deferOrHandleInput, () => deferOrHandleResize())
-        enterAlternateScreenIfConfigured()
-        if terminalColorSchemeNotificationsEnabled then
-          terminal.write(TerminalColorProtocol.EnableColorSchemeNotifications)
-        TerminalImageProtocol.resetCellDimensions()
-        terminal.hideCursor()
-        terminal.write(TerminalImageProtocol.QueryCellDimensions)
-        requestRenderInternal(force = true, clear = isAlternateScreenMode)
-        flushRender()
-        // Keep callbacks deferred until replay drains all batches. Input delivered during replay
-        // stays buffered so it cannot overtake earlier startup input.
-        var startupReplayComplete = false
-        while !startupReplayComplete do
-          val (deferredInputs, deferredResizeRequested) = lifecycleLock.synchronized {
-            val inputs = startupInputs.reverse
-            val resize = startupResizeRequested
-            startupInputs = Nil
-            startupResizeRequested = false
-            inputs -> resize
-          }
-          deferredInputs.foreach(input => safeRuntimeCallback(handleInput(input)))
-          if deferredResizeRequested then
-            safeRuntimeCallback {
-              requestRender()
-              flushRender()
-            }
-          startupReplayComplete = lifecycleLock.synchronized {
-            if startupInputs.isEmpty && !startupResizeRequested then
-              startupCallbacksReady = true
-              true
-            else false
-          }
+        writeTerminal(terminal.start(
+          input => safeRuntimeCallback(publishInput(input)),
+          () => safeRuntimeCallback(publishResize())
+        ))
+        if startupMayContinue then
+          enterAlternateScreenIfConfigured()
+        if startupMayContinue && terminalColorSchemeNotificationsEnabled then
+          writeTerminal(terminal.write(TerminalColorProtocol.EnableColorSchemeNotifications))
+        if startupMayContinue then
+          TerminalImageProtocol.resetCellDimensions()
+          writeTerminal(terminal.hideCursor())
+          writeTerminal(terminal.write(TerminalImageProtocol.QueryCellDimensions))
+          requestRenderInternal(force = true, clear = isAlternateScreenMode)
+        lifecycleLock.synchronized {
+          startupOwner = false
+          if lifecycleState === TUI.LifecycleState.Starting then
+            lifecycleState = TUI.LifecycleState.Running
+        }
+        drainOrReturn()
+        finishDeferredCleanupIfNeeded()
+        runtimeFailure.foreach(throw _)
       catch
         case e: Throwable =>
-          try stop()
+          recordFailure(e)
+          lifecycleLock.synchronized { startupOwner = false }
+          try finishDeferredCleanupIfNeeded()
           catch case cleanupFailure: Throwable => e.addSuppressed(cleanupFailure)
-          throw e
+          throw runtimeFailure.getOrElse(e)
 
+  /** Start, wait for exit, and return only after deferred cleanup reaches `Stopped`. */
   def run(): Unit =
     try
       start()
       lifecycleLock.synchronized {
-        while running && !exitRequested do lifecycleLock.wait()
+        while lifecycleState === TUI.LifecycleState.Running && !exitRequested do
+          lifecycleLock.wait()
       }
     finally stop()
+    lifecycleLock.synchronized {
+      while lifecycleState !== TUI.LifecycleState.Stopped do lifecycleLock.wait()
+    }
     runtimeFailure.foreach(throw _)
 
   override def requestExit(): Unit = lifecycleLock.synchronized {
@@ -323,120 +362,616 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     lifecycleLock.notifyAll()
   }
 
-  def stop(): Unit = lifecycleLock.synchronized {
-    if running then
-      running = false
-      try
-        parkCursorBelowContentIfNeeded()
-        if terminalColorSchemeNotificationsEnabled then
-          terminal.write(TerminalColorProtocol.DisableColorSchemeNotifications)
-        Terminal.drainInput(terminal)
-      finally
-        try restoreAutoWrapIfNeeded()
-        finally
-          try terminal.showCursor()
-          finally
-            try exitAlternateScreenIfNeeded()
-            finally
-              try terminal.stop()
-              finally lifecycleLock.notifyAll()
-  }
+  /**
+   * Request terminal restoration. An uncontended caller performs cleanup synchronously. A reentrant
+   * or concurrent caller marks `Stopping` and returns without waiting; the active startup or drain
+   * owner completes single-owner cleanup. Repeated calls do not duplicate restoration.
+   */
+  def stop(): Unit =
+    val own = lifecycleLock.synchronized {
+      lifecycleState match
+        case TUI.LifecycleState.Stopped | TUI.LifecycleState.Stopping |
+            TUI.LifecycleState.Cleaning => false
+        case _ =>
+          transitionToStoppingLocked()
+          !startupOwner && !drainOwned && queryWriteReservations === 0
+    }
+    if own then finishDeferredCleanupIfNeeded(propagateCleanupFailure = true)
 
-  override def requestRender(force: Boolean = false): Unit = lifecycleLock.synchronized {
+  override def requestRender(force: Boolean = false): Unit =
     requestRenderInternal(force = force, clear = false)
-  }
 
   private def requestRenderInternal(force: Boolean, clear: Boolean): Unit =
     lifecycleLock.synchronized {
-      if force then
-        previousLines = Vector.empty
-        previousWidth = if clear then -1 else 0
-        previousHeight = if clear then -1 else 0
-        cursorRow = 0
-      if clear then clearRequested = true
-      renderRequested = true
+      if lifecycleState === TUI.LifecycleState.Starting ||
+        lifecycleState === TUI.LifecycleState.Running
+      then
+        if force then
+          forceRenderRequested = true
+        if clear then clearRequested = true
+        renderRequested = true
     }
 
-  override def flushRender(): Unit = lifecycleLock.synchronized {
-    if renderRequested then
-      renderRequested = false
-      renderNow()
-  }
+  override def flushRender(): Unit = drainOrReturn()
 
   private def handleInput(input: TerminalInput): Unit =
-    val notifications = lifecycleLock.synchronized {
-      consumeTerminalProtocolReply(input) match
-        case Some(value) => value
-        case None        =>
-          if routeGlobalInputListeners(input) !== InputResult.Ignored then Vector.empty
-          else if isIgnoredKeyRelease(input) then Vector.empty
-          else if handlesControlC && isCtrl(input, "c") then
-            requestExit()
-            Vector.empty
-          else if exitsOnEscape && (input === TerminalInput.Key(TerminalKey.Escape)) then
-            requestExit()
-            Vector.empty
-          else
-            inputTarget.map(_.handleInputResult(input)).foreach(handleInputResult)
-            Vector.empty
+    if routeGlobalInputListeners(input) !== InputResult.Ignored then ()
+    else if isIgnoredKeyRelease(input) then ()
+    else if handlesControlC && isCtrl(input, "c") then requestExit()
+    else if exitsOnEscape && (input === TerminalInput.Key(TerminalKey.Escape)) then requestExit()
+    else inputTarget.map(_.handleInputResult(input)).foreach(handleInputResult)
+
+  private def subscribeQuery[A](
+      getFlight: () => Option[TUI.QueryFlight[A]],
+      setFlight: Option[TUI.QueryFlight[A]] => Unit,
+      request: String,
+      onComplete: TerminalQueryResult[A] => Unit
+  ): () => Unit =
+    val registration = lifecycleLock.synchronized {
+      nextQuerySubscriberId += 1
+      val subscriber = TUI.QuerySubscriber(nextQuerySubscriberId, onComplete)
+      lifecycleState match
+        case TUI.LifecycleState.Running                                =>
+          getFlight() match
+            case Some(flight) =>
+              setFlight(Some(flight.copy(subscribers = flight.subscribers :+ subscriber)))
+              TUI.QueryRegistration.Registered(subscriber, None)
+            case None         =>
+              nextQueryFlightId += 1
+              val flight = TUI.QueryFlight(
+                nextQueryFlightId,
+                TUI.QueryFlightPhase.Reserved,
+                Vector(subscriber)
+              )
+              setFlight(Some(flight))
+              queryWriteReservations += 1
+              TUI.QueryRegistration.Registered(subscriber, Some(flight.id))
+        case TUI.LifecycleState.Starting | TUI.LifecycleState.Stopping =>
+          retainedQueryCompletions += TUI.QueryCompletion(
+            subscriber,
+            TerminalQueryResult.Stopped
+          )
+          TUI.QueryRegistration.Registered(subscriber, None)
+        case TUI.LifecycleState.Cleaning                               =>
+          val completion = TUI.QueryCompletion(subscriber, TerminalQueryResult.Stopped)
+          if postRestorationCutoff then retainedQueryCompletions += completion
+          else postRestorationQueryCompletions += completion
+          TUI.QueryRegistration.Registered(subscriber, None)
+        case TUI.LifecycleState.Stopped                                =>
+          retainedQueryCompletions += TUI.QueryCompletion(
+            subscriber,
+            TerminalQueryResult.Stopped
+          )
+          val own = !drainOwned
+          if own then drainOwned = true
+          TUI.QueryRegistration.QueuedStopped(subscriber, own)
     }
-    notifications.foreach { case (listener, scheme) => listener(scheme) }
+    registration match
+      case TUI.QueryRegistration.Registered(subscriber, flightId) =>
+        flightId.foreach(id => emitQueryRequest(id, getFlight, setFlight, request))
+        drainOrReturn()
+        () => cancelQuerySubscriber(subscriber)
+      case TUI.QueryRegistration.QueuedStopped(subscriber, own)   =>
+        if own then drainWork(propagateCleanupFailure = false)
+        () => cancelQuerySubscriber(subscriber)
 
-  private def consumeTerminalProtocolReply(
-      input: TerminalInput
-  ): Option[Vector[(TerminalColorScheme => Unit, TerminalColorScheme)]] = input match
-    case TerminalInput.Raw(data) if TerminalImageProtocol.isCellSizeResponse(data)             =>
-      val previousDimensions = TerminalImageProtocol.cellDimensions
-      TerminalImageProtocol.parseCellSizeResponse(data).foreach { dimensions =>
-        TerminalImageProtocol.setCellDimensions(dimensions.widthPx, dimensions.heightPx).foreach {
-          updatedDimensions =>
-            if updatedDimensions !== previousDimensions then
-              requestRender()
-              flushRender()
-        }
-      }
-      Some(Vector.empty)
-    case TerminalInput.Raw(data) if TerminalColorProtocol.isOsc11BackgroundColorResponse(data) =>
-      TerminalColorProtocol.parseOsc11BackgroundColor(data).foreach { color =>
-        pendingBackgroundColorQueries.foreach(_.complete(color))
-        pendingBackgroundColorQueries.clear()
-      }
-      Some(Vector.empty)
-    case TerminalInput.Raw(data) if TerminalColorProtocol.isTerminalColorSchemeReport(data)    =>
-      TerminalColorProtocol.parseTerminalColorSchemeReport(data) match
-        case Some(scheme) =>
-          pendingColorSchemeQueries.foreach(_.complete(scheme))
-          pendingColorSchemeQueries.clear()
-          val listeners =
-            if terminalColorSchemeNotificationsEnabled then terminalColorSchemeListeners.toVector
-            else Vector.empty
-          Some(listeners.map(listener => listener -> scheme))
-        case None         => Some(Vector.empty)
-    case TerminalInput.Raw(_)                                                                  => None
-    case _                                                                                     => None
-
-  private def registerPendingQuery[A](
-      pendingQueries: ArrayBuffer[TUI.PendingQuery[A]],
+  private def emitQueryRequest[A](
+      flightId: Long,
+      getFlight: () => Option[TUI.QueryFlight[A]],
+      setFlight: Option[TUI.QueryFlight[A]] => Unit,
       request: String
-  ): Option[TUI.PendingQuery[A]] = lifecycleLock.synchronized {
-    if running then
-      val pending = TUI.PendingQuery[A]()
-      pendingQueries += pending
-      try
-        terminal.write(request)
-        Some(pending)
-      catch
-        case e: Throwable =>
-          pendingQueries -= pending
-          throw e
-    else None
+  ): Unit =
+    try
+      writeTerminal(terminal.write(request))
+      lifecycleLock.synchronized {
+        getFlight() match
+          case Some(flight) if flight.id === flightId =>
+            if lifecycleState === TUI.LifecycleState.Stopping then
+              retainQueryCompletionsLocked(flight.subscribers, TerminalQueryResult.Stopped)
+              setFlight(None)
+            else
+              setFlight(Some(flight.copy(phase = TUI.QueryFlightPhase.Emitted)))
+          case _                                      => ()
+        queryWriteReservations -= 1
+        lifecycleLock.notifyAll()
+      }
+    catch
+      case error: Throwable =>
+        lifecycleLock.synchronized {
+          getFlight() match
+            case Some(flight) if flight.id === flightId =>
+              retainQueryCompletionsLocked(
+                flight.subscribers,
+                TerminalQueryResult.Failed(error)
+              )
+              setFlight(None)
+            case _                                      => ()
+          queryWriteReservations -= 1
+          recordFailureLocked(error)
+          lifecycleLock.notifyAll()
+        }
+    finishDeferredCleanupIfNeeded()
+
+  private def cancelQuerySubscriber(subscriber: TUI.QuerySubscriber[?]): Unit =
+    lifecycleLock.synchronized {
+      if subscriber.state === TUI.QuerySubscriberState.Active then
+        subscriber.state = TUI.QuerySubscriberState.Cancelled
+        backgroundColorFlight = removeQuerySubscriber(backgroundColorFlight, subscriber)
+        colorSchemeFlight = removeQuerySubscriber(colorSchemeFlight, subscriber)
+    }
+
+  private def removeQuerySubscriber[A](
+      flight: Option[TUI.QueryFlight[A]],
+      subscriber: TUI.QuerySubscriber[?]
+  ): Option[TUI.QueryFlight[A]] =
+    flight.map(value => value.copy(subscribers = value.subscribers.filterNot(_ eq subscriber)))
+
+  private def classifyIngressLocked(input: TerminalInput): TUI.IngressClassification =
+    if replayContinuation.nonEmpty then TUI.IngressClassification.Blocked
+    else classifyIngressWithoutReplayLocked(input)
+
+  private def classifyIngressWithoutReplayLocked(
+      input: TerminalInput
+  ): TUI.IngressClassification =
+    val hasCapacity = pendingIngress.length < TUI.IngressCapacity
+    input match
+      case TerminalInput.RawStart(kind) if rawReplyEligible(kind)       =>
+        TUI.IngressClassification.Consumed(() =>
+          rawCorrelation = Some(TUI.RawCorrelation(kind, Vector.empty, 0))
+        )
+      case TerminalInput.RawChunk(chunk) if rawCorrelation.nonEmpty     =>
+        val correlation = rawCorrelation.get
+        if correlation.length + chunk.length <= TerminalInputChunk.MaxBytes then
+          TUI.IngressClassification.Consumed(() =>
+            rawCorrelation = Some(correlation.copy(
+              chunks = correlation.chunks :+ chunk,
+              length = correlation.length + chunk.length
+            ))
+          )
+        else if !hasCapacity then TUI.IngressClassification.Blocked
+        else
+          val replay = TerminalInput.RawStart(correlation.kind) +:
+            (correlation.chunks.map(TerminalInput.RawChunk(_)) :+ TerminalInput.RawChunk(chunk))
+          TUI.IngressClassification.Publish(
+            TUI.Ingress.Input(replay.head),
+            replay.tail.map(TUI.Ingress.Input(_)),
+            () => rawCorrelation = None
+          )
+      case TerminalInput.RawEnd(termination) if rawCorrelation.nonEmpty =>
+        if !hasCapacity then TUI.IngressClassification.Blocked
+        else
+          val correlation = rawCorrelation.get
+          val data        = String(
+            correlation.chunks.flatMap(_.toArray).toArray,
+            java.nio.charset.StandardCharsets.UTF_8
+          )
+          classifyRawReplyLocked(data, termination, correlation)
+      case _ if !hasCapacity                                            =>
+        TUI.IngressClassification.Blocked
+      case _                                                            =>
+        TUI.IngressClassification.Publish(TUI.Ingress.Input(input), Vector.empty, () => ())
+
+  private def classifyRawReplyLocked(
+      data: String,
+      termination: TerminalRawTermination,
+      correlation: TUI.RawCorrelation
+  ): TUI.IngressClassification =
+    if termination === TerminalRawTermination.Complete && TerminalImageProtocol.isCellSizeResponse(
+        data
+      )
+    then
+      val previousDimensions = TerminalImageProtocol.cellDimensions
+      TUI.IngressClassification.Publish(
+        TUI.Ingress.Protocol(Vector.empty, Vector.empty),
+        Vector.empty,
+        () =>
+          rawCorrelation = None
+          TerminalImageProtocol.parseCellSizeResponse(data).foreach { dimensions =>
+            TerminalImageProtocol.setCellDimensions(
+              dimensions.widthPx,
+              dimensions.heightPx
+            ).foreach {
+              updatedDimensions =>
+                if updatedDimensions !== previousDimensions then renderRequested = true
+            }
+          }
+      )
+    else if termination === TerminalRawTermination.Complete && TerminalColorProtocol.isOsc11BackgroundColorResponse(
+        data
+      )
+    then
+      val result      = TerminalColorProtocol.parseOsc11BackgroundColor(data)
+        .map(TerminalQueryResult.Success(_))
+        .getOrElse(TerminalQueryResult.InvalidResponse)
+      val completions = completeFlightLocked(backgroundColorFlight, result)
+      TUI.IngressClassification.Publish(
+        TUI.Ingress.Protocol(completions, Vector.empty),
+        Vector.empty,
+        () =>
+          rawCorrelation = None
+          backgroundColorFlight = None
+      )
+    else if termination === TerminalRawTermination.Complete && TerminalColorProtocol.isTerminalColorSchemeReport(
+        data
+      )
+    then
+      val parsed        = TerminalColorProtocol.parseTerminalColorSchemeReport(data)
+      val result        = parsed
+        .map(TerminalQueryResult.Success(_))
+        .getOrElse(TerminalQueryResult.InvalidResponse)
+      val completions   = completeFlightLocked(colorSchemeFlight, result)
+      val notifications = parsed.toVector.flatMap { scheme =>
+        if terminalColorSchemeNotificationsEnabled then
+          terminalColorSchemeListeners.toVector.map(listener => () => listener(scheme))
+        else Vector.empty
+      }
+      TUI.IngressClassification.Publish(
+        TUI.Ingress.Protocol(completions, notifications),
+        Vector.empty,
+        () =>
+          rawCorrelation = None
+          colorSchemeFlight = None
+      )
+    else
+      val replay = TerminalInput.RawStart(correlation.kind) +:
+        (correlation.chunks.map(TerminalInput.RawChunk(_)) :+ TerminalInput.RawEnd(termination))
+      TUI.IngressClassification.Publish(
+        TUI.Ingress.Input(replay.head),
+        replay.tail.map(TUI.Ingress.Input(_)),
+        () => rawCorrelation = None
+      )
+
+  private def rawReplyEligible(kind: TerminalRawKind): Boolean = kind match
+    case TerminalRawKind.Csi => true
+    case TerminalRawKind.Osc => backgroundColorFlight.nonEmpty
+    case _                   => false
+
+  private def completeFlightLocked[A](
+      flight: Option[TUI.QueryFlight[A]],
+      result: TerminalQueryResult[A]
+  ): Vector[TUI.QueryCompletion[A]] =
+    flight.toVector.flatMap(_.subscribers).map(TUI.QueryCompletion(_, result))
+
+  private def retainQueryCompletionsLocked[A](
+      subscribers: Vector[TUI.QuerySubscriber[A]],
+      result: TerminalQueryResult[A]
+  ): Unit =
+    retainedQueryCompletions ++= subscribers.map(TUI.QueryCompletion(_, result))
+
+  private def publishInput(input: TerminalInput): Unit =
+    val publication = lifecycleLock.synchronized {
+      var result = classifyIngressLocked(input)
+      while acceptsIngress && result === TUI.IngressClassification.Blocked do
+        lifecycleLock.wait()
+        result = classifyIngressLocked(input)
+      if !acceptsIngress then None
+      else
+        result match
+          case TUI.IngressClassification.Consumed(commit)                  =>
+            commit()
+            Some(Vector.empty)
+          case TUI.IngressClassification.Publish(first, remaining, commit) =>
+            commit()
+            pendingIngress += first
+            refillReplayLocked(remaining)
+            Some(Vector.empty)
+          case TUI.IngressClassification.Blocked                           => None
+    }
+    val accepted    = publication.nonEmpty
+    if accepted then drainOrReturn()
+
+  private def refillReplayLocked(replay: Vector[TUI.Ingress] = Vector.empty): Unit =
+    if replay.nonEmpty then
+      require(replay.length <= TUI.MaxReplayEvents - 1)
+      replayContinuation = Some(TUI.ReplayContinuation(replay, 0))
+    replayContinuation.foreach { continuation =>
+      val available = TUI.IngressCapacity - pendingIngress.length
+      val admitted  = math.min(available, continuation.events.length - continuation.nextIndex)
+      pendingIngress ++= continuation.events.slice(
+        continuation.nextIndex,
+        continuation.nextIndex + admitted
+      )
+      val nextIndex = continuation.nextIndex + admitted
+      if nextIndex === continuation.events.length then
+        replayContinuation = None
+        lifecycleLock.notifyAll()
+      else replayContinuation = Some(continuation.copy(nextIndex = nextIndex))
+    }
+
+  private def publishResize(): Unit =
+    lifecycleLock.synchronized {
+      resizeGeneration += 1
+      if lifecycleState === TUI.LifecycleState.Running then
+        renderRequested = true
+        forceRenderRequested = true
+        clearRequested = true
+    }
+    drainOrReturn()
+
+  private def drainOrReturn(propagateCleanupFailure: Boolean = false): Unit =
+    val own = lifecycleLock.synchronized {
+      if drainOwned || startupOwner then false
+      else
+        drainOwned = true
+        true
+    }
+    if own then drainWork(propagateCleanupFailure)
+
+  private def drainWork(propagateCleanupFailure: Boolean): Unit =
+    var continue               = true
+    var completed              = false
+    var deferredCleanupFailure = Option.empty[Throwable]
+    try
+      while continue do
+        val work = lifecycleLock.synchronized {
+          if retainedQueryCompletions.nonEmpty then
+            TUI.Work.QueryCompletion(retainedQueryCompletions.remove(0))
+          else if lifecycleState === TUI.LifecycleState.Stopping then
+            if pendingControlOutput.nonEmpty then
+              TUI.Work.Control(pendingControlOutput.remove(0))
+            else if queryWriteReservations === 0 then
+              claimCleanupLocked()
+              TUI.Work.Cleanup
+            else
+              drainOwned = false
+              TUI.Work.Done
+          else if hasOrdinaryWorkLocked then selectOrdinaryWorkLocked()
+          else
+            drainOwned = false
+            TUI.Work.Done
+        }
+        work match
+          case TUI.Work.Ingress(ingress)            => processIngress(ingress)
+          case TUI.Work.QueryCompletion(completion) => processQueryCompletion(completion)
+          case TUI.Work.Structural(claimed)         => applyStructural(claimed)
+          case TUI.Work.Action(action)              =>
+            try action()
+            catch case error: Throwable => recordFailure(error)
+          case TUI.Work.Control(action)             => action()
+          case TUI.Work.Render(force, clear)        => renderNow(force, clear)
+          case TUI.Work.Cleanup                     =>
+            deferredCleanupFailure = cleanup()
+          case TUI.Work.Done                        => continue = false
+      completed = true
+    catch
+      case e: Throwable =>
+        recordFailure(e)
+        lifecycleLock.synchronized { drainOwned = false }
+        finishDeferredCleanupIfNeeded()
+    if completed then
+      deferredCleanupFailure.foreach { error =>
+        if propagateCleanupFailure then throw error
+        else recordFailure(error)
+      }
+
+  private def processIngress(ingress: TUI.Ingress): Unit = ingress match
+    case TUI.Ingress.Input(input)                         => handleInput(input)
+    case TUI.Ingress.Protocol(completions, notifications) =>
+      completions.foreach(processQueryCompletion)
+      val running = lifecycleLock.synchronized {
+        lifecycleState === TUI.LifecycleState.Running
+      }
+      if running then notifications.foreach(_())
+
+  private def processQueryCompletion(completion: TUI.QueryCompletion[?]): Unit =
+    val claimed = lifecycleLock.synchronized {
+      if completion.subscriber.state === TUI.QuerySubscriberState.Active then
+        completion.subscriber.state = TUI.QuerySubscriberState.Claimed
+        true
+      else false
+    }
+    if claimed then
+      try completion.invoke()
+      catch case error: Throwable => recordFailure(error)
+      finally
+        lifecycleLock.synchronized {
+          completion.subscriber.state = TUI.QuerySubscriberState.Completed
+        }
+
+  private def scheduleControlOutput(supported: Boolean)(action: => Unit): Boolean =
+    if !supported then false
+    else
+      val state = lifecycleLock.synchronized {
+        lifecycleState match
+          case TUI.LifecycleState.Starting | TUI.LifecycleState.Running =>
+            pendingControlOutput += (() => action)
+            lifecycleState
+          case value                                                    => value
+      }
+      state match
+        case TUI.LifecycleState.Starting                               => true
+        case TUI.LifecycleState.Running                                =>
+          drainOrReturn()
+          true
+        case TUI.LifecycleState.Stopping | TUI.LifecycleState.Cleaning => false
+        case TUI.LifecycleState.Stopped                                =>
+          val direct = lifecycleLock.synchronized {
+            if drainOwned then
+              pendingControlOutput += (() => action)
+              false
+            else true
+          }
+          if direct then writeTerminal(action)
+          else drainOrReturn()
+          true
+
+  private def publishAction(action: () => Unit): Unit =
+    val publication = lifecycleLock.synchronized {
+      lifecycleState match
+        case TUI.LifecycleState.Stopped                                =>
+          pendingActions += action
+          val own = !drainOwned
+          if own then drainOwned = true
+          TUI.ActionPublication.Accepted(own)
+        case TUI.LifecycleState.Stopping | TUI.LifecycleState.Cleaning =>
+          TUI.ActionPublication.Rejected
+        case _                                                         =>
+          pendingActions += action
+          TUI.ActionPublication.Accepted(own = false)
+    }
+    publication match
+      case TUI.ActionPublication.Accepted(true)  =>
+        drainWork(propagateCleanupFailure = false)
+      case TUI.ActionPublication.Accepted(false) => drainOrReturn()
+      case TUI.ActionPublication.Rejected        => ()
+
+  private def publishStructural(create: () => TUI.StructuralOperation): Unit =
+    val accepted = lifecycleLock.synchronized {
+      lifecycleState match
+        case TUI.LifecycleState.Stopping | TUI.LifecycleState.Cleaning => false
+        case _                                                         =>
+          pendingStructural += create()
+          true
+    }
+    if accepted then drainOrReturn()
+
+  private def hasOrdinaryWorkLocked: Boolean =
+    pendingStructural.nonEmpty || pendingActions.nonEmpty || pendingIngress.nonEmpty ||
+      pendingControlOutput.nonEmpty || renderRequested
+
+  private def selectOrdinaryWorkLocked(): TUI.Work =
+    val categories = TUI.OrdinaryCategory.values
+    var offset     = 1
+    var selected   = Option.empty[TUI.OrdinaryCategory]
+    while selected.isEmpty && offset <= categories.length do
+      val candidate = categories((lastOrdinaryCategory.ordinal + offset) % categories.length)
+      if ordinaryCategoryReadyLocked(candidate) then selected = Some(candidate)
+      offset += 1
+    val category   = selected.get
+    lastOrdinaryCategory = category
+    category match
+      case TUI.OrdinaryCategory.Structural =>
+        TUI.Work.Structural(claimStructuralLocked(pendingStructural.remove(0)))
+      case TUI.OrdinaryCategory.Action     => TUI.Work.Action(pendingActions.remove(0))
+      case TUI.OrdinaryCategory.Ingress    =>
+        val ingress = pendingIngress.removeHead()
+        refillReplayLocked()
+        lifecycleLock.notifyAll()
+        TUI.Work.Ingress(ingress)
+      case TUI.OrdinaryCategory.Control    =>
+        TUI.Work.Control(pendingControlOutput.remove(0))
+      case TUI.OrdinaryCategory.Render     =>
+        renderRequested = false
+        val force = forceRenderRequested
+        val clear = clearRequested
+        forceRenderRequested = false
+        clearRequested = false
+        TUI.Work.Render(force, clear)
+
+  private def ordinaryCategoryReadyLocked(category: TUI.OrdinaryCategory): Boolean = category match
+    case TUI.OrdinaryCategory.Structural => pendingStructural.nonEmpty
+    case TUI.OrdinaryCategory.Action     => pendingActions.nonEmpty
+    case TUI.OrdinaryCategory.Ingress    => pendingIngress.nonEmpty
+    case TUI.OrdinaryCategory.Control    => pendingControlOutput.nonEmpty
+    case TUI.OrdinaryCategory.Render     => renderRequested
+
+  private def claimStructuralLocked(
+      operation: TUI.StructuralOperation
+  ): TUI.ClaimedStructural = operation match
+    case TUI.StructuralOperation.NoOp       => TUI.ClaimedStructural(Vector.empty)
+    case TUI.StructuralOperation.Add(entry) =>
+      val attach = committedChildren.count(_.component eq entry.component) === 0
+      committedChildren :+= entry
+      TUI.ClaimedStructural(Vector(TUI.StructuralEffect.Add(entry.component, attach)))
+    case TUI.StructuralOperation.Remove(id) =>
+      committedChildren.indexWhere(_.id === id) match
+        case -1    => TUI.ClaimedStructural(Vector.empty)
+        case index =>
+          val entry  = committedChildren(index)
+          committedChildren = committedChildren.patch(index, Nil, 1)
+          val detach = !committedChildren.exists(_.component eq entry.component)
+          TUI.ClaimedStructural(Vector(TUI.StructuralEffect.Remove(entry.component, detach)))
+    case TUI.StructuralOperation.Clear(ids) =>
+      val removed = committedChildren.filter(entry => ids.contains(entry.id))
+      committedChildren = committedChildren.filterNot(entry => ids.contains(entry.id))
+      TUI.ClaimedStructural(removed.zipWithIndex.map { (entry, index) =>
+        val remainingRemoved = removed.drop(index + 1)
+        val detach           = !committedChildren.exists(_.component eq entry.component) &&
+          !remainingRemoved.exists(_.component eq entry.component)
+        TUI.StructuralEffect.Remove(entry.component, detach)
+      })
+
+  private def applyStructural(claimed: TUI.ClaimedStructural): Unit =
+    claimed.effects.foreach {
+      case TUI.StructuralEffect.Add(component, attach)    =>
+        root.addChild(component)
+        if attach then attachContext(component)
+      case TUI.StructuralEffect.Remove(component, detach) =>
+        root.removeChild(component)
+        if detach then detachContext(component)
+    }
+
+  private def writeTerminal(action: => Unit): Unit = terminalWriteLock.synchronized(action)
+
+  private def startupMayContinue: Boolean = lifecycleLock.synchronized {
+    lifecycleState === TUI.LifecycleState.Starting
   }
+
+  private def recordFailure(error: Throwable): Unit = lifecycleLock.synchronized {
+    recordFailureLocked(error)
+  }
+
+  private def recordFailureLocked(error: Throwable): Unit =
+    runtimeFailure match
+      case Some(first) if first ne error => first.addSuppressed(error)
+      case None                          => runtimeFailure = Some(error)
+      case _                             => ()
+    if (lifecycleState !== TUI.LifecycleState.Stopped) &&
+      (lifecycleState !== TUI.LifecycleState.Cleaning)
+    then transitionToStoppingLocked()
+    lifecycleLock.notifyAll()
+
+  private def transitionToStoppingLocked(): Unit =
+    lifecycleState = TUI.LifecycleState.Stopping
+    pendingIngress.foreach {
+      case TUI.Ingress.Protocol(completions, _) => retainedQueryCompletions ++= completions
+      case _                                    => ()
+    }
+    pendingIngress.clear()
+    replayContinuation = None
+    pendingActions.clear()
+    pendingStructural.clear()
+    desiredChildren = committedChildren
+    renderRequested = false
+    forceRenderRequested = false
+    clearRequested = false
+    backgroundColorFlight match
+      case Some(flight) if flight.phase === TUI.QueryFlightPhase.Emitted =>
+        retainQueryCompletionsLocked(flight.subscribers, TerminalQueryResult.Stopped)
+        backgroundColorFlight = None
+      case _                                                             => ()
+    colorSchemeFlight match
+      case Some(flight) if flight.phase === TUI.QueryFlightPhase.Emitted =>
+        retainQueryCompletionsLocked(flight.subscribers, TerminalQueryResult.Stopped)
+        colorSchemeFlight = None
+      case _                                                             => ()
+    exitRequested = true
+    lifecycleLock.notifyAll()
+
+  private def acceptsIngress: Boolean =
+    lifecycleState === TUI.LifecycleState.Starting ||
+      lifecycleState === TUI.LifecycleState.Running
+
+  private def finishDeferredCleanupIfNeeded(
+      propagateCleanupFailure: Boolean = false
+  ): Unit =
+    val shouldDrain  = lifecycleLock.synchronized {
+      lifecycleState === TUI.LifecycleState.Stopping && !startupOwner && !drainOwned &&
+      queryWriteReservations === 0 &&
+      (retainedQueryCompletions.nonEmpty || pendingControlOutput.nonEmpty)
+    }
+    if shouldDrain then drainOrReturn(propagateCleanupFailure)
+    val shouldFinish = lifecycleLock.synchronized {
+      lifecycleState === TUI.LifecycleState.Stopping && !startupOwner && !drainOwned &&
+      queryWriteReservations === 0
+    }
+    if shouldFinish then drainOrReturn(propagateCleanupFailure)
 
   private def inputTarget: Option[Component] =
     topCapturingOverlay.map(_.component).orElse(focusedComponent)
 
   private def routeGlobalInputListeners(input: TerminalInput): InputResult =
-    val listeners = inputListeners.toVector
+    val listeners = lifecycleLock.synchronized(inputListeners.toVector)
     var result    = InputResult.Ignored
     var index     = 0
     while index < listeners.length && result === InputResult.Ignored do
@@ -459,8 +994,8 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     case _                                                  => false
 
   private def renderOverlays(baseLines: Vector[String], width: Int, height: Int): Vector[String] =
-    val rendered = overlayStack.toVector
-      .filter(isOverlayVisible)
+    val visible  = overlayStack.toVector.filter(isOverlayVisible)
+    val rendered = visible
       .sortBy(_.focusOrder)
       .flatMap { entry =>
         val initialLayout = OverlayRenderer.resolve(entry.options, overlayHeight = 0, width, height)
@@ -469,39 +1004,41 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         val layout        = OverlayRenderer.resolve(entry.options, clippedLines.length, width, height)
         Option.when(clippedLines.nonEmpty)(clippedLines -> layout)
       }
+    latestOverlayVisibility = visible.nonEmpty
     OverlayRenderer.composite(baseLines, rendered, width, height)
 
   private def makeOverlayHandle(entry: TUI.OverlayEntry): OverlayHandle = new OverlayHandle:
     override def id: OverlayId = entry.id
 
-    override def hide(): Unit = lifecycleLock.synchronized(removeOverlay(entry))
+    override def hide(): Unit = publishAction(() => removeOverlay(entry))
 
-    override def setHidden(hidden: Boolean): Unit = lifecycleLock.synchronized {
+    override def setHidden(hidden: Boolean): Unit = publishAction(() => {
       if overlayStack.exists(_ eq entry) && (entry.hidden !== hidden) then
         entry.hidden = hidden
         if hidden && focusedComponent.exists(_ eq entry.component) then restoreFocusAfter(entry)
         else if !hidden && entry.options.focusCapturing && isOverlayVisible(entry) then
           focusOverlay(entry)
+        latestOverlayVisibility = overlayStack.exists(isOverlayVisible)
         requestRender()
-    }
+    })
 
     override def isHidden: Boolean = lifecycleLock.synchronized(entry.hidden)
 
-    override def focus(): Unit = lifecycleLock.synchronized {
+    override def focus(): Unit = publishAction(() => {
       if overlayStack.exists(_ eq entry) && entry.options.focusCapturing && isOverlayVisible(entry)
       then
         focusOverlay(entry)
         requestRender()
-    }
+    })
 
     override def unfocus(options: Option[OverlayUnfocusOptions]): Unit =
-      lifecycleLock.synchronized {
+      publishAction(() =>
         if focusedComponent.exists(_ eq entry.component) then
           options match
-            case Some(value) => setFocus(value.target)
+            case Some(value) => setFocusNow(value.target)
             case None        => restoreFocusAfter(entry)
           requestRender()
-      }
+      )
 
     override def isFocused: Boolean =
       lifecycleLock.synchronized(focusedComponent.exists(_ eq entry.component))
@@ -511,16 +1048,17 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         options: Option[OverlayOptions],
         requestRender: Boolean
     ): Unit =
-      lifecycleLock.synchronized {
+      publishAction(() =>
         if overlayStack.exists(_ eq entry) then
           val wasFocused = focusedComponent.exists(_ eq entry.component)
           detachContext(entry.component)
           entry.component = component
           attachContext(component)
           options.foreach(entry.options = _)
-          if wasFocused then setFocus(component)
+          if wasFocused then setFocusNow(component)
+          latestOverlayVisibility = overlayStack.exists(isOverlayVisible)
           if requestRender then TUI.this.requestRender()
-      }
+      )
 
   private def removeOverlay(entry: TUI.OverlayEntry): Unit =
     val index = overlayStack.indexWhere(_ eq entry)
@@ -529,18 +1067,19 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
       overlayStack.remove(index)
       detachContext(entry.component)
       if wasFocused then restoreFocusAfter(entry)
+      latestOverlayVisibility = overlayStack.exists(isOverlayVisible)
       requestRender()
 
   private def restoreFocusAfter(entry: TUI.OverlayEntry): Unit =
     val fallback = topCapturingOverlay.filterNot(
       _ eq entry
     ).map(_.component).orElse(entry.preFocus).orElse(baseFocusedComponent)
-    setFocus(fallback.orNull)
+    setFocusNow(fallback.orNull)
 
   private def focusOverlay(entry: TUI.OverlayEntry): Unit =
     nextFocusOrder += 1
     entry.focusOrder = nextFocusOrder
-    setFocus(entry.component)
+    setFocusNow(entry.component)
 
   private def topCapturingOverlay: Option[TUI.OverlayEntry] =
     overlayStack.filter(entry => entry.options.focusCapturing && isOverlayVisible(entry)).sortBy(
@@ -572,19 +1111,66 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     catch case e: Throwable => handleRuntimeFailure(e)
 
   private def handleRuntimeFailure(error: Throwable): Unit =
+    recordFailure(error)
+    finishDeferredCleanupIfNeeded()
+
+  private def claimCleanupLocked(): Unit =
+    require(drainOwned)
+    require(!cleanupOwned)
+    require(lifecycleState === TUI.LifecycleState.Stopping)
+    require(!startupOwner)
+    require(queryWriteReservations === 0)
+    require(retainedQueryCompletions.isEmpty)
+    require(pendingControlOutput.isEmpty)
+    cleanupOwned = true
+    postRestorationCutoff = false
+    lifecycleState = TUI.LifecycleState.Cleaning
+
+  private def cleanup(): Option[Throwable] =
+    var failure                        = Option.empty[Throwable]
+    def attempt(action: => Unit): Unit =
+      try action
+      catch
+        case e: Throwable => failure match
+            case Some(first) => first.addSuppressed(e)
+            case None        => failure = Some(e)
+    attempt(parkCursorBelowContentIfNeeded())
+    if terminalColorSchemeNotificationsEnabled then
+      attempt(
+        writeTerminal(terminal.write(TerminalColorProtocol.DisableColorSchemeNotifications))
+      )
+    attempt(writeTerminal(Terminal.drainInput(terminal)))
+    attempt(restoreAutoWrapIfNeeded())
+    attempt(writeTerminal(terminal.showCursor()))
+    attempt(exitAlternateScreenIfNeeded())
+    attempt(writeTerminal(terminal.stop()))
+
+    val detachedCompletions = lifecycleLock.synchronized {
+      postRestorationCutoff = true
+      val detached = postRestorationQueryCompletions.toVector
+      postRestorationQueryCompletions.clear()
+      detached
+    }
+    detachedCompletions.foreach(processQueryCompletion)
     lifecycleLock.synchronized {
-      if runtimeFailure.isEmpty then runtimeFailure = Some(error)
-      exitRequested = true
+      backgroundColorFlight = None
+      colorSchemeFlight = None
+      rawCorrelation = None
+      pendingIngress.clear()
+      replayContinuation = None
+      lifecycleState = TUI.LifecycleState.Stopped
+      cleanupOwned = false
       lifecycleLock.notifyAll()
     }
-    stop()
+    failure
 
   private def isCtrl(input: TerminalInput, char: String): Boolean = input match
     case TerminalInput.KeyEvent(TerminalKey.Character(value), modifiers, eventType) =>
       (eventType !== KeyEventType.Release) && (value === char) && modifiers.ctrl
     case _                                                                          => false
 
-  private def renderNow(): Unit =
+  private def renderNow(force: Boolean, clear: Boolean): Unit =
+    val generation   = lifecycleLock.synchronized(resizeGeneration)
     val width        = positiveDimension(terminal.columns)
     val height       = positiveDimension(terminal.rows)
     val rawLines     = root.render(width)
@@ -592,23 +1178,31 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     val frame        = prepareFrame(overlayLines, width)
     val newLines     = frame.lines
 
-    val widthChanged  = (previousWidth !== 0) && (previousWidth !== width)
-    val heightChanged = (previousHeight !== 0) && (previousHeight !== height)
-    if previousLines.isEmpty then
-      val shouldClear = clearRequested
-      clearRequested = false
-      fullRender(frame, width, height, clear = shouldClear)
-    else if widthChanged || heightChanged then
-      clearRequested = false
-      fullRender(frame, width, height, clear = true)
+    val currentWidth      = positiveDimension(terminal.columns)
+    val currentHeight     = positiveDimension(terminal.rows)
+    val currentGeneration = lifecycleLock.synchronized(resizeGeneration)
+    if (generation !== currentGeneration) || (width !== currentWidth) ||
+      (height !== currentHeight)
+    then
+      lifecycleLock.synchronized {
+        renderRequested = true
+        forceRenderRequested = true
+        clearRequested = true
+      }
     else
-      clearRequested = false
-      val firstChanged = firstChangedLine(previousLines, newLines)
-      if firstChanged >= 0 then partialRender(frame, firstChanged)
-      else positionHardwareCursorOnly(frame.position)
-      previousLines = newLines
-      previousWidth = width
-      previousHeight = height
+      val widthChanged  = (previousWidth !== 0) && (previousWidth !== width)
+      val heightChanged = (previousHeight !== 0) && (previousHeight !== height)
+      if previousLines.isEmpty || force then
+        fullRender(frame, width, height, clear = clear)
+      else if widthChanged || heightChanged then
+        fullRender(frame, width, height, clear = true)
+      else
+        val firstChanged = firstChangedLine(previousLines, newLines)
+        if firstChanged >= 0 then partialRender(frame, firstChanged)
+        else positionHardwareCursorOnly(frame.position)
+        previousLines = newLines
+        previousWidth = width
+        previousHeight = height
 
   private def fullRender(
       frame: CursorMarker.ScanResult,
@@ -641,7 +1235,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
 
   private def writeRenderBuffer(buffer: String): Unit =
     autoWrapRestoreNeeded = true
-    terminal.write(buffer)
+    writeTerminal(terminal.write(buffer))
     autoWrapRestoreNeeded = false
 
   private def parkCursorBelowContentIfNeeded(): Unit =
@@ -653,16 +1247,16 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         toRow = math.max(0, previousLines.length - 1)
       )
       builder.append("\r\n")
-      terminal.write(builder.result())
+      writeTerminal(terminal.write(builder.result()))
 
   private def enterAlternateScreenIfConfigured(): Unit =
     if isAlternateScreenMode && !alternateScreenEntered then
-      terminal.write(AlternateScreenEnter)
+      writeTerminal(terminal.write(AlternateScreenEnter))
       alternateScreenEntered = true
 
   private def exitAlternateScreenIfNeeded(): Unit =
     if alternateScreenEntered then
-      try terminal.write(AlternateScreenExit)
+      try writeTerminal(terminal.write(AlternateScreenExit))
       finally alternateScreenEntered = false
 
   private def clearSequence: String =
@@ -675,7 +1269,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   private def restoreAutoWrapIfNeeded(): Unit =
     if autoWrapRestoreNeeded then
       autoWrapRestoreNeeded = false
-      terminal.write(AutoWrapOn)
+      writeTerminal(terminal.write(AutoWrapOn))
 
   private def appendRenderStart(builder: StringBuilder): Unit =
     builder.append(SyncStart)
@@ -697,7 +1291,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         builder.append("\r")
         appendMoveRight(builder, target.column)
         if builder.nonEmpty then
-          terminal.write(builder.result())
+          writeTerminal(terminal.write(builder.result()))
           cursorRow = target.row
       }
 
@@ -763,34 +1357,99 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     lines.map(_ + LineReset)
 
 object TUI:
+  private enum LifecycleState derives CanEqual:
+    case Starting, Running, Stopping, Cleaning, Stopped
+
+  private val IngressCapacity = 4096
+
+  private enum Work:
+    case Ingress(ingress: TUI.Ingress)
+    case QueryCompletion(completion: TUI.QueryCompletion[?])
+    case Structural(claimed: TUI.ClaimedStructural)
+    case Action(action: () => Unit)
+    case Control(action: () => Unit)
+    case Render(force: Boolean, clear: Boolean)
+    case Cleanup
+    case Done
+
+  private enum Ingress:
+    case Input(input: TerminalInput)
+    case Protocol(
+        completions: Vector[TUI.QueryCompletion[?]],
+        notifications: Vector[() => Unit]
+    )
+
+  private val MaxReplayEvents = TerminalInputChunk.MaxBytes + 2
+
+  private final case class ReplayContinuation(events: Vector[Ingress], nextIndex: Int)
+
+  private enum IngressClassification:
+    case Consumed(commit: () => Unit)
+    case Blocked
+    case Publish(first: Ingress, remaining: Vector[Ingress], commit: () => Unit)
+
+  private final case class ChildEntry(id: Long, component: Component)
+
+  private final case class ClaimedStructural(effects: Vector[StructuralEffect])
+
+  private enum StructuralEffect:
+    case Add(component: Component, attach: Boolean)
+    case Remove(component: Component, detach: Boolean)
+
+  private enum OrdinaryCategory:
+    case Structural, Action, Ingress, Control, Render
+
+  private enum ActionPublication:
+    case Accepted(own: Boolean)
+    case Rejected
+
+  private enum StructuralOperation:
+    case Add(entry: ChildEntry)
+    case Remove(entryId: Long)
+    case Clear(entryIds: Set[Long])
+    case NoOp
+
+  private enum QueryFlightPhase derives CanEqual:
+    case Reserved, Emitted
+
+  private final case class QueryFlight[A](
+      id: Long,
+      phase: QueryFlightPhase,
+      subscribers: Vector[QuerySubscriber[A]]
+  )
+  private final case class RawCorrelation(
+      kind: TerminalRawKind,
+      chunks: Vector[TerminalInputChunk],
+      length: Int
+  )
+
+  private enum QuerySubscriberState derives CanEqual:
+    case Active, Claimed, Cancelled, Completed
+
+  private final class QuerySubscriber[A](
+      val id: Long,
+      val callback: TerminalQueryResult[A] => Unit
+  ):
+    var state: QuerySubscriberState = QuerySubscriberState.Active
+
+  private final class QueryCompletion[A](
+      val subscriber: QuerySubscriber[A],
+      val result: TerminalQueryResult[A]
+  ):
+    def invoke(): Unit = subscriber.callback(result)
+
+  private enum QueryRegistration[A]:
+    case Registered(subscriber: QuerySubscriber[A], flightId: Option[Long])
+    case QueuedStopped(subscriber: QuerySubscriber[A], own: Boolean)
+
   private final class OverlayEntry(
       val id: OverlayId,
       var component: Component,
       var options: OverlayOptions,
-      val preFocus: Option[Component],
+      var preFocus: Option[Component],
       var hidden: Boolean,
       var focusOrder: Long
   )
-
-  private final class PendingQuery[A]:
-    private var completed = false
-    private var result    = Option.empty[A]
-
-    def complete(value: A): Unit = synchronized {
-      if !completed then
-        result = Some(value)
-        completed = true
-        notifyAll()
-    }
-
-    def await(timeoutMillis: Long): Option[A] = synchronized {
-      val deadline  = System.currentTimeMillis() + math.max(0L, timeoutMillis)
-      var remaining = math.max(0L, timeoutMillis)
-      while !completed && remaining > 0 do
-        wait(remaining)
-        remaining = deadline - System.currentTimeMillis()
-      result
-    }
 
   final case class RenderSanitization(
       lineIndex: Int,

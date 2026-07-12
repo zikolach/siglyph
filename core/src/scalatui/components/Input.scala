@@ -1,7 +1,7 @@
 package scalatui.components
 
 import scalatui.ansi.Ansi
-import scalatui.core.{Component, CursorMarker, Focusable}
+import scalatui.core.{Component, CursorMarker, Focusable, InputResult}
 import scalatui.editing.{KillRing, UndoStack, WordNavigation}
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{
@@ -9,7 +9,9 @@ import scalatui.terminal.{
   KeybindingCommand,
   KeybindingManager,
   TerminalInput,
-  TerminalKey
+  TerminalInputChunk,
+  TerminalKey,
+  TerminalUtf8Decoder
 }
 import scalatui.unicode.Unicode
 
@@ -22,14 +24,16 @@ final class Input(
   private var currentValue     = initialValue
   private var cursorCluster    = Unicode.graphemeClusters(initialValue).length
   private var isFocused        = false
+  private var pasteSession     = Option.empty[Input.PasteSession]
   private val undoStack        = UndoStack[Input.State]()
   private val killRing         = KillRing()
   private var lastAction       = Option.empty[Input.Action]
   private var lastYankClusters = 0
 
-  def value: String = currentValue
+  def value: String = pasteSession.fold(currentValue)(_.value)
 
   def setValue(value: String): Unit =
+    pasteSession = None
     currentValue = value
     cursorCluster = Unicode.graphemeClusters(value).length
     lastAction = None
@@ -37,6 +41,7 @@ final class Input(
 
   /** Undo the most recent editing snapshot, returning whether state changed. */
   def undo(): Boolean =
+    finishPaste()
     undoStack.pop() match
       case Some(Input.State(value, cursor)) =>
         currentValue = value
@@ -48,6 +53,7 @@ final class Input(
 
   /** Insert the most recent killed text at the cursor, returning whether state changed. */
   def yank(): Boolean =
+    finishPaste()
     killRing.peek match
       case Some(text) =>
         pushUndo()
@@ -59,6 +65,7 @@ final class Input(
 
   /** Replace the most recent yank with the next kill-ring entry. */
   def yankPop(): Boolean =
+    finishPaste()
     if !lastAction.contains(Input.Action.Yank) || killRing.length <= 1 || lastYankClusters <= 0 then
       false
     else
@@ -78,6 +85,61 @@ final class Input(
   override def focused_=(value: Boolean): Unit = isFocused = value
 
   override def handleInput(input: TerminalInput): Unit =
+    handleInputResult(input)
+    ()
+
+  override def handleInputResult(input: TerminalInput): InputResult =
+    input match
+      case TerminalInput.PasteStart        =>
+        val finalized = finishPaste()
+        startPaste()
+        if finalized then InputResult.Render else InputResult.NoRender
+      case TerminalInput.PasteChunk(chunk) =>
+        pasteSession.foreach(_.append(chunk))
+        InputResult.NoRender
+      case TerminalInput.PasteEnd          =>
+        if finishPaste() then InputResult.Render else InputResult.NoRender
+      case _                               =>
+        finishPaste()
+        handleNonPasteInput(input)
+        InputResult.Render
+
+  override def render(width: Int): Vector[String] =
+    val cs             = clusters
+    val visibleCursor  = pasteSession.fold(cursorCluster)(_.cursorCluster)
+    val before         = cs.take(visibleCursor).mkString
+    val at             = cs.lift(visibleCursor).getOrElse(" ")
+    val after          = cs.drop(visibleCursor + 1).mkString
+    val marker         = if isFocused then CursorMarker.Sequence else ""
+    val renderedCursor = if isFocused then s"\u001b[7m$at\u001b[27m" else at
+    Vector(Ansi.truncateToWidth(before + marker + renderedCursor + after, width, ""))
+
+  private def startPaste(): Unit =
+    val cs     = clusters
+    val prefix = cs.take(cursorCluster).mkString
+    val suffix = cs.drop(cursorCluster).mkString
+    pasteSession = Some(Input.PasteSession(currentValue, cursorCluster, prefix, suffix))
+    currentValue = ""
+
+  private def finishPaste(): Boolean =
+    pasteSession match
+      case None          => false
+      case Some(session) =>
+        pasteSession = None
+        session.finish()
+        if session.isEmpty then
+          currentValue = session.baseValue
+          cursorCluster = session.baseCursor
+          false
+        else
+          undoStack.push(Input.State(session.baseValue, session.baseCursor))
+          currentValue = session.value
+          cursorCluster = session.cursorCluster
+          lastAction = None
+          lastYankClusters = 0
+          true
+
+  private def handleNonPasteInput(input: TerminalInput): Unit =
     if keybindings.matches(input, KeybindingCommand.EditorUndo) then
       undo()
     else if keybindings.matches(input, KeybindingCommand.EditorDeleteWordBackward) then
@@ -114,20 +176,10 @@ final class Input(
       insert("\n")
     else
       input match
-        case TerminalInput.Paste(text) => insert(text.replace('\n', ' ').replace('\r', ' '))
         case TerminalInput.Key(TerminalKey.Character(text), modifiers)
             if !modifiers.ctrl && !modifiers.alt && !modifiers.superKey =>
           insert(text)
-        case _                         => ()
-
-  override def render(width: Int): Vector[String] =
-    val cs     = clusters
-    val before = cs.take(cursorCluster).mkString
-    val at     = cs.lift(cursorCluster).getOrElse(" ")
-    val after  = cs.drop(cursorCluster + 1).mkString
-    val marker = if isFocused then CursorMarker.Sequence else ""
-    val cursor = if isFocused then s"\u001b[7m$at\u001b[27m" else at
-    Vector(Ansi.truncateToWidth(before + marker + cursor + after, width, ""))
+        case _ => ()
 
   private def insert(text: String): Unit =
     if text.nonEmpty then
@@ -236,9 +288,45 @@ final class Input(
   private def pushUndo(): Unit =
     undoStack.push(Input.State(currentValue, cursorCluster))
 
-  private def clusters: Vector[String] = Unicode.graphemeClusters(currentValue)
+  private def clusters: Vector[String] = Unicode.graphemeClusters(value)
 
 object Input:
   private final case class State(value: String, cursorCluster: Int)
+
+  private[scalatui] final class PasteSession(
+      val baseValue: String,
+      val baseCursor: Int,
+      prefix: String,
+      suffix: String
+  ):
+    private val decoder         = TerminalUtf8Decoder()
+    private val prefixBuilder   = StringBuilder(prefix)
+    private val graphemeCounter = Unicode.IncrementalGraphemeCounter()
+    private var acceptedChars   = 0L
+    private var appendCalls     = 0L
+
+    graphemeCounter.process(prefix)
+
+    def value: String      = prefixBuilder.result() + suffix
+    def cursorCluster: Int = graphemeCounter.count.toInt
+    def isEmpty: Boolean   = acceptedChars === 0L
+
+    private[scalatui] def acceptedCharacterCount: Long = acceptedChars
+    private[scalatui] def appendCount: Long            = appendCalls
+
+    def append(chunk: TerminalInputChunk): Unit =
+      appendDecoded(decoder.process(chunk))
+
+    def finish(): Unit =
+      appendDecoded(decoder.flush())
+
+    private def appendDecoded(decoded: String): Unit =
+      val normalized = decoded.replace('\n', ' ').replace('\r', ' ')
+      if normalized.nonEmpty then
+        prefixBuilder.append(normalized)
+        graphemeCounter.process(normalized)
+        acceptedChars += normalized.length
+        appendCalls += 1
+
   private enum Action derives CanEqual:
     case Kill, Yank, TypeWord
