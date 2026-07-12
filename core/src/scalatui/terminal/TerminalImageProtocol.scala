@@ -42,7 +42,12 @@ final case class ImageRenderOptions(
 final case class ImageRenderResult(sequence: String, rows: Int, imageId: Option[Int])
     derives CanEqual
 
-/** Dependency-free Kitty/iTerm2 terminal image protocol helpers. */
+/**
+ * Dependency-free Kitty/iTerm2 terminal image protocol helpers for JVM and Scala Native.
+ *
+ * Image payload entry points require [[Base64ImagePayload]] and do not validate image format,
+ * dimensions, size, terminal capability claims, or payload content beyond that type's contract.
+ */
 object TerminalImageProtocol:
   private val defaultCellDimensions   = ImageCellDimensions(widthPx = 9, heightPx = 18)
   private val defaultCellSizeResponse = "^\u001b\\[6;(\\d+);(\\d+)t$".r
@@ -140,9 +145,13 @@ object TerminalImageProtocol:
 
   private def positiveInt(value: String): Option[Int] = value.toIntOption.filter(_ > 0)
 
-  /** Render base64 image data according to terminal capabilities. */
+  /**
+   * Render a validated base64 payload according to terminal capabilities.
+   *
+   * Payload validation is performed by [[Base64ImagePayload]] before this helper can be called.
+   */
   def renderBase64Image(
-      base64Data: String,
+      payload: Base64ImagePayload,
       dimensions: ImageDimensions,
       capabilities: TerminalCapabilities,
       terminalWidth: Int,
@@ -154,36 +163,43 @@ object TerminalImageProtocol:
         case ImageProtocol.Kitty  =>
           val imageId = options.imageId.getOrElse(allocateImageId())
           ImageRenderResult(
-            encodeKitty(base64Data, imageId, size.widthCells, size.heightCells),
+            encodeKitty(payload, imageId, size.widthCells, size.heightCells),
             size.heightCells,
             Some(imageId)
           )
         case ImageProtocol.ITerm2 =>
           ImageRenderResult(
-            encodeITerm2(base64Data, options.filename, size.widthCells, size.heightCells),
+            encodeITerm2(payload, options.filename, size.widthCells, size.heightCells),
             size.heightCells,
             None
           )
     }
 
-  /** Encode a Kitty graphics protocol placement sequence for already-base64 image data. */
+  /** Encode a Kitty graphics sequence that appends validated payload text unchanged. */
   def encodeKitty(
-      base64Data: String,
+      payload: Base64ImagePayload,
       imageId: Int,
       widthCells: Int,
       heightCells: Int
   ): String =
-    s"\u001b_Ga=T,f=100,i=$imageId,c=$widthCells,r=$heightCells,C=1;$base64Data\u001b\\"
+    s"\u001b_Ga=T,f=100,i=$imageId,c=$widthCells,r=$heightCells,C=1;${payload.value}\u001b\\"
 
-  /** Encode an iTerm2 inline image sequence for already-base64 image data. */
+  /**
+   * Encode an iTerm2 inline image sequence with unchanged validated payload text.
+   *
+   * A present filename is standard-base64 encoded from UTF-8 bytes. An absent filename emits no
+   * `name=` field.
+   */
   def encodeITerm2(
-      base64Data: String,
+      payload: Base64ImagePayload,
       filename: Option[String],
       widthCells: Int,
       heightCells: Int
   ): String =
-    val name = filename.fold("")(value => s"name=$value;")
-    s"\u001b]1337;File=${name}inline=1;width=${widthCells};height=${heightCells}:$base64Data\u0007"
+    val name = filename.fold("")(value =>
+      s"name=${Base64ImagePayload.encode(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)).value};"
+    )
+    s"\u001b]1337;File=${name}inline=1;width=${widthCells};height=${heightCells}:${payload.value}\u0007"
 
   /** Kitty delete-image sequence, or `None` when the protocol does not support this operation. */
   def deleteImage(imageId: Int, capabilities: TerminalCapabilities): Option[String] =
@@ -202,9 +218,16 @@ object TerminalImageProtocol:
       filename: Option[String],
       width: Int
   ): String =
-    val name = filename.fold("image")(identity)
+    val name = escapeMetadataControls(filename.fold("image")(identity))
+    val mime = escapeMetadataControls(mimeType)
     Ansi.truncateToWidth(
-      s"[image: $name, $mimeType, ${dimensions.widthPx}x${dimensions.heightPx}]",
+      s"[image: $name, $mime, ${dimensions.widthPx}x${dimensions.heightPx}]",
       math.max(0, width),
       ""
     )
+
+  private def escapeMetadataControls(value: String): String =
+    value.flatMap { char =>
+      if char <= '\u001f' || (char >= '\u007f' && char <= '\u009f') then f"\\u${char.toInt}%04X"
+      else char.toString
+    }

@@ -27,7 +27,7 @@ import scalatui.terminal.jvm.SttyTerminal
     Text("Supported terminals render the image; unsupported terminals render fallback text.")
   )
   tui.addChild(Spacer(1))
-  tui.addChild(Image(source.base64Data, source.dimensions, capabilities))
+  tui.addChild(Image(source.payload, source.dimensions, capabilities))
   tui.addChild(Spacer(1))
   tui.addChild(Text("This line should appear below the image. Esc or Ctrl+C exits."))
   tui.run()
