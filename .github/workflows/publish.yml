@@ -59,7 +59,10 @@ jobs:
         run: mill __.compile
 
       - name: Run tests
-        run: mill __.test
+        run: |
+          command -v script
+          script --version
+          script -q -e -c 'mill --no-daemon __.test' /dev/null
 
       - name: Publish packages
         run: |
