@@ -84,7 +84,7 @@ object TerminalInputParser:
             else MouseAction.Press(mouseButton(code))
           Some(TerminalInput.Mouse(action, row - 1, col - 1, modifiers))
         case _                                            => None
-    case _                                                => None
+    case _                                            => None
 
   private def parseModifiedUnsafe(data: String): Option[TerminalInput] = data match
     case ModifiedArrow(modText, code)                         =>
