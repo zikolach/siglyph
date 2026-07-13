@@ -53,7 +53,7 @@ Alternatives considered:
 Add `TerminalInput.Mouse(...)` with these public values:
 - Position: `row` and `col`, both zero-based terminal cell coordinates in the final frame.
 - Action values: `Press(button)`, `Release(button)`, and `Wheel(direction)`.
-- Button values: `Left`, `Middle`, `Right`, and `Other(code)`.
+- Button values: `Left`, `Middle`, `Right`, and `Other(code)`, where `code` contains only the SGR button identity bits rather than modifier, motion, or wheel flags.
 - Wheel direction values: `Up`, `Down`, `Left`, and `Right`.
 - Modifiers: reuse `KeyModifiers`; SGR mouse reports can set `shift`, `alt`, and `ctrl`; `superKey` remains false for parsed SGR mouse reports.
 

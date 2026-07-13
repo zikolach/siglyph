@@ -45,6 +45,15 @@ class TerminalInputParserSuite extends munit.FunSuite:
       parse("\u001b[<3;1;1M"),
       Vector(TerminalInput.Mouse(MouseAction.Press(MouseButton.Other(3)), row = 0, col = 0))
     )
+    assertEquals(
+      parse("\u001b[<31;1;1M"),
+      Vector(TerminalInput.Mouse(
+        MouseAction.Press(MouseButton.Other(3)),
+        row = 0,
+        col = 0,
+        modifiers = KeyModifiers(ctrl = true, shift = true, alt = true)
+      ))
+    )
 
   test("preserves invalid SGR mouse coordinates as raw input"):
     Vector(

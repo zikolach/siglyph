@@ -99,7 +99,7 @@ object MouseButton:
   case object Middle extends MouseButton
   case object Right  extends MouseButton
 
-  /** Valid mouse button code without a named mapping. */
+  /** SGR button identity bits without modifier, motion, or wheel flags. */
   final case class Other(code: Int) extends MouseButton
 
 /** Mouse wheel direction parsed from terminal wheel reports. */

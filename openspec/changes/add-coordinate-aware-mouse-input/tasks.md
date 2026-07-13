@@ -53,3 +53,8 @@
 - [x] 7.2 Account for terminal scrolling during the initial mouse-enabled frame render.
 - [x] 7.3 Add focused tests for shifted and scrolled mouse frame origins.
 - [x] 7.4 Document that terminal wheel scrollback is captured while mouse reporting is enabled.
+
+## 8. Review Feedback
+
+- [x] 8.1 Clarify that unknown mouse button values exclude SGR modifier and action flags, and add focused parser regression coverage.
+- [x] 8.2 Clarify that terminal mouse reporting configuration records start/stop lifecycle intent rather than immediately toggling a running backend.

@@ -35,7 +35,7 @@ The public mouse action model SHALL define the complete action set as `Press(but
 
 #### Scenario: Unknown button code is preserved
 - **WHEN** an SGR mouse report contains a button code that is valid SGR syntax but has no named button mapping
-- **THEN** the emitted mouse event uses `Other(code)` with the original button code
+- **THEN** the emitted mouse event uses `Other(code)` with the button identity code after modifier, motion, and wheel flags are removed
 
 ### Requirement: Coordinate-aware mouse routing
 The TUI runtime SHALL route mouse events by coordinates using the latest retained rendered bounds tree and the visible terminal origin of the current TUI frame.
