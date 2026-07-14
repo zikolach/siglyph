@@ -34,7 +34,7 @@ class InputPasteSuite extends munit.FunSuite:
       InputResult.NoRender
     )
     assertEquals(input.value, "Ae\u0301B")
-    val active = input.render(20).head
+    val active = input.render(20).lines.head
     assertEquals(Ansi.strip(active), "Ae\u0301B")
     assert(active.indexOf(CursorMarker.Sequence) > active.indexOf("e"), active)
 

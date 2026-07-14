@@ -1,7 +1,7 @@
 package scalatui.components
 
 import scalatui.ansi.Ansi
-import scalatui.core.{Component, ContextualComponent, InputResult, TUIContext}
+import scalatui.core.{Component, ComponentRender, ContextualComponent, InputResult, TUIContext}
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{TerminalInput, TerminalKey}
 
@@ -118,12 +118,13 @@ class Loader(initialOptions: LoaderOptions = LoaderOptions()) extends Component,
     currentFrame = 0
     requestRender()
 
-  override def render(width: Int): Vector[String] =
+  override def render(width: Int): ComponentRender = ComponentRender.text {
     val safeWidth = math.max(0, width)
     if safeWidth <= 0 then Vector("")
     else
       val body = Vector(renderLine(safeWidth))
       if initialOptions.leadingBlankLine then "" +: body else body
+  }
 
   protected def requestRender(): Unit = context.foreach(_.requestRender())
 

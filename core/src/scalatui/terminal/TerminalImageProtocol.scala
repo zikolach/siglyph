@@ -36,17 +36,37 @@ final case class ImageRenderOptions(
     imageId: Option[Int] = None,
     cellDimensions: ImageCellDimensions = ImageCellDimensions(),
     cellDimensionsSource: ImageCellDimensionsSource = ImageCellDimensionsSource.Fixed
-) derives CanEqual
+) derives CanEqual:
+  require(imageId.forall(_ > 0), "Configured Kitty image ID must be positive")
 
-/** Protocol render result and row reservation metadata. */
-final case class ImageRenderResult(sequence: String, rows: Int, imageId: Option[Int])
-    derives CanEqual
+/**
+ * Typed JVM/Native image output and explicit display geometry.
+ *
+ * For values returned by [[TerminalImageProtocol.renderBase64Image]], `width` and `rows` match the
+ * control footprint, and `imageId` identifies Kitty image reuse and cleanup when present. A
+ * component reserves `rows` ordinary frame lines and places `control` within that geometry. The TUI
+ * validates the placement and encodes the control only while assembling final synchronized output;
+ * this value contains no raw protocol string.
+ */
+final case class ImageRenderResult(
+    /** Closed semantic image control. */
+    control: TerminalRenderControl,
+    /** Display-cell width reserved for the image. */
+    width: Int,
+    /** Frame rows reserved for the image. */
+    rows: Int,
+    /** Kitty image identity, or `None` for protocols without that identity. */
+    imageId: Option[Int]
+) derives CanEqual
 
 /**
  * Dependency-free Kitty/iTerm2 terminal image protocol helpers for JVM and Scala Native.
  *
  * Image payload entry points require [[Base64ImagePayload]] and do not validate image format,
  * dimensions, size, terminal capability claims, or payload content beyond that type's contract.
+ * Helpers return closed [[TerminalRenderControl]] values, never arbitrary trusted strings. The TUI
+ * validates their frame geometry and encodes them only at final output. Direct terminal backend
+ * writes remain outside this component-output contract.
  */
 object TerminalImageProtocol:
   private val defaultCellDimensions   = ImageCellDimensions(widthPx = 9, heightPx = 18)
@@ -85,13 +105,10 @@ object TerminalImageProtocol:
   /** Reset cached dimensions to the built-in deterministic fallback. */
   def resetCellDimensions(): Unit = synchronized { currentCellDimensions = defaultCellDimensions }
 
-  private var nextImageId = 1
+  private val imageIdAllocator = KittyImageIdAllocator()
 
   /** Allocate a stable Kitty image id for reuse/update flows. */
-  def allocateImageId(): Int =
-    val id = nextImageId
-    nextImageId += 1
-    id
+  def allocateImageId(): Int = imageIdAllocator.allocate()
 
   /** Calculate image cell size preserving aspect ratio within requested cell bounds. */
   def calculateCellSize(
@@ -149,6 +166,9 @@ object TerminalImageProtocol:
    * Render a validated base64 payload according to terminal capabilities.
    *
    * Payload validation is performed by [[Base64ImagePayload]] before this helper can be called.
+   * `None` means that no supported image protocol is available. A returned result contains the
+   * typed control and exact geometry that a component must reserve; protocol bytes are not encoded
+   * here.
    */
   def renderBase64Image(
       payload: Base64ImagePayload,
@@ -164,52 +184,70 @@ object TerminalImageProtocol:
           val imageId = options.imageId.getOrElse(allocateImageId())
           ImageRenderResult(
             encodeKitty(payload, imageId, size.widthCells, size.heightCells),
+            size.widthCells,
             size.heightCells,
             Some(imageId)
           )
         case ImageProtocol.ITerm2 =>
           ImageRenderResult(
             encodeITerm2(payload, options.filename, size.widthCells, size.heightCells),
+            size.widthCells,
             size.heightCells,
             None
           )
     }
 
-  /** Encode a Kitty graphics sequence that appends validated payload text unchanged. */
+  /**
+   * Construct a typed Kitty image control that retains validated payload text unchanged.
+   *
+   * `imageId`, `widthCells`, and `heightCells` must be positive; invalid values throw
+   * [[IllegalArgumentException]]. The control gains authority through this typed helper and is
+   * encoded only by final TUI output.
+   */
   def encodeKitty(
       payload: Base64ImagePayload,
       imageId: Int,
       widthCells: Int,
       heightCells: Int
-  ): String =
-    s"\u001b_Ga=T,f=100,i=$imageId,c=$widthCells,r=$heightCells,C=1;${payload.value}\u001b\\"
+  ): TerminalRenderControl =
+    TerminalRenderControl.kittyImage(payload, imageId, widthCells, heightCells)
 
   /**
-   * Encode an iTerm2 inline image sequence with unchanged validated payload text.
+   * Construct a typed iTerm2 inline image control with unchanged validated payload text.
    *
    * A present filename is standard-base64 encoded from UTF-8 bytes. An absent filename emits no
-   * `name=` field.
+   * `name=` field. `widthCells` and `heightCells` must be positive; invalid values throw
+   * [[IllegalArgumentException]]. Encoding occurs only in final TUI output.
    */
   def encodeITerm2(
       payload: Base64ImagePayload,
       filename: Option[String],
       widthCells: Int,
       heightCells: Int
-  ): String =
-    val name = filename.fold("")(value =>
-      s"name=${Base64ImagePayload.encode(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)).value};"
-    )
-    s"\u001b]1337;File=${name}inline=1;width=${widthCells};height=${heightCells}:${payload.value}\u0007"
+  ): TerminalRenderControl =
+    TerminalRenderControl.iTerm2Image(payload, filename, widthCells, heightCells)
 
-  /** Kitty delete-image sequence, or `None` when the protocol does not support this operation. */
-  def deleteImage(imageId: Int, capabilities: TerminalCapabilities): Option[String] =
+  /**
+   * Return a typed Kitty uppercase-I delete-image control, or `None` when Kitty cleanup is
+   * unsupported. Final encoding is `a=d,d=I,i=<positive id>`, which removes the targeted image data
+   * and placements before retransmission. Encoding occurs only in final TUI output.
+   */
+  def deleteImage(
+      imageId: Int,
+      capabilities: TerminalCapabilities
+  ): Option[TerminalRenderControl] =
     capabilities.images.collect { case ImageProtocol.Kitty =>
-      s"\u001b_Ga=d,d=i,i=$imageId\u001b\\"
+      TerminalRenderControl.kittyCleanup(Some(imageId))
     }
 
-  /** Kitty delete-all sequence, or `None` when unsupported. */
-  def deleteAllImages(capabilities: TerminalCapabilities): Option[String] =
-    capabilities.images.collect { case ImageProtocol.Kitty => "\u001b_Ga=d,d=A\u001b\\" }
+  /**
+   * Return a typed Kitty delete-all control, or `None` when Kitty cleanup is unsupported. Encoding
+   * occurs only in final TUI output.
+   */
+  def deleteAllImages(capabilities: TerminalCapabilities): Option[TerminalRenderControl] =
+    capabilities.images.collect { case ImageProtocol.Kitty =>
+      TerminalRenderControl.kittyCleanup(None)
+    }
 
   /** Human-readable fallback constrained to `width` visible columns. */
   def fallback(
@@ -231,3 +269,16 @@ object TerminalImageProtocol:
       if char <= '\u001f' || (char >= '\u007f' && char <= '\u009f') then f"\\u${char.toInt}%04X"
       else char.toString
     }
+
+/** Bounded Kitty image identity state that never wraps into a non-positive value. */
+private[terminal] final class KittyImageIdAllocator(initialNextId: Int = 1):
+  require(initialNextId > 0, "Initial Kitty image ID must be positive")
+
+  private var nextId = Option(initialNextId)
+
+  /** Allocate the next positive ID, or fail after `Int.MaxValue` has been allocated. */
+  def allocate(): Int = synchronized {
+    val id = nextId.getOrElse(throw IllegalStateException("Kitty image ID allocator exhausted"))
+    nextId = Option.when(id < Int.MaxValue)(id + 1)
+    id
+  }

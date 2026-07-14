@@ -206,7 +206,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
   override def handleInputResult(input: TerminalInput): InputResult =
     synchronized(handleInputLocked(input))
 
-  override def render(width: Int): Vector[String] = synchronized {
+  override def render(width: Int): ComponentRender = synchronized {
     val layout = EditorLayout.fromBuffer(buffer, width)
     lastRenderedVisualHeight = layout.lines.length
     lastRenderedWidth = width
@@ -218,7 +218,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
       Ansi.truncateToWidth(rendered, width, "")
     }
     refreshAutocompleteOverlayPlacement(requestRender = false)
-    lines
+    ComponentRender.text(lines)
   }
 
   private def handleInputLocked(input: TerminalInput): InputResult =
@@ -881,8 +881,8 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
       ))
     }
 
-  private def renderCurrentAutocompleteOverlay(width: Int): Vector[String] = synchronized {
-    currentAutocomplete.map(_.list.render(width)).getOrElse(Vector.empty)
+  private def renderCurrentAutocompleteOverlay(width: Int): ComponentRender = synchronized {
+    currentAutocomplete.map(_.list.render(width)).getOrElse(ComponentRender.empty)
   }
 
   private def currentOverlayOptions: OverlayOptions =
@@ -1000,7 +1000,7 @@ object Editor:
     }
 
   final class AutocompleteOverlay(owner: Editor, list: SelectList) extends Component:
-    override def render(width: Int): Vector[String] = owner.renderCurrentAutocompleteOverlay(width)
+    override def render(width: Int): ComponentRender = owner.renderCurrentAutocompleteOverlay(width)
 
     override def handleInputResult(input: TerminalInput): InputResult = owner.synchronized {
       owner.handleAutocompleteInput(input)

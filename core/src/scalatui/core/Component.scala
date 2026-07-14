@@ -5,18 +5,23 @@ import scalatui.terminal.TerminalInput
 /**
  * A renderable terminal UI component.
  *
- * Implementations must ensure every rendered line is at most the requested terminal display width
- * after ANSI/non-printing escapes are ignored.
+ * Implementations return ordinary lines and separately positioned semantic controls on JVM and
+ * Scala Native. Every line and control footprint must fit within the requested terminal display
+ * width, and each control footprint must fit within the returned rows.
  */
 trait Component:
   /**
-   * Render this component into terminal lines that fit within `width` visible columns.
+   * Render this component into one typed frame that fits within `width` visible columns.
+   *
+   * Text-only implementations should return `ComponentRender.text`. Ordinary line contents do not
+   * grant semantic control authority. Invalid surviving control geometry fails before terminal
+   * output; the TUI does not move, drop, partially encode, or convert the control to text.
    *
    * The TUI serializes rendering with input callbacks and invokes it without holding the runtime
    * lifecycle lock. A render may request or flush another render; that follow-up is coalesced and
    * runs after the current render rather than recursively.
    */
-  def render(width: Int): Vector[String]
+  def render(width: Int): ComponentRender
 
   /** Legacy/simple input hook for components that do not need result control. */
   def handleInput(input: TerminalInput): Unit = ()

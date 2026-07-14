@@ -123,23 +123,35 @@ trait RenderOriginAware:
   def renderOrigin_=(value: Option[ComponentRenderOrigin]): Unit
 
 /**
- * Small vertical frame builder that tracks render origins for origin-aware components.
+ * Small shared JVM/Native vertical frame builder that tracks render origins for origin-aware
+ * components.
  *
  * This is intentionally lightweight rather than a retained layout tree: it helps application and
  * demo code compose line-oriented frames while allowing components such as
  * [[scalatui.components.Editor]] to place owned overlays adjacent to their rendered area.
+ * `startRow` and `startCol` notify [[RenderOriginAware]] components only. Returned control
+ * coordinates remain frame-local and are rebased only by rows accumulated in this builder.
  */
 final class ComponentFrameBuilder(width: Int, startRow: Int = 0, startCol: Int = 0):
-  private val rendered = Vector.newBuilder[String]
-  private var row      = startRow
+  private val renderedLines    = Vector.newBuilder[String]
+  private val renderedControls = Vector.newBuilder[TerminalControlPlacement]
+  private var localRow         = 0
 
-  /** Append already-rendered lines and advance the tracked row. */
+  /** Append ordinary lines and advance the local row without adding semantic controls. */
   def addLines(lines: Vector[String]): Unit =
-    rendered ++= lines
-    row += lines.length
+    renderedLines ++= lines
+    localRow += lines.length
 
-  /** Append one already-rendered line and advance the tracked row. */
+  /** Append one ordinary line and advance the local row without adding semantic controls. */
   def addLine(line: String): Unit = addLines(Vector(line))
+
+  /** Append a typed child frame and rebase controls only by accumulated local rows. */
+  def addRender(frame: ComponentRender): Unit =
+    renderedLines ++= frame.lines
+    frame.controls.foreach(placement =>
+      renderedControls += placement.translated(rowOffset = localRow)
+    )
+    localRow += frame.lines.length
 
   /**
    * Render and append a component, supplying its render origin when it supports that capability.
@@ -147,10 +159,13 @@ final class ComponentFrameBuilder(width: Int, startRow: Int = 0, startCol: Int =
   def addComponent(component: Component): Unit =
     component match
       case aware: RenderOriginAware =>
-        aware.renderOrigin_=(Some(ComponentRenderOrigin(row, startCol)))
+        aware.renderOrigin_=(Some(ComponentRenderOrigin(startRow + localRow, startCol)))
       case _                        => ()
-    val lines = component.render(width)
-    addLines(lines)
+    addRender(component.render(width))
 
-  /** Return accumulated frame lines. */
-  def result(): Vector[String] = rendered.result()
+  /**
+   * Return accumulated ordinary lines and frame-relative controls.
+   *
+   * The caller or TUI must validate the returned control footprints against the final frame width.
+   */
+  def result(): ComponentRender = ComponentRender(renderedLines.result(), renderedControls.result())

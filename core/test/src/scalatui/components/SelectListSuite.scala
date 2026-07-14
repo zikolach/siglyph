@@ -25,8 +25,8 @@ class SelectListSuite extends munit.FunSuite:
       legacyFiltered.handleInput(TerminalInput.Key(TerminalKey.Character(ch.toString)))
     )
 
-    assertEquals(default.render(20).map(Ansi.strip), Vector("> A"))
-    assertEquals(limited.render(20).length, 1)
+    assertEquals(default.render(20).lines.map(Ansi.strip), Vector("> A"))
+    assertEquals(limited.render(20).lines.length, 1)
     assertEquals(legacyFiltered.selected, None)
 
   test("select list applies theme hooks to selected rows width-safely"):
@@ -47,7 +47,7 @@ class SelectListSuite extends munit.FunSuite:
       )
     )
 
-    val lines = list.render(28)
+    val lines = list.render(28).lines
     assert(lines.head.contains("\u001b[33m"), lines.head)
     assert(lines.head.contains("\u001b[1m"), lines.head)
     assert(lines.head.contains("\u001b[2m"), lines.head)
@@ -68,7 +68,7 @@ class SelectListSuite extends munit.FunSuite:
       )
     )
 
-    val second = list.render(16)(1)
+    val second = list.render(16).lines(1)
     assert(second.contains("\u001b[35m"), second)
     assert(second.contains("\u001b[4m"), second)
     assert(Ansi.strip(second).startsWith("· Beta"), second)
@@ -88,7 +88,7 @@ class SelectListSuite extends munit.FunSuite:
       )
     )
 
-    val rendered = list.render(40)
+    val rendered = list.render(40).lines
     val stripped = rendered.map(Ansi.strip)
     assertEquals(rendered.length, 2)
     assert(stripped.exists(_.contains("First description")), stripped.toString)
@@ -102,7 +102,7 @@ class SelectListSuite extends munit.FunSuite:
       options = SelectListOptions(showDescriptions = false)
     )
 
-    val rendered = Ansi.strip(list.render(40).mkString("\n"))
+    val rendered = Ansi.strip(list.render(40).lines.mkString("\n"))
     assert(!rendered.contains("Hidden description"), rendered)
 
   test("select list can hide scroll info"):
@@ -115,7 +115,7 @@ class SelectListSuite extends munit.FunSuite:
       options = SelectListOptions(maxVisible = 2, showScrollInfo = false)
     )
 
-    val rendered = list.render(20).map(Ansi.strip)
+    val rendered = list.render(20).lines.map(Ansi.strip)
     assertEquals(rendered.length, 2)
     assert(!rendered.exists(_.contains("of 3")), rendered.toString)
 
@@ -125,7 +125,7 @@ class SelectListSuite extends munit.FunSuite:
       options = SelectListOptions(maxVisible = 1, labelMaxWidth = Some(8))
     )
 
-    val wide     = list.render(80).head
+    val wide     = list.render(80).lines.head
     val stripped = Ansi.strip(wide)
     assert(stripped.contains("Very lon"), stripped)
     assert(!stripped.contains("g label"), stripped)
@@ -138,10 +138,10 @@ class SelectListSuite extends munit.FunSuite:
       options = SelectListOptions(maxVisible = 1)
     )
 
-    val narrow = list.render(1)
+    val narrow = list.render(1).lines
     assert(narrow.nonEmpty)
     assert(narrow.forall(Ansi.visibleWidth(_) <= 1), narrow.toString)
-    assertEquals(list.render(0), Vector(""))
+    assertEquals(list.render(0).lines, Vector(""))
 
   test("select list filters results by value label or description"):
     val list = SelectList(
@@ -159,7 +159,7 @@ class SelectListSuite extends munit.FunSuite:
 
     assertEquals(list.query, "g")
     assertEquals(list.selected.map(_.label), Some("Gamma"))
-    val rendered = Ansi.strip(list.render(40).mkString("\n"))
+    val rendered = Ansi.strip(list.render(40).lines.mkString("\n"))
     assert(rendered.contains("Gamma"), rendered)
     assert(!rendered.contains("Alpha"), rendered)
 
@@ -174,7 +174,7 @@ class SelectListSuite extends munit.FunSuite:
         options = SelectListOptions(filtering = SelectListFiltering.Containment)
       )
       query.foreach(ch => list.handleInput(TerminalInput.Key(TerminalKey.Character(ch.toString))))
-      Ansi.strip(list.render(80).mkString("\n"))
+      Ansi.strip(list.render(80).lines.mkString("\n"))
 
     assert(renderedFor("value-only").contains("Alpha"))
     assert(renderedFor("label-only").contains("label-only-token"))
@@ -191,7 +191,7 @@ class SelectListSuite extends munit.FunSuite:
         options = SelectListOptions(filtering = SelectListFiltering.Fuzzy)
       )
       query.foreach(ch => list.handleInput(TerminalInput.Key(TerminalKey.Character(ch.toString))))
-      Ansi.strip(list.render(80).mkString("\n"))
+      Ansi.strip(list.render(80).lines.mkString("\n"))
 
     assert(renderedFor("vto").contains("Alpha"))
     assert(renderedFor("lot").contains("label-only-token"))
@@ -208,12 +208,12 @@ class SelectListSuite extends munit.FunSuite:
 
     "fb".foreach(ch => list.handleInput(TerminalInput.Key(TerminalKey.Character(ch.toString))))
 
-    val rendered = Ansi.strip(list.render(40).mkString("\n"))
+    val rendered = Ansi.strip(list.render(40).lines.mkString("\n"))
     assert(rendered.contains("fooBar"), rendered)
     assert(!rendered.contains("Zeta"), rendered)
 
     list.handleInput(TerminalInput.Key(TerminalKey.Character("x")))
-    val noMatch = Ansi.strip(list.render(40).mkString("\n"))
+    val noMatch = Ansi.strip(list.render(40).lines.mkString("\n"))
     assert(noMatch.contains("No fuzzy matches"), noMatch)
     assert(!noMatch.contains("fooBar"), noMatch)
 
@@ -226,7 +226,7 @@ class SelectListSuite extends munit.FunSuite:
     "fb".foreach(ch => list.handleInput(TerminalInput.Key(TerminalKey.Character(ch.toString))))
 
     assertEquals(list.selected, None)
-    assert(Ansi.strip(list.render(40).mkString("\n")).contains("No items"))
+    assert(Ansi.strip(list.render(40).lines.mkString("\n")).contains("No items"))
 
   test("select list fuzzy filtering ranks matches by score"):
     val list = SelectList(
@@ -240,7 +240,7 @@ class SelectListSuite extends munit.FunSuite:
 
     "fb".foreach(ch => list.handleInput(TerminalInput.Key(TerminalKey.Character(ch.toString))))
 
-    val labels = list.render(80).map(renderedLabel)
+    val labels = list.render(80).lines.map(renderedLabel)
     assertEquals(labels, Vector("fooBar", "fast-boat", "fuzzy boilerplate"))
 
   test("select list fuzzy filtering preserves stable ordering for equal scores"):
@@ -255,7 +255,7 @@ class SelectListSuite extends munit.FunSuite:
 
     "same".foreach(ch => list.handleInput(TerminalInput.Key(TerminalKey.Character(ch.toString))))
 
-    val rendered = list.render(80).map(line => Ansi.strip(line).trim)
+    val rendered = list.render(80).lines.map(line => Ansi.strip(line).trim)
     assertEquals(rendered, Vector("> One", "Two", "Three"))
 
   test("select list containment filtering does not apply fuzzy-only matches"):
@@ -267,7 +267,7 @@ class SelectListSuite extends munit.FunSuite:
     "fb".foreach(ch => list.handleInput(TerminalInput.Key(TerminalKey.Character(ch.toString))))
 
     assertEquals(list.selected, None)
-    val rendered = Ansi.strip(list.render(40).mkString("\n"))
+    val rendered = Ansi.strip(list.render(40).lines.mkString("\n"))
     assert(rendered.contains("No items"), rendered)
     assert(!rendered.contains("fooBar"), rendered)
 
@@ -277,7 +277,7 @@ class SelectListSuite extends munit.FunSuite:
     list.handleInput(TerminalInput.Key(TerminalKey.Character("z")))
 
     assertEquals(list.query, "")
-    assert(Ansi.strip(list.render(40).mkString("\n")).contains("Alpha"))
+    assert(Ansi.strip(list.render(40).lines.mkString("\n")).contains("Alpha"))
 
   test("select list filtering accepts shift-modified printable input"):
     val list = SelectList(
@@ -288,7 +288,7 @@ class SelectListSuite extends munit.FunSuite:
     list.handleInput(TerminalInput.Key(TerminalKey.Character("A"), KeyModifiers(shift = true)))
 
     assertEquals(list.query, "A")
-    val rendered = Ansi.strip(list.render(40).mkString("\n"))
+    val rendered = Ansi.strip(list.render(40).lines.mkString("\n"))
     assert(rendered.contains("Alpha Beta"), rendered)
     assert(!rendered.contains("Other"), rendered)
 
@@ -301,7 +301,7 @@ class SelectListSuite extends munit.FunSuite:
     TestInputStreams.paste("Alpha\nCat").foreach(list.handleInput)
 
     assertEquals(list.query, "Alpha Cat")
-    assert(Ansi.strip(list.render(40).mkString("\n")).contains("Alpha Cat"))
+    assert(Ansi.strip(list.render(40).lines.mkString("\n")).contains("Alpha Cat"))
 
   test("select list filtering rejects shortcut-modified printable input"):
     val list = SelectList(
@@ -315,7 +315,7 @@ class SelectListSuite extends munit.FunSuite:
 
     assertEquals(list.query, "")
     assertEquals(list.selected.map(_.value), Some("alpha"))
-    val rendered = Ansi.strip(list.render(40).mkString("\n"))
+    val rendered = Ansi.strip(list.render(40).lines.mkString("\n"))
     assert(rendered.contains("Alpha"), rendered)
     assert(rendered.contains("Zeta"), rendered)
 
@@ -330,7 +330,7 @@ class SelectListSuite extends munit.FunSuite:
     assertEquals(list.query, "a🙂")
     list.handleInput(TerminalInput.Key(TerminalKey.Backspace))
     assertEquals(list.query, "a")
-    val rendered = Ansi.strip(list.render(40).mkString("\n"))
+    val rendered = Ansi.strip(list.render(40).lines.mkString("\n"))
     assert(rendered.contains("Alpha"), rendered)
     assert(rendered.contains("a🙂 match"), rendered)
 
@@ -379,7 +379,7 @@ class SelectListSuite extends munit.FunSuite:
       TerminalInput.Key(TerminalKey.Character("z"))
     )
 
-    val line = list.render(20).head
+    val line = list.render(20).lines.head
     assert(line.contains("\u001b[31m"), line)
     assert(Ansi.strip(line).contains("No matching"), line)
     assert(Ansi.visibleWidth(line) <= 20, line)
@@ -429,7 +429,7 @@ class SelectListSuite extends munit.FunSuite:
       )
     )
 
-    val line = list.render(10).head
+    val line = list.render(10).lines.head
     assert(line.contains("\u001b[31m"), line)
     assert(Ansi.strip(line).startsWith("No"), line)
     assert(Ansi.visibleWidth(line) <= 10, line)

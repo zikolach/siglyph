@@ -1,7 +1,7 @@
 package scalatui.components
 
 import scalatui.ansi.Ansi
-import scalatui.core.Component
+import scalatui.core.{Component, ComponentRender}
 import scalatui.syntax.Equality.*
 
 /**
@@ -30,11 +30,11 @@ final class TruncatedText(
 
   def text_=(value: String): Unit = content = value
 
-  override def render(width: Int): Vector[String] =
+  override def render(width: Int): ComponentRender =
     val safeWidth = math.max(0, width)
     val emptyLine = " ".repeat(safeWidth)
     val vertical  = Vector.fill(math.max(0, paddingY))(emptyLine)
-    vertical ++ Vector(contentLine(safeWidth)) ++ vertical
+    ComponentRender.text(vertical ++ Vector(contentLine(safeWidth)) ++ vertical)
 
   private def contentLine(width: Int): String =
     if width <= 0 then ""

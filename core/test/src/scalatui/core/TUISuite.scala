@@ -36,10 +36,10 @@ import java.util.concurrent.atomic.AtomicReference
 
 class TUISuite extends munit.FunSuite:
   final class MutableLine(var value: String) extends Component:
-    override def render(width: Int): Vector[String] = Vector(value)
+    override def render(width: Int): ComponentRender = ComponentRender.text(Vector(value))
 
   final class MutableFrame(var values: Vector[String]) extends Component:
-    override def render(width: Int): Vector[String] = values
+    override def render(width: Int): ComponentRender = ComponentRender.text(values)
 
   final class AsyncStartupTerminal(
       inputs: Vector[TerminalInput],
@@ -332,7 +332,8 @@ class TUISuite extends munit.FunSuite:
     ))
     val received  = scala.collection.mutable.ArrayBuffer.empty[String]
     val component = new Component:
-      override def render(width: Int): Vector[String] = Vector(received.mkString)
+      override def render(width: Int): ComponentRender =
+        ComponentRender.text(Vector(received.mkString))
 
       override def handleInputResult(input: TerminalInput): InputResult = input match
         case TerminalInput.Key(TerminalKey.Character(value), _) =>
@@ -354,7 +355,8 @@ class TUISuite extends munit.FunSuite:
     ))
     val received  = scala.collection.mutable.ArrayBuffer.empty[String]
     val component = new Component:
-      override def render(width: Int): Vector[String] = Vector(received.mkString)
+      override def render(width: Int): ComponentRender =
+        ComponentRender.text(Vector(received.mkString))
 
       override def handleInputResult(input: TerminalInput): InputResult = input match
         case TerminalInput.Key(TerminalKey.Character("a"), _)   =>
@@ -644,9 +646,9 @@ class TUISuite extends munit.FunSuite:
     val terminal      = VirtualTerminal(0, 0)
     var renderedWidth = 0
     val component     = new Component:
-      override def render(width: Int): Vector[String] =
+      override def render(width: Int): ComponentRender =
         renderedWidth = width
-        Vector("x")
+        ComponentRender.text("x")
     val tui           = TUI(terminal)
     tui.addChild(component)
 
@@ -694,30 +696,12 @@ class TUISuite extends munit.FunSuite:
     assert(visibleOutputLines(terminal.output).forall(Ansi.visibleWidth(_) <= 1), terminal.output)
     assertEquals(tui.sanitizedLineCount, 1)
 
-  test("image protocol escapes remain in synchronized sanitized output"):
-    val terminal = VirtualTerminal(3, 5)
-    val sequence = TerminalImageProtocol.renderBase64Image(
-      Base64ImagePayload.from("AAAA").toOption.get,
-      ImageDimensions(10, 10),
-      TerminalCapabilities(trueColor = true, hyperlinks = true, images = Some(ImageProtocol.Kitty)),
-      terminalWidth = 3,
-      ImageRenderOptions(imageId = Some(5))
-    ).get.sequence
-    val tui      = TUI(terminal)
-    tui.addChild(MutableLine(sequence + "abcdef"))
-
-    tui.start()
-
-    assert(terminal.output.contains("\u001b_G"), terminal.output)
-    assert(terminal.output.contains("abc" + Ansi.Reset + TUI.LineReset), terminal.output)
-    assertEquals(tui.sanitizedLineCount, 1)
-
   test("input-triggered over-wide render is sanitized without uncaught exception"):
     val terminal  = VirtualTerminal(3, 5)
     val component = new Component:
       var value                                            = "ok"
       override def handleInput(input: TerminalInput): Unit = value = "abcdef"
-      override def render(width: Int): Vector[String]      = Vector(value)
+      override def render(width: Int): ComponentRender     = ComponentRender.text(Vector(value))
     val tui       = TUI(terminal)
     tui.addChild(component)
     tui.setFocus(component)
@@ -734,9 +718,9 @@ class TUISuite extends munit.FunSuite:
     val component = new Component:
       var fail                                             = false
       override def handleInput(input: TerminalInput): Unit = fail = true
-      override def render(width: Int): Vector[String]      =
+      override def render(width: Int): ComponentRender     =
         if fail then throw RuntimeException("boom")
-        Vector("stable")
+        ComponentRender.text("stable")
     val tui       = TUI(terminal)
     tui.addChild(component)
     tui.setFocus(component)
@@ -808,7 +792,7 @@ class TUISuite extends munit.FunSuite:
       override def handleInput(input: TerminalInput): Unit = input match
         case TerminalInput.Key(TerminalKey.Character(text), _) => value = text
         case _                                                 => ()
-      override def render(width: Int): Vector[String]      = Vector(value)
+      override def render(width: Int): ComponentRender     = ComponentRender.text(Vector(value))
     val tui       = TUI(terminal)
     tui.addChild(component)
     tui.setFocus(component)
@@ -827,7 +811,7 @@ class TUISuite extends munit.FunSuite:
       override def handleInputResult(input: TerminalInput): InputResult =
         componentLog :+= input
         InputResult.NoRender
-      override def render(width: Int): Vector[String]                   = Vector("stable")
+      override def render(width: Int): ComponentRender                  = ComponentRender.text(Vector("stable"))
     val tui          = TUI(terminal)
     tui.addChild(component)
     tui.setFocus(component)
@@ -851,7 +835,7 @@ class TUISuite extends munit.FunSuite:
       override def handleInputResult(input: TerminalInput): InputResult =
         delivered += 1
         InputResult.NoRender
-      override def render(width: Int): Vector[String]                   = Vector("component")
+      override def render(width: Int): ComponentRender                  = ComponentRender.text(Vector("component"))
     val tui       = TUI(terminal)
     tui.addChild(line)
     tui.addChild(component)
@@ -876,7 +860,7 @@ class TUISuite extends munit.FunSuite:
       override def handleInputResult(input: TerminalInput): InputResult =
         componentCalls += 1
         InputResult.NoRender
-      override def render(width: Int): Vector[String]                   = Vector("stable")
+      override def render(width: Int): ComponentRender                  = ComponentRender.text(Vector("stable"))
     val tui            = TUI(terminal)
     tui.addChild(component)
     tui.setFocus(component)
@@ -914,7 +898,7 @@ class TUISuite extends munit.FunSuite:
       override def handleInputResult(input: TerminalInput): InputResult =
         delivered += 1
         InputResult.NoRender
-      override def render(width: Int): Vector[String]                   = Vector("stable")
+      override def render(width: Int): ComponentRender                  = ComponentRender.text(Vector("stable"))
     val tui       = TUI(terminal)
     tui.addChild(component)
     tui.setFocus(component)
@@ -935,7 +919,7 @@ class TUISuite extends munit.FunSuite:
       override def handleInputResult(input: TerminalInput): InputResult =
         delivered = Some(input)
         InputResult.NoRender
-      override def render(width: Int): Vector[String]                   = Vector("stable")
+      override def render(width: Int): ComponentRender                  = ComponentRender.text(Vector("stable"))
     val tui       = TUI(terminal)
     tui.addChild(component)
     tui.setFocus(component)
@@ -974,7 +958,7 @@ class TUISuite extends munit.FunSuite:
       override def handleInputResult(input: TerminalInput): InputResult =
         handled += 1
         InputResult.NoRender
-      override def render(width: Int): Vector[String]                   = Vector("stable")
+      override def render(width: Int): ComponentRender                  = ComponentRender.text(Vector("stable"))
     val tui       = TUI(terminal)
     tui.addChild(component)
     tui.setFocus(component)
@@ -990,7 +974,7 @@ class TUISuite extends munit.FunSuite:
     val terminal  = VirtualTerminal(20, 5)
     val component = new Component:
       override def handleInputResult(input: TerminalInput): InputResult = InputResult.Ignored
-      override def render(width: Int): Vector[String]                   = Vector("stable")
+      override def render(width: Int): ComponentRender                  = ComponentRender.text(Vector("stable"))
     val tui       = TUI(terminal)
     tui.addChild(component)
     tui.setFocus(component)
@@ -1005,7 +989,7 @@ class TUISuite extends munit.FunSuite:
     val terminal  = VirtualTerminal(20, 5)
     val component = new Component:
       override def handleInputResult(input: TerminalInput): InputResult = InputResult.Exit
-      override def render(width: Int): Vector[String]                   = Vector("stable")
+      override def render(width: Int): ComponentRender                  = ComponentRender.text(Vector("stable"))
     val tui       = TUI(terminal)
     tui.addChild(component)
     tui.setFocus(component)
@@ -1165,7 +1149,7 @@ class TUISuite extends munit.FunSuite:
       override def handleInputResult(input: TerminalInput): InputResult =
         delivered :+= input
         InputResult.NoRender
-      override def render(width: Int): Vector[String]                   = Vector("stable")
+      override def render(width: Int): ComponentRender                  = ComponentRender.text(Vector("stable"))
     val tui       = TUI(terminal)
     tui.addChild(component)
     tui.setFocus(component)
@@ -1201,7 +1185,7 @@ class TUISuite extends munit.FunSuite:
       override def handleInputResult(input: TerminalInput): InputResult =
         delivered :+= input
         InputResult.NoRender
-      override def render(width: Int): Vector[String]                   = Vector("stable")
+      override def render(width: Int): ComponentRender                  = ComponentRender.text(Vector("stable"))
     val tui       = TUI(terminal)
     tui.addChild(component)
     tui.setFocus(component)
@@ -1214,9 +1198,9 @@ class TUISuite extends munit.FunSuite:
   test("valid cell-size reply triggers repaint"):
     val terminal  = VirtualTerminal(20, 5)
     val component = new Component:
-      override def render(width: Int): Vector[String] =
+      override def render(width: Int): ComponentRender =
         val dimensions = TerminalImageProtocol.cellDimensions
-        Vector(s"${dimensions.widthPx}x${dimensions.heightPx}")
+        ComponentRender.text(s"${dimensions.widthPx}x${dimensions.heightPx}")
     val tui       = TUI(terminal)
     tui.addChild(component)
     tui.start()
@@ -1233,7 +1217,7 @@ class TUISuite extends munit.FunSuite:
       override def handleInputResult(input: TerminalInput): InputResult =
         delivered :+= input
         InputResult.NoRender
-      override def render(width: Int): Vector[String]                   = Vector("stable")
+      override def render(width: Int): ComponentRender                  = ComponentRender.text(Vector("stable"))
     val tui       = TUI(terminal)
     tui.addChild(component)
     tui.setFocus(component)
@@ -1335,7 +1319,7 @@ class TUISuite extends munit.FunSuite:
       override def wantsKeyRelease: Boolean                             = true
       override def handleInputResult(input: TerminalInput): InputResult =
         InputResult.NoRender
-      override def render(width: Int): Vector[String]                   = Vector("stable")
+      override def render(width: Int): ComponentRender                  = ComponentRender.text(Vector("stable"))
     tui.addChild(component)
     tui.setFocus(component)
     val thread    = Thread(() => tui.run())
@@ -1378,12 +1362,12 @@ class TUISuite extends munit.FunSuite:
     var baseHits    = 0
     var overlayHits = 0
     val base        = new Component:
-      override def render(width: Int): Vector[String]                   = Vector("base")
+      override def render(width: Int): ComponentRender                  = ComponentRender.text(Vector("base"))
       override def handleInputResult(input: TerminalInput): InputResult =
         baseHits += 1
         InputResult.NoRender
     val overlay     = new Component:
-      override def render(width: Int): Vector[String]                   = Vector("over")
+      override def render(width: Int): ComponentRender                  = ComponentRender.text(Vector("over"))
       override def handleInputResult(input: TerminalInput): InputResult =
         overlayHits += 1
         InputResult.NoRender
@@ -1404,16 +1388,16 @@ class TUISuite extends munit.FunSuite:
     var firstHits    = 0
     var secondHits   = 0
     val base         = new Component with Focusable:
-      override def render(width: Int): Vector[String] = Vector("base")
-      override def focused: Boolean                   = baseFocused
-      override def focused_=(value: Boolean): Unit    = baseFocused = value
+      override def render(width: Int): ComponentRender = ComponentRender.text(Vector("base"))
+      override def focused: Boolean                    = baseFocused
+      override def focused_=(value: Boolean): Unit     = baseFocused = value
     val first        = new Component:
-      override def render(width: Int): Vector[String]                   = Vector("one")
+      override def render(width: Int): ComponentRender                  = ComponentRender.text(Vector("one"))
       override def handleInputResult(input: TerminalInput): InputResult =
         firstHits += 1
         InputResult.NoRender
     val second       = new Component:
-      override def render(width: Int): Vector[String]                   = Vector("two")
+      override def render(width: Int): ComponentRender                  = ComponentRender.text(Vector("two"))
       override def handleInputResult(input: TerminalInput): InputResult =
         secondHits += 1
         InputResult.NoRender

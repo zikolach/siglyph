@@ -22,23 +22,23 @@ class EditorSuite extends munit.FunSuite:
     val editor = Editor("abc")
     editor.setCursor(EditorCursor(0, 1))
 
-    assertEquals(editor.render(10).head, "abc")
+    assertEquals(editor.render(10).lines.head, "abc")
 
     editor.focused = true
-    assertEquals(editor.render(10).head, s"a${CursorMarker.Sequence}\u001b[7mb\u001b[27mc")
+    assertEquals(editor.render(10).lines.head, s"a${CursorMarker.Sequence}\u001b[7mb\u001b[27mc")
 
   test("renders inverse space at line end and keeps output within width"):
     val editor = Editor("abcd")
     editor.focused = true
 
-    val lines = editor.render(2)
+    val lines = editor.render(2).lines
 
     assertEquals(lines.map(Ansi.strip), Vector("ab", "cd"))
     assert(lines.forall(line => Ansi.visibleWidth(line) <= 2), lines.toString)
 
     val roomy = Editor("ab")
     roomy.focused = true
-    assertEquals(roomy.render(5).head, s"ab${CursorMarker.Sequence}\u001b[7m \u001b[27m")
+    assertEquals(roomy.render(5).lines.head, s"ab${CursorMarker.Sequence}\u001b[7m \u001b[27m")
 
   test("editor suppresses cursor marker while autocomplete owns input"):
     val editor = Editor(
@@ -52,7 +52,7 @@ class EditorSuite extends munit.FunSuite:
 
     assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Tab)), InputResult.Render)
 
-    val rendered = editor.render(20).head
+    val rendered = editor.render(20).lines.head
     assert(!rendered.contains(CursorMarker.Sequence), rendered)
 
   test("inserts printable input and multiline paste via editor buffer"):
@@ -82,7 +82,7 @@ class EditorSuite extends munit.FunSuite:
       case InputResult.Handled(true) => true
       case _                         => false))
     assertEquals(editor.text, "a[paste #1 +11 lines]b")
-    assert(editor.render(80).head.contains("[paste #1 +11 lines]"))
+    assert(editor.render(80).lines.head.contains("[paste #1 +11 lines]"))
 
     editor.handleInputResult(TerminalInput.Key(TerminalKey.Enter))
     assertEquals(submitted, s"a${pasted}b")
@@ -171,7 +171,7 @@ class EditorSuite extends munit.FunSuite:
     val terminal = VirtualTerminal(40, 8)
     var renders  = 0
     val wrapper  = new scalatui.core.Component:
-      override def render(width: Int): Vector[String]                   =
+      override def render(width: Int): scalatui.core.ComponentRender    =
         renders += 1
         editor.render(width)
       override def handleInputResult(input: TerminalInput): InputResult =
@@ -532,7 +532,7 @@ class EditorSuite extends munit.FunSuite:
 
   test("page up and page down preserve wrapped visual columns"):
     val editor = Editor("abcdefghijklmnopqrst")
-    editor.render(1)
+    editor.render(1).lines
     editor.setCursor(EditorCursor(0, 10))
     assertEquals(
       editor.handleInputResult(TerminalInput.Key(TerminalKey.PageUp)),
@@ -547,7 +547,7 @@ class EditorSuite extends munit.FunSuite:
 
   test("jump keybinds jump to typed target characters"):
     val editor = Editor("abracadabra")
-    editor.render(1)
+    editor.render(1).lines
     editor.setCursor(EditorCursor(0, 0))
     assertEquals(
       editor.handleInputResult(TerminalInput.Key(

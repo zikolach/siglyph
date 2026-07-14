@@ -67,7 +67,8 @@ class UtilityComponentsSuite extends munit.FunSuite:
 
   private final class TestSubmenu extends Component:
     var controller                                                    = Option.empty[SettingsSubmenuController]
-    override def render(width: Int): Vector[String]                   = Vector("submenu")
+    override def render(width: Int): scalatui.core.ComponentRender    =
+      scalatui.core.ComponentRender.text("submenu")
     override def handleInputResult(input: TerminalInput): InputResult = input match
       case TerminalInput.Key(TerminalKey.Escape, _) =>
         controller.foreach(_.cancel())
@@ -76,7 +77,7 @@ class UtilityComponentsSuite extends munit.FunSuite:
 
   test("truncated text uses first line and pads to width"):
     val text  = TruncatedText("hello\nworld", paddingX = 1, paddingY = 1)
-    val lines = text.render(8)
+    val lines = text.render(8).lines
 
     assertEquals(lines.length, 3)
     assertEquals(Ansi.visibleWidth(lines.head), 8)
@@ -87,19 +88,19 @@ class UtilityComponentsSuite extends munit.FunSuite:
   test("truncated text truncates ANSI and Unicode content within narrow widths"):
     val text = TruncatedText("\u001b[31mabcdef\u001b[0m🙂")
 
-    val five = text.render(5).head
+    val five = text.render(5).lines.head
     assert(Ansi.visibleWidth(five) <= 5, five)
     assert(Ansi.strip(five).startsWith("abcde"), Ansi.strip(five))
 
-    val one = text.render(1).head
+    val one = text.render(1).lines.head
     assert(Ansi.visibleWidth(one) <= 1, one)
 
   test("truncated text can be mutated"):
     val text = TruncatedText("old", paddingX = 0)
-    assertEquals(Ansi.strip(text.render(10).head).trim, "old")
+    assertEquals(Ansi.strip(text.render(10).lines.head).trim, "old")
 
     text.text = "new value"
-    assertEquals(Ansi.strip(text.render(10).head).trim, "new value")
+    assertEquals(Ansi.strip(text.render(10).lines.head).trim, "new value")
 
   test("settings list renders labels, values, descriptions, and hints width-safely"):
     val list = SettingsList(
@@ -116,7 +117,7 @@ class UtilityComponentsSuite extends munit.FunSuite:
       SettingsListOptions(maxVisible = 5)
     )
 
-    val lines = list.render(28)
+    val lines = list.render(28).lines
     assert(lines.exists(line => Ansi.strip(line).contains("Theme")), lines.toString)
     assert(lines.exists(line => Ansi.strip(line).contains("dark")), lines.toString)
     assert(lines.exists(line => Ansi.strip(line).contains("Choose")), lines.toString)
@@ -125,7 +126,7 @@ class UtilityComponentsSuite extends munit.FunSuite:
 
   test("settings list renders empty and no-match states"):
     val empty = SettingsList(Vector.empty, SettingsListOptions(showHints = false))
-    assertEquals(Ansi.strip(empty.render(20).head), "No settings")
+    assertEquals(Ansi.strip(empty.render(20).lines.head), "No settings")
 
     val filtered = SettingsList(
       Vector(SettingItem("theme", "Theme", "dark")),
@@ -133,7 +134,7 @@ class UtilityComponentsSuite extends munit.FunSuite:
     )
     filtered.handleInput(TerminalInput.Key(TerminalKey.Character("z")))
 
-    assert(filtered.render(20).exists(line => Ansi.strip(line).contains("No matching")))
+    assert(filtered.render(20).lines.exists(line => Ansi.strip(line).contains("No matching")))
 
   test("settings list scrolls visible rows and reports scroll range"):
     val list = SettingsList(
@@ -149,7 +150,7 @@ class UtilityComponentsSuite extends munit.FunSuite:
     list.handleInput(TerminalInput.Key(TerminalKey.Down))
     list.handleInput(TerminalInput.Key(TerminalKey.Down))
 
-    val stripped = list.render(20).map(Ansi.strip)
+    val stripped = list.render(20).lines.map(Ansi.strip)
     assert(stripped.exists(_.contains("Beta")), stripped.toString)
     assert(stripped.exists(_.contains("Gamma")), stripped.toString)
     assert(stripped.exists(_.contains("2-3 of 4")), stripped.toString)
@@ -166,7 +167,7 @@ class UtilityComponentsSuite extends munit.FunSuite:
       SettingsListOptions(maxVisible = 1)
     )
 
-    val lines = list.render(1)
+    val lines = list.render(1).lines
     assert(lines.nonEmpty)
     assert(lines.forall(Ansi.visibleWidth(_) <= 1), lines.toString)
 
@@ -334,7 +335,7 @@ class UtilityComponentsSuite extends munit.FunSuite:
 
     assertEquals(list.query, "co")
     assertEquals(list.selected.map(_.id), Some("color"))
-    val stripped = list.render(20).map(Ansi.strip).mkString("\n")
+    val stripped = list.render(20).lines.map(Ansi.strip).mkString("\n")
     assert(stripped.contains("Search: co"), stripped)
     assert(stripped.contains("Color"), stripped)
     assert(!stripped.contains("Theme"), stripped)
@@ -372,7 +373,7 @@ class UtilityComponentsSuite extends munit.FunSuite:
     list.handleInput(TerminalInput.Key(TerminalKey.Character("b")))
 
     assertEquals(list.selected.map(_.id), Some("foo-bar"))
-    val lines                 = list.render(24)
+    val lines                 = list.render(24).lines
     val rendered              = lines.map(Ansi.strip).mkString("\n")
     val fooBarIndex           = rendered.indexOf("Foo Bar")
     val fastBoatIndex         = rendered.indexOf("Fast Boat")
@@ -396,7 +397,7 @@ class UtilityComponentsSuite extends munit.FunSuite:
         SettingsListOptions(filtering = SettingsListFiltering.Fuzzy, showHints = false)
       )
       query.foreach(ch => list.handleInput(TerminalInput.Key(TerminalKey.Character(ch.toString))))
-      Ansi.strip(list.render(80).mkString("\n"))
+      Ansi.strip(list.render(80).lines.mkString("\n"))
 
     assert(renderedFor("iot").contains("Alpha"))
     assert(renderedFor("lot").contains("label-only-token"))
@@ -412,7 +413,7 @@ class UtilityComponentsSuite extends munit.FunSuite:
     list.handleInput(TerminalInput.Key(TerminalKey.Character("f")))
     list.handleInput(TerminalInput.Key(TerminalKey.Character("b")))
 
-    val rendered = Ansi.strip(list.render(40).mkString("\n"))
+    val rendered = Ansi.strip(list.render(40).lines.mkString("\n"))
     assert(rendered.contains("No matching settings"), rendered)
     assert(!rendered.contains("fooBar"), rendered)
     assertEquals(list.selected, None)
@@ -426,7 +427,7 @@ class UtilityComponentsSuite extends munit.FunSuite:
     list.handleInput(TerminalInput.Key(TerminalKey.Character("f")))
     list.handleInput(TerminalInput.Key(TerminalKey.Character("b")))
 
-    val rendered = Ansi.strip(list.render(40).mkString("\n"))
+    val rendered = Ansi.strip(list.render(40).lines.mkString("\n"))
     assert(rendered.contains("No matching settings"), rendered)
     assert(!rendered.contains("fooBar"), rendered)
     assertEquals(list.selected, None)
@@ -449,7 +450,7 @@ class UtilityComponentsSuite extends munit.FunSuite:
     list.handleInput(TerminalInput.Key(TerminalKey.Character("f")))
     list.handleInput(TerminalInput.Key(TerminalKey.Character("b")))
 
-    val rendered = Ansi.strip(list.render(40).mkString("\n"))
+    val rendered = Ansi.strip(list.render(40).lines.mkString("\n"))
     assert(rendered.contains("Foo Bar"), rendered)
     assertEquals(list.selected.map(_.id), Some("foo-bar"))
 
@@ -465,7 +466,7 @@ class UtilityComponentsSuite extends munit.FunSuite:
 
     list.handleInput(TerminalInput.Key(TerminalKey.Character("z")))
 
-    val lines    = list.render(18)
+    val lines    = list.render(18).lines
     val rendered = Ansi.strip(lines.mkString("\n"))
     assert(rendered.contains("No fuzzy settings"), rendered)
     assert(!rendered.contains("Alpha"), rendered)
@@ -473,7 +474,7 @@ class UtilityComponentsSuite extends munit.FunSuite:
 
   test("loader renders default message and indicator width-safely"):
     val loader = Loader()
-    val lines  = loader.render(20)
+    val lines  = loader.render(20).lines
 
     assertEquals(lines.length, 2)
     assertEquals(lines.head, "")
@@ -483,7 +484,7 @@ class UtilityComponentsSuite extends munit.FunSuite:
 
   test("loader hides empty indicator"):
     val loader = Loader(LoaderOptions(indicator = LoaderIndicatorOptions(frames = Vector.empty)))
-    val line   = Ansi.strip(loader.render(20).last).trim
+    val line   = Ansi.strip(loader.render(20).lines.last).trim
 
     assertEquals(line, "Loading...")
 
@@ -495,12 +496,12 @@ class UtilityComponentsSuite extends munit.FunSuite:
       messageStyle = value => s"\u001b[2m$value\u001b[0m"
     ))
 
-    val wide = loader.render(20).last
+    val wide = loader.render(20).lines.last
     assert(wide.contains("\u001b[31m"), wide)
     assert(wide.contains("\u001b[2m"), wide)
     assert(Ansi.visibleWidth(wide) <= 20, wide)
 
-    val narrow = loader.render(1)
+    val narrow = loader.render(1).lines
     assert(narrow.forall(Ansi.visibleWidth(_) <= 1), narrow.toString)
 
   test("loader lifecycle and tick behavior are deterministic"):
@@ -534,12 +535,12 @@ class UtilityComponentsSuite extends munit.FunSuite:
     assertEquals(loader.frame, "b")
 
     loader.setMessage("Done")
-    assert(Ansi.strip(loader.render(20).last).contains("Done"))
+    assert(Ansi.strip(loader.render(20).lines.last).contains("Done"))
 
     loader.setIndicator(LoaderIndicatorOptions(Vector("x", "y"), intervalMs = -1))
     assertEquals(loader.frame, "x")
     assertEquals(loader.intervalMs, Loader.DefaultIntervalMs)
-    assert(Ansi.strip(loader.render(20).last).contains("x"))
+    assert(Ansi.strip(loader.render(20).lines.last).contains("x"))
 
   test("cancellable loader handles escape and exposes cancellation token"):
     val loader = CancellableLoader()
@@ -575,4 +576,4 @@ class UtilityComponentsSuite extends munit.FunSuite:
       InputResult.Ignored
     )
     assertEquals(loader.cancelled, false)
-    assert(loader.render(8).forall(Ansi.visibleWidth(_) <= 8))
+    assert(loader.render(8).lines.forall(Ansi.visibleWidth(_) <= 8))

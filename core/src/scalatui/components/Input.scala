@@ -1,7 +1,7 @@
 package scalatui.components
 
 import scalatui.ansi.Ansi
-import scalatui.core.{Component, CursorMarker, Focusable, InputResult}
+import scalatui.core.{Component, ComponentRender, CursorMarker, Focusable, InputResult}
 import scalatui.editing.{KillRing, UndoStack, WordNavigation}
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{
@@ -104,7 +104,7 @@ final class Input(
         handleNonPasteInput(input)
         InputResult.Render
 
-  override def render(width: Int): Vector[String] =
+  override def render(width: Int): ComponentRender =
     val cs             = clusters
     val visibleCursor  = pasteSession.fold(cursorCluster)(_.cursorCluster)
     val before         = cs.take(visibleCursor).mkString
@@ -112,7 +112,7 @@ final class Input(
     val after          = cs.drop(visibleCursor + 1).mkString
     val marker         = if isFocused then CursorMarker.Sequence else ""
     val renderedCursor = if isFocused then s"\u001b[7m$at\u001b[27m" else at
-    Vector(Ansi.truncateToWidth(before + marker + renderedCursor + after, width, ""))
+    ComponentRender.text(Ansi.truncateToWidth(before + marker + renderedCursor + after, width, ""))
 
   private def startPaste(): Unit =
     val cs     = clusters

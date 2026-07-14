@@ -57,30 +57,48 @@ object OverlayRenderer:
     ResolvedOverlay(width = width, row = row, col = col, maxHeight = maxHeight)
 
   def composite(
-      baseLines: Vector[String],
-      overlays: Vector[(Vector[String], ResolvedOverlay)],
+      baseFrame: ComponentRender,
+      overlays: Vector[(ComponentRender, ResolvedOverlay)],
       terminalWidth: Int,
       terminalHeight: Int
-  ): Vector[String] =
-    if overlays.isEmpty then baseLines
+  ): ComponentRender =
+    if overlays.isEmpty then baseFrame
     else
       val termWidth     = math.max(1, terminalWidth)
       val termHeight    = math.max(1, terminalHeight)
-      val minHeight     = overlays.foldLeft(baseLines.length) { case (height, (lines, layout)) =>
-        math.max(height, layout.row + lines.length)
+      val minHeight     = overlays.foldLeft(baseFrame.lines.length) {
+        case (height, (frame, layout)) => math.max(height, layout.row + frame.lines.length)
       }
-      val buffer        = baseLines.padTo(minHeight, "").toArray
+      val lineBuffer    = baseFrame.lines.padTo(minHeight, "").toArray
       val viewportStart = math.max(0, minHeight - termHeight)
+      var controls      = baseFrame.controls
 
-      overlays.foreach { case (lines, layout) =>
-        lines.zipWithIndex.foreach { case (line, offset) =>
-          val index = viewportStart + layout.row + offset
-          if index >= 0 && index < buffer.length then
-            buffer(index) = compositeLine(buffer(index), line, layout.col, layout.width, termWidth)
+      overlays.foreach { case (frame, layout) =>
+        val finalRow = viewportStart + layout.row
+        controls = controls.filterNot(intersectsOverlay(_, finalRow, layout, frame.lines.length))
+        controls ++= frame.controls.map(_.translated(finalRow, layout.col))
+        frame.lines.zipWithIndex.foreach { case (line, offset) =>
+          val index = finalRow + offset
+          if index >= 0 && index < lineBuffer.length then
+            lineBuffer(index) =
+              compositeLine(lineBuffer(index), line, layout.col, layout.width, termWidth)
         }
       }
 
-      buffer.toVector
+      ComponentRender(lineBuffer.toVector, controls)
+
+  private def intersectsOverlay(
+      placement: TerminalControlPlacement,
+      overlayRow: Int,
+      layout: ResolvedOverlay,
+      overlayHeight: Int
+  ): Boolean =
+    val controlBottom = placement.row + placement.control.rows
+    val controlRight  = placement.column + placement.control.width
+    val overlayBottom = overlayRow + overlayHeight
+    val overlayRight  = layout.col + layout.width
+    placement.control.width > 0 && placement.row < overlayBottom && controlBottom > overlayRow &&
+    placement.column < overlayRight && controlRight > layout.col
 
   def compositeLine(
       baseLine: String,

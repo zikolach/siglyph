@@ -1,7 +1,7 @@
 package scalatui.image
 
 import scalatui.ansi.Ansi
-import scalatui.core.Component
+import scalatui.core.{Component, ComponentRender, TerminalControlPlacement}
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{
   Base64ImagePayload,
@@ -12,7 +12,8 @@ import scalatui.terminal.{
   ImageCellSize,
   ImageRenderOptions,
   TerminalCapabilities,
-  TerminalImageProtocol
+  TerminalImageProtocol,
+  TerminalRenderControl
 }
 
 import java.io.IOException
@@ -220,10 +221,13 @@ object ImageSizing:
     )
 
 /**
- * Optional image component that emits Kitty/iTerm2 protocol escapes when supported.
+ * Optional image component that emits typed Kitty/iTerm2 controls when supported.
  *
  * The component requires a [[scalatui.terminal.Base64ImagePayload]] and caller-supplied dimensions
  * so this module stays dependency-free. It does not decode, validate, scale, or transcode images.
+ * Supported output reserves ordinary blank rows and carries one semantic control separately. The
+ * TUI validates that control's geometry and encodes it only while assembling final synchronized
+ * output. Unsupported capability returns readable ordinary text with no control.
  *
  * By default, this high-level component opts into runtime terminal cell dimensions because it is
  * rendered inside a [[scalatui.core.TUI]] lifecycle that sends the cell-size query on start. Pass
@@ -245,28 +249,38 @@ final class Image(
   /** Protocol image id used for Kitty render/reuse flows, if one has been allocated. */
   def currentImageId: Option[Int] = imageId
 
-  override def render(width: Int): Vector[String] =
+  override def render(width: Int): ComponentRender =
     val safeWidth = math.max(0, width)
-    TerminalImageProtocol.renderBase64Image(
-      payload,
-      dimensions,
-      capabilities,
-      math.max(1, safeWidth),
-      options.copy(imageId = imageId)
-    ) match
-      case Some(result) =>
-        imageId = result.imageId.orElse(imageId)
-        result.sequence +: Vector.fill(math.max(0, result.rows - 1))("")
-      case None         =>
-        Vector(theme.fallbackStyle(TerminalImageProtocol.fallback(
-          dimensions,
-          options.mimeType,
-          options.filename,
-          safeWidth
-        )))
+    if safeWidth <= 0 then ComponentRender.text("")
+    else
+      TerminalImageProtocol.renderBase64Image(
+        payload,
+        dimensions,
+        capabilities,
+        safeWidth,
+        options.copy(imageId = imageId)
+      ) match
+        case Some(result) =>
+          imageId = result.imageId.orElse(imageId)
+          ComponentRender(
+            Vector.fill(result.rows)(""),
+            Vector(TerminalControlPlacement(row = 0, column = 0, result.control))
+          )
+        case None         =>
+          ComponentRender.text(theme.fallbackStyle(TerminalImageProtocol.fallback(
+            dimensions,
+            options.mimeType,
+            options.filename,
+            safeWidth
+          )))
 
-  /** Cleanup escape for the current image id when the active protocol supports one. */
-  def cleanupSequence: Option[String] =
+  /**
+   * Typed cleanup control for the current image id when the active protocol supports one.
+   *
+   * This method returns no raw sequence. The control is encoded only when included in TUI-owned
+   * final output.
+   */
+  def cleanupSequence: Option[TerminalRenderControl] =
     imageId.flatMap(TerminalImageProtocol.deleteImage(_, capabilities))
 
 object Image:

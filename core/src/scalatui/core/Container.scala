@@ -22,7 +22,7 @@ final class Container extends Component:
   override def invalidate(): Unit =
     childBuffer.foreach(_.invalidate())
 
-  override def render(width: Int): Vector[String] =
+  override def render(width: Int): ComponentRender =
     val frame = ComponentFrameBuilder(width)
     childBuffer.foreach(frame.addComponent)
     frame.result()

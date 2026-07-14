@@ -279,12 +279,12 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
   private var copiedSnippetIndex = Option.empty[Int]
   private var active             = true
 
-  override def render(width: Int): Vector[String] = stateLock.synchronized {
+  override def render(width: Int): ComponentRender = ComponentRender.text(stateLock.synchronized {
     val w    = math.max(1, width)
     val rows = math.max(1, tui.terminal.rows)
     if w < 32 || rows < 10 then compactRender(w).take(rows)
     else fullRender(w)
-  }
+  })
 
   override def handleInputResult(input: TerminalInput): InputResult = stateLock.synchronized {
     input match
@@ -607,7 +607,7 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
 
   private def artifactRows(width: Int): Vector[String] =
     if artifacts.isEmpty then emptyArtifactRows(width)
-    else artifactList.fold(Vector.empty[String])(_.render(width))
+    else artifactList.fold(Vector.empty[String])(_.render(width).lines)
 
   private def emptyArtifactRows(width: Int): Vector[String] = searchState match
     case LoadState.Idle    =>
@@ -618,7 +618,7 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
 
   private def loadingRows(text: String, width: Int): Vector[String] =
     if loader.message !== text then loader.setMessage(text)
-    loader.render(width).map(line => fit(line, width))
+    loader.render(width).lines.map(line => fit(line, width))
 
   private def detailRows(width: Int): Vector[String] = selectedArtifact match
     case None           => Vector("Search first, then select an artifact.")
@@ -646,11 +646,12 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
     case LoadState.Failed  => Vector("Version lookup failed.")
     case LoadState.Ready   =>
       if versions.isEmpty then Vector("No versions returned.")
-      else Vector("Versions:") ++ versionList.fold(Vector.empty[String])(_.render(width))
+      else Vector("Versions:") ++ versionList.fold(Vector.empty[String])(_.render(width).lines)
 
   private def snippetRows(width: Int): Vector[String] =
     if step !== ExplorerStep.BuildTool then Vector.empty
-    else Vector("", "Build tool:") ++ buildToolList.fold(Vector.empty[String])(_.render(width))
+    else
+      Vector("", "Build tool:") ++ buildToolList.fold(Vector.empty[String])(_.render(width).lines)
 
   // ----- Derived state -----
 
@@ -680,7 +681,7 @@ final class MavenExplorer(tui: TUI, executor: ScheduledExecutorService) extends 
     case ExplorerStep.Search =>
       val label      = "Search: "
       val inputWidth = math.max(1, width - Ansi.visibleWidth(label))
-      label + searchInput.render(inputWidth).headOption.getOrElse("")
+      label + searchInput.render(inputWidth).lines.headOption.getOrElse("")
     case _                   => s"${stepLabel} · Query: ${searchInput.value}"
 
   private def stepLabel: String = step match

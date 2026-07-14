@@ -29,7 +29,7 @@ import scalatui.components.{
   SelectListTheme,
   Text
 }
-import scalatui.core.{Component, ComponentFrameBuilder, TUI, TerminalQueryResult}
+import scalatui.core.{Component, ComponentFrameBuilder, ComponentRender, TUI, TerminalQueryResult}
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{RgbColor, TerminalColorScheme, TerminalInput, TerminalKey}
 
@@ -79,7 +79,7 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
   private val workspaceRoot = DemoRoot.findWorkspaceRoot(File(System.getProperty("user.dir")))
   private var messages      = Vector.empty[String]
   private val messagesText  = new Component:
-    override def render(width: Int): Vector[String] =
+    override def render(width: Int): ComponentRender =
       val content = DemoRoot.this.synchronized(messagesContent)
       Text(content, paddingX = 0).render(width)
   private val editor        = Editor(options =
@@ -341,7 +341,7 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
         fileManagerPathInputOnChange(fileManagerPathInput.value)
       case _                                                                          => ()
 
-  override def render(width: Int): Vector[String] =
+  override def render(width: Int): ComponentRender =
     val renderWidth = math.max(1, width)
     val frame       = ComponentFrameBuilder(renderWidth)
     frame.addLines(Vector(fit("siglyph showcase demo", renderWidth)))
@@ -730,7 +730,7 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
       )
 
   private def plainLoaderLine(component: Component, width: Int): String =
-    component.render(width).headOption.map(Ansi.strip).getOrElse("").trim
+    component.render(width).lines.headOption.map(Ansi.strip).getOrElse("").trim
 
   private def fit(value: String, width: Int): String =
     Ansi.truncateToWidth(value, width, "")

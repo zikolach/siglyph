@@ -198,7 +198,7 @@ class MarkdownRendererSuite extends munit.FunSuite:
 
   test("Markdown component renders with padding within component width"):
     val component = Markdown("# Hi", paddingX = 1, paddingY = 1)
-    val lines     = component.render(10)
+    val lines     = component.render(10).lines
 
     assertEquals(lines.head, "          ")
     assert(lines.exists(_.contains("# Hi")), lines.mkString("\n"))
