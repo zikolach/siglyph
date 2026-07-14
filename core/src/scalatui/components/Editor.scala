@@ -226,7 +226,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
   }
 
   override def render(width: Int): ComponentRender = synchronized {
-    val plan = EditorLayout.renderPlan(buffer, width)
+    val plan             = EditorLayout.renderPlan(buffer, width)
     lastRenderedVisualHeight = plan.layout.lines.length
     lastRenderedWidth = width
     val cursorPlacements = Vector.newBuilder[CursorPlacement]

@@ -155,7 +155,7 @@ class TUISuite extends munit.FunSuite:
   ) extends Component,
         MouseInputHandler:
     val events                                                        = scala.collection.mutable.ArrayBuffer.empty[(String, MouseInputContext)]
-    override def render(width: Int): ComponentRender                 = ComponentRender.text(lines)
+    override def render(width: Int): ComponentRender                  = ComponentRender.text(lines)
     override def handleMouse(context: MouseInputContext): InputResult =
       events += name -> context
       result
@@ -164,15 +164,15 @@ class TUISuite extends munit.FunSuite:
       extends Component,
         MouseInputHandler:
     val events                                                        = scala.collection.mutable.ArrayBuffer.empty[String]
-    override def render(width: Int): ComponentRender                 = ComponentRender.text(lines)
+    override def render(width: Int): ComponentRender                  = ComponentRender.text(lines)
     override def handleMouse(context: MouseInputContext): InputResult =
       events += name
       InputResult.Ignored
 
   final class FocusableLine extends Component, Focusable:
-    private var isFocused                           = false
-    override def focused: Boolean                   = isFocused
-    override def focused_=(value: Boolean): Unit    = isFocused = value
+    private var isFocused                            = false
+    override def focused: Boolean                    = isFocused
+    override def focused_=(value: Boolean): Unit     = isFocused = value
     override def render(width: Int): ComponentRender =
       ComponentRender.text(if focused then "focused" else "plain")
 
@@ -694,7 +694,7 @@ class TUISuite extends munit.FunSuite:
     val parent   = MouseLine("parent")
     val child    = IgnoringMouseLine("child")
     val nested   = new Component with MouseInputHandler:
-      override def render(width: Int): ComponentRender                       =
+      override def render(width: Int): ComponentRender                        =
         ComponentRender.text("nested")
       override def renderFrame(width: Int, row: Int, col: Int): RenderedFrame =
         RenderedFrame(

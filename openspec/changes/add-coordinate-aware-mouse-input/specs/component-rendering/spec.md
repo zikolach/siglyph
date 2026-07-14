@@ -1,14 +1,14 @@
 ## ADDED Requirements
 
 ### Requirement: Retained component bounds tree
-The TUI runtime SHALL retain a component bounds tree for the latest rendered frame without changing the existing `Component.render(width): Vector[String]` output contract.
+The TUI runtime SHALL retain a component bounds tree for the latest rendered frame without changing the existing `Component.render(width): ComponentRender` output contract.
 
 #### Scenario: Leaf component receives bounds
 - **WHEN** a component is rendered through the layout-aware render path
 - **THEN** the retained bounds tree records that component with row, column, width, and height for its rendered output
 
 #### Scenario: Existing render contract remains valid
-- **WHEN** an existing component implements only `render(width): Vector[String]`
+- **WHEN** an existing component implements only `render(width): ComponentRender`
 - **THEN** it continues to render as a leaf component in the retained bounds tree
 
 #### Scenario: Bounds update after rerender

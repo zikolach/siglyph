@@ -2,7 +2,7 @@
 
 siglyph currently delivers typed keyboard input, paste events, and raw protocol replies through `TerminalInput`. Interactive JVM and Native backends enable bracketed paste and restore it on stop. They do not enable terminal mouse reporting.
 
-Rendering is line-oriented. `Component.render(width)` returns terminal lines, and the runtime composites overlays after rendering base content. `ComponentFrameBuilder` can provide a component render origin, but the runtime does not retain a nested bounds tree after a frame is rendered.
+Rendering uses typed `ComponentRender` values that carry ordinary lines, semantic controls, and cursor placements. The runtime composites overlays after rendering base content. `ComponentFrameBuilder` can provide a component render origin, but the runtime does not retain a nested bounds tree after a frame is rendered.
 
 Upstream `pi-tui` buffers mouse escape sequences but does not enable mouse reporting or expose typed mouse events. This change is a siglyph extension for coordinate-aware mouse wheel input and future pointer interactions.
 
@@ -12,7 +12,7 @@ Upstream `pi-tui` buffers mouse escape sequences but does not enable mouse repor
 - Add opt-in xterm SGR mouse reporting for interactive JVM and Native backends.
 - Add public typed mouse input through `TerminalInput.Mouse(...)`.
 - Parse SGR mouse reports into zero-based terminal cell coordinates.
-- Retain the latest rendered component bounds tree without changing the existing `render(width): Vector[String]` contract.
+- Retain the latest rendered component bounds tree without changing the existing `render(width): ComponentRender` contract.
 - Route mouse input by coordinates through visible overlays first and then through nested base components.
 - Deliver mouse input only to components that explicitly opt into mouse handling.
 - Add wheel scrolling to scrollable built-in components and autocomplete suggestion overlays.
@@ -24,7 +24,7 @@ Upstream `pi-tui` buffers mouse escape sequences but does not enable mouse repor
 - Do not enable mouse reporting by default.
 - Do not promise parity with upstream `pi-tui` for mouse input.
 - Do not implement drag selection, hover tracking, or all-motion tracking in this change.
-- Do not replace the existing line-oriented component rendering contract.
+- Do not replace the existing typed component rendering contract.
 - Do not require existing application components to handle mouse input.
 
 ## Decisions
@@ -85,7 +85,7 @@ Alternatives considered:
 
 ### Decision 4: Rendering records a retained bounds tree alongside frame lines
 
-Add a rendered-frame data model that carries both terminal lines and component layout nodes. Keep `Component.render(width): Vector[String]` as the stable rendering method, and add a default layout-aware render path that wraps existing output as one leaf node.
+Add a rendered-frame data model that carries both typed `ComponentRender` output and component layout nodes. Keep `Component.render(width): ComponentRender` as the stable rendering method, and add a default layout-aware render path that wraps existing output as one leaf node.
 
 The retained node records:
 - Component reference.
@@ -95,7 +95,7 @@ The retained node records:
 `Container` and `ComponentFrameBuilder` become layout-aware so nested children produce nested bounds. Overlay rendering records one layout subtree per visible overlay after the overlay's final row, column, width, and clipped height are known.
 
 Rationale:
-- Existing application components still compile and render through the current contract.
+- Application components continue rendering through the current typed contract without a second output representation.
 - Built-in containers can produce nested hit-test data without asking every component to manually report bounds.
 - Runtime stores only the latest frame layout, so input routing uses the same layout the user sees.
 

@@ -104,7 +104,7 @@ Single-file demos live in [`examples/scala-cli/`](examples/scala-cli/) and are i
 ./examples/scala-cli/mouse.scala
 ```
 
-The released examples reference Maven Central dependencies, so they can run without cloning or GitHub Packages credentials. The unreleased mouse example references local `0.4.0-SNAPSHOT` artifacts; run `./scripts/publish-local-snapshot.sh` from the repository root before running it. The alternate-screen Sonatype Central explorer uses the full alternate-screen height, shows built-in loader states and published dates, and copies selected build snippets through terminal clipboard escape sequences with an inline `Copied!` badge.
+The released examples reference Maven Central dependencies, so they can run without cloning or GitHub Packages credentials. The unreleased mouse example references local `0.5.0-SNAPSHOT` artifacts; run `./scripts/publish-local-snapshot.sh` from the repository root before running it. The alternate-screen Sonatype Central explorer uses the full alternate-screen height, shows built-in loader states and published dates, and copies selected build snippets through terminal clipboard escape sequences with an inline `Copied!` badge.
 
 ## Quick example
 

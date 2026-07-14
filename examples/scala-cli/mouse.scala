@@ -1,12 +1,12 @@
 #!/usr/bin/env -S scala-cli shebang
 //> using scala 3.7.4
 //> using repository m2Local
-//> using dep io.github.zikolach::siglyph-core:0.4.0-SNAPSHOT
-//> using dep io.github.zikolach::siglyph-terminal-jvm:0.4.0-SNAPSHOT
+//> using dep io.github.zikolach::siglyph-core:0.5.0-SNAPSHOT
+//> using dep io.github.zikolach::siglyph-terminal-jvm:0.5.0-SNAPSHOT
 
 import scalatui.ansi.Ansi
 import scalatui.components.*
-import scalatui.core.{Component, InputResult, MouseInputHandler, TUI, TUIOptions}
+import scalatui.core.{Component, ComponentRender, InputResult, MouseInputHandler, TUI, TUIOptions}
 import scalatui.terminal.*
 import scalatui.terminal.jvm.SttyTerminal
 
@@ -80,17 +80,17 @@ import scalatui.terminal.jvm.SttyTerminal
 final class MousePad extends Component, MouseInputHandler:
   private var message = "No routed event yet. Click or scroll inside this block."
 
-  override def render(width: Int): Vector[String] =
+  override def render(width: Int): ComponentRender =
     val safeWidth = math.max(0, width)
-    if safeWidth <= 0 then Vector("")
+    if safeWidth <= 0 then ComponentRender.text("")
     else
-      Vector(
+      ComponentRender.text(Vector(
         fit("+------------------------------------------------------------+", safeWidth),
         fit("| This component handles routed mouse events directly.       |", safeWidth),
         fit("| It reports terminal coordinates and component-local cells. |", safeWidth),
         fit(s"| $message", safeWidth),
         fit("+------------------------------------------------------------+", safeWidth)
-      )
+      ))
 
   override def handleMouse(context: MouseInputContext): InputResult =
     message =

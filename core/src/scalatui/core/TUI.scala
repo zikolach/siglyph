@@ -1142,7 +1142,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         }
       }
     latestOverlayVisibility = visible.nonEmpty
-    val frame = OverlayRenderer.composite(baseFrame, rendered.map(_._1), width, height)
+    val frame    = OverlayRenderer.composite(baseFrame, rendered.map(_._1), width, height)
     frame -> rendered.map(_._2)
 
   private def makeOverlayHandle(entry: TUI.OverlayEntry): OverlayHandle = new OverlayHandle:
@@ -1319,14 +1319,14 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     case _                                                                          => false
 
   private def renderNow(force: Boolean, clear: Boolean): Unit =
-    val generation              = lifecycleLock.synchronized(resizeGeneration)
-    val width                   = positiveDimension(terminal.columns)
-    val height                  = positiveDimension(terminal.rows)
-    val baseFrame               = root.renderFrame(width)
-    val (composed, layouts)     = renderOverlays(baseFrame.render, width, height)
+    val generation          = lifecycleLock.synchronized(resizeGeneration)
+    val width               = positiveDimension(terminal.columns)
+    val height              = positiveDimension(terminal.rows)
+    val baseFrame           = root.renderFrame(width)
+    val (composed, layouts) = renderOverlays(baseFrame.render, width, height)
     latestBaseLayout = Some(baseFrame.layout)
     latestOverlayLayouts = layouts
-    val frame                   = prepareFrame(composed.validated(width), width)
+    val frame               = prepareFrame(composed.validated(width), width)
 
     val currentWidth      = positiveDimension(terminal.columns)
     val currentHeight     = positiveDimension(terminal.rows)
@@ -1369,7 +1369,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         appendVerticalMove(builder, fromRow = cursorRow, toRow = 0)
         builder.append("\r")
       }
-    val paintedRow = appendFrameContent(
+    val paintedRow           = appendFrameContent(
       builder,
       frame,
       fromRow = 0,

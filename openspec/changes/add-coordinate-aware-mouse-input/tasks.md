@@ -17,7 +17,7 @@
 ## 3. Retained Layout and Hit Testing
 
 - [x] 3.1 Add shared core rendered-frame and layout-node types that carry frame lines plus component bounds.
-- [x] 3.2 Add a layout-aware render path that preserves `Component.render(width): Vector[String]` for existing components and treats non-layout-aware components as leaf nodes.
+- [x] 3.2 Add a layout-aware render path that preserves `Component.render(width): ComponentRender` for existing components and treats non-layout-aware components as leaf nodes.
 - [x] 3.3 Update `Container` and `ComponentFrameBuilder` to record nested child bounds in terminal-relative display-cell coordinates.
 - [x] 3.4 Update overlay rendering to retain final visible overlay bounds after resolving size, clamping, clipping, and z-order.
 - [x] 3.5 Store the latest retained base and overlay layout trees in `TUI` during the synchronized render path.
@@ -58,3 +58,4 @@
 
 - [x] 8.1 Clarify that unknown mouse button values exclude SGR modifier and action flags, and add focused parser regression coverage.
 - [x] 8.2 Clarify that terminal mouse reporting configuration records start/stop lifecycle intent rather than immediately toggling a running backend.
+- [x] 8.3 Integrate retained mouse layout with typed component output and migrate the mouse demo after rebasing onto the typed-rendering API.
