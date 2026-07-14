@@ -37,3 +37,4 @@
 - [x] 5.6 Run `openspec validate --all --strict` and resolve every validation error.
 - [x] 5.7 Verify security review repairs: private emitted JVM construction and typed null rejection.
 - [x] 5.8 Strengthen Kitty/escape ordering tests and compile the image example against current local sources.
+- [x] 5.9 Replace payload-slicing lexical checks with one indexed O(1)-state scan, add large padded and unpadded parity tests, and retain the separately accepted decoder output allocation.

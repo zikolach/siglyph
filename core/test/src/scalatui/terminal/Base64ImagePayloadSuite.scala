@@ -15,6 +15,18 @@ class Base64ImagePayloadSuite extends munit.FunSuite:
     assertEquals(Base64ImagePayload.from("TQ").map(_.value), Right("TQ"))
     assertEquals(Base64ImagePayload.from("TWE").map(_.value), Right("TWE"))
 
+  test("validates large padded and unpadded payloads unchanged"):
+    val largePrefix = "TWFu".repeat(16384)
+    val accepted    = Vector(largePrefix + "TQ", largePrefix + "TQ==")
+    accepted.foreach { value =>
+      assertEquals(Base64ImagePayload.from(value).map(_.value), Right(value))
+    }
+
+    val rejected = Vector(largePrefix + "A", largePrefix + "TQ=A")
+    rejected.foreach { value =>
+      assertEquals(Base64ImagePayload.from(value), Left(invalid))
+    }
+
   test("rejects malformed padding"):
     Vector("=", "T=Fu", "TWFu=", "TQ=", "TQ===", "TWE==", "TWFu====").foreach { value =>
       assertEquals(Base64ImagePayload.from(value), Left(invalid), value)

@@ -42,18 +42,28 @@ object Base64ImagePayload:
     new Base64ImagePayload(Base64.getEncoder.encodeToString(bytes))
 
   private def hasValidLexicalForm(value: String): Boolean =
-    val firstPadding = value.indexOf('=')
-    val dataLength   = if firstPadding < 0 then value.length else firstPadding
-    val padding      = value.length - dataLength
-    val dataValid    = value.take(dataLength).forall(isStandardAlphabet)
+    var index      = 0
+    var dataLength = value.length
+    var padding    = 0
+    var valid      = true
+    while index < value.length && valid do
+      val char = value.charAt(index)
+      if padding === 0 then
+        if char === '=' then
+          dataLength = index
+          padding = 1
+        else valid = isStandardAlphabet(char)
+      else if char === '=' then padding += 1
+      else valid = false
+      index += 1
+
     val paddingValid =
       if padding === 0 then dataLength % 4 !== 1
       else
         (padding === 1 || padding === 2) &&
-        value.drop(dataLength).forall(_ === '=') &&
         value.length                   % 4 === 0 &&
         dataLength                     % 4 === (if padding === 1 then 3 else 2)
-    dataValid && paddingValid
+    valid && paddingValid
 
   private def isStandardAlphabet(char: Char): Boolean =
     (char >= 'A' && char <= 'Z') ||

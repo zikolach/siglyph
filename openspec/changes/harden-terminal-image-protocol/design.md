@@ -38,7 +38,7 @@ Alternative considered: validate inside each encoder or throw from constructors.
 
 `scalatui.terminal.Base64ImagePayload.from` first enforces one lexical contract on JVM and Scala Native. Input may contain only the standard base64 alphabet (`A-Z`, `a-z`, `0-9`, `+`, `/`) plus optional terminal `=` padding. When padding is present, it must be valid terminal padding. Empty input is valid. Unpadded input with length remainder two or three modulo four is accepted only when decoder-valid; remainder one is rejected with `InvalidStandardBase64`. This excludes whitespace, control characters, URL-safe `-` and `_`, BEL, ESC/C1 framing controls, and other protocol delimiters. Decoder validation then rejects any remaining malformed input. On success, the value stores the original string without normalization, padding, or re-encoding.
 
-Decoder validation allocates a decoded byte array proportional to payload size and then discards it. This transient memory cost is accepted because no size limit is in scope. Shared lexical checks fix padding and modulo-length behavior before decoding, so JVM and Scala Native expose the same acceptance boundary. A custom no-allocation validator was considered, but it would duplicate mature base64 validation logic and increase parity risk.
+Lexical validation makes one indexed pass over the original string with O(1) state and no payload-sized substring allocation. Decoder validation then allocates a decoded byte array proportional to payload size and discards it. This transient decoder memory cost is accepted because no size limit is in scope. Shared lexical checks fix padding and modulo-length behavior before decoding, so JVM and Scala Native expose the same acceptance boundary. A custom base64 decoder was considered, but it would duplicate mature decoding logic and increase parity risk.
 
 ### 3. Encode metadata at its output boundary
 
@@ -62,7 +62,7 @@ Security cases cover padded and empty input; unpadded lengths in every modulo-fo
 
 ## Risks / Trade-offs
 
-- [Transient decoded-byte allocation can approach the encoded payload size] → Document the validation memory cost and keep chunking or size limits explicitly out of scope.
+- [Transient decoded-byte allocation can approach the encoded payload size] → Keep lexical validation to an indexed O(1)-state scan, document the separate decoder allocation, and keep chunking or size limits explicitly out of scope.
 - [JVM and Native decoder behavior could diverge] → Use the same shared implementation and fixtures, and run the core protocol suite on both targets.
 - [The direct signature and field replacement breaks source compatibility] → Mark the change as breaking and update all in-repository call sites and documentation; do not add compatibility work.
 - [Escaped control text is wider than the source metadata] → Escape before existing ANSI-aware truncation so final fallback width remains bounded.
