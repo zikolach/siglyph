@@ -1,5 +1,7 @@
 package scalatui.core
 
+import scalatui.ansi.Ansi
+
 import scalatui.syntax.Equality.*
 
 import scalatui.terminal.{
@@ -48,7 +50,8 @@ class TUITypedControlSuite extends munit.FunSuite:
     val control   = kittyControl("AAAA", imageId = 11, width = 2, rows = 2)
     val component = MutableTypedFrame(ComponentRender(
       Vector("", "", "below"),
-      Vector(TerminalControlPlacement(row = 0, column = 1, control))
+      Vector(TerminalControlPlacement(row = 0, column = 1, control)),
+      Vector.empty
     ))
     val terminal  = VirtualTerminal(10, 5)
     val tui       = TUI(terminal)
@@ -84,7 +87,8 @@ class TUITypedControlSuite extends munit.FunSuite:
     val control   = kittyControl("AAAA", imageId = 13, rows = 2)
     val component = MutableTypedFrame(ComponentRender(
       Vector("", "", "before"),
-      Vector(TerminalControlPlacement(0, 0, control))
+      Vector(TerminalControlPlacement(0, 0, control)),
+      Vector.empty
     ))
     val terminal  = VirtualTerminal(10, 5)
     val tui       = TUI(terminal)
@@ -186,7 +190,8 @@ class TUITypedControlSuite extends munit.FunSuite:
     val otherPlacement = TerminalControlPlacement(0, 0, unrelated)
     val component      = MutableTypedFrame(ComponentRender(
       Vector("", ""),
-      Vector(otherPlacement, oldPlacement)
+      Vector(otherPlacement, oldPlacement),
+      Vector.empty
     ))
     val terminal       = VirtualTerminal(10, 5)
     val tui            = TUI(terminal)
@@ -194,7 +199,8 @@ class TUITypedControlSuite extends munit.FunSuite:
     tui.start()
     terminal.clearWrites()
 
-    component.frame = ComponentRender(Vector("", ""), Vector(otherPlacement, newPlacement))
+    component.frame =
+      ComponentRender(Vector("", ""), Vector(otherPlacement, newPlacement), Vector.empty)
     tui.requestRender()
     tui.flushRender()
 
@@ -227,7 +233,8 @@ class TUITypedControlSuite extends munit.FunSuite:
     val duplicate = kittyControl("TQ==", imageId = 27)
     val component = MutableTypedFrame(ComponentRender(
       Vector("", ""),
-      Vector(TerminalControlPlacement(0, 0, first), TerminalControlPlacement(1, 0, duplicate))
+      Vector(TerminalControlPlacement(0, 0, first), TerminalControlPlacement(1, 0, duplicate)),
+      Vector.empty
     ))
     val terminal  = VirtualTerminal(10, 5)
     val tui       = TUI(terminal)
@@ -240,6 +247,22 @@ class TUITypedControlSuite extends munit.FunSuite:
     assert(!terminal.output.contains(encode(duplicate)), terminal.output)
     assert(!terminal.isRunning)
 
+  test("invalid child control geometry cannot use a sibling row before synchronized output"):
+    val control  = kittyControl("AAAA", imageId = 35)
+    val terminal = VirtualTerminal(10, 5)
+    val tui      = TUI(terminal)
+    tui.addChild(MutableTypedFrame(ComponentRender(
+      Vector("first"),
+      Vector(TerminalControlPlacement(1, 0, control)),
+      Vector.empty
+    )))
+    tui.addChild(MutableTypedFrame(ComponentRender.text("sibling")))
+
+    intercept[IllegalArgumentException](tui.start())
+
+    assert(!terminal.output.contains(TUI.SyncStart), terminal.output)
+    assert(!terminal.output.contains(encode(control)), terminal.output)
+
   test("pure reorder cleans rewritten existing IDs once before all retransmissions"):
     val unaffected = kittyControl("TWE=", imageId = 27)
     val first      = kittyControl("AAAA", imageId = 28)
@@ -250,7 +273,8 @@ class TUITypedControlSuite extends munit.FunSuite:
         TerminalControlPlacement(0, 0, unaffected),
         TerminalControlPlacement(1, 0, first),
         TerminalControlPlacement(1, 0, second)
-      )
+      ),
+      Vector.empty
     ))
     val terminal   = VirtualTerminal(10, 5)
     val tui        = TUI(terminal)
@@ -321,12 +345,14 @@ class TUITypedControlSuite extends munit.FunSuite:
     val tui          = TUI(terminal)
     tui.addChild(MutableTypedFrame(ComponentRender(
       Vector("base"),
-      Vector(TerminalControlPlacement(0, 0, baseControl))
+      Vector(TerminalControlPlacement(0, 0, baseControl)),
+      Vector.empty
     )))
     tui.showOverlay(
       MutableTypedFrame(ComponentRender(
         Vector("  "),
-        Vector(TerminalControlPlacement(0, 0, lowerControl))
+        Vector(TerminalControlPlacement(0, 0, lowerControl)),
+        Vector.empty
       )),
       OverlayOptions(
         width = Some(OverlaySize.Absolute(2)),
@@ -338,7 +364,8 @@ class TUITypedControlSuite extends munit.FunSuite:
     tui.showOverlay(
       MutableTypedFrame(ComponentRender(
         Vector(" "),
-        Vector(TerminalControlPlacement(0, 0, upperControl))
+        Vector(TerminalControlPlacement(0, 0, upperControl)),
+        Vector.empty
       )),
       OverlayOptions(
         width = Some(OverlaySize.Absolute(1)),
@@ -359,7 +386,8 @@ class TUITypedControlSuite extends munit.FunSuite:
     val control  = kittyControl("AAAA", imageId = 22)
     val overlay  = MutableTypedFrame(ComponentRender(
       Vector("one", "two", "three"),
-      Vector(TerminalControlPlacement(2, 0, control))
+      Vector(TerminalControlPlacement(2, 0, control)),
+      Vector.empty
     ))
     val terminal = VirtualTerminal(10, 5)
     val tui      = TUI(terminal)
@@ -380,6 +408,31 @@ class TUITypedControlSuite extends munit.FunSuite:
     assert(terminal.output.contains("two"))
     assert(!terminal.output.contains("three"))
 
+  test("overlay validates raw control metadata before clipping or parent composition"):
+    val control  = kittyControl("AAAA", imageId = 36)
+    val terminal = VirtualTerminal(10, 5)
+    val tui      = TUI(terminal)
+    tui.addChild(MutableTypedFrame(ComponentRender.text(Vector("base", "parent row"))))
+    tui.showOverlay(
+      MutableTypedFrame(ComponentRender(
+        Vector("overlay"),
+        Vector(TerminalControlPlacement(1, 0, control)),
+        Vector.empty
+      )),
+      OverlayOptions(
+        width = Some(OverlaySize.Absolute(7)),
+        maxHeight = Some(OverlaySize.Absolute(1)),
+        row = Some(OverlaySize.Absolute(0)),
+        col = Some(OverlaySize.Absolute(0)),
+        focusCapturing = false
+      )
+    )
+
+    intercept[IllegalArgumentException](tui.start())
+
+    assert(!terminal.output.contains(TUI.SyncStart), terminal.output)
+    assert(!terminal.output.contains(encode(control)), terminal.output)
+
   test("partially clipped overlay failure retains bounded redacted diagnostics"):
     val sensitivePayload = "QUJD".repeat(2048)
     val sensitiveName    = "secret-overlay-filename-".repeat(512)
@@ -394,7 +447,8 @@ class TUITypedControlSuite extends munit.FunSuite:
     tui.showOverlay(
       MutableTypedFrame(ComponentRender(
         Vector("one", "two", "three"),
-        Vector(TerminalControlPlacement(1, 0, control))
+        Vector(TerminalControlPlacement(1, 0, control)),
+        Vector.empty
       )),
       OverlayOptions(
         width = Some(OverlaySize.Absolute(5)),
@@ -418,7 +472,8 @@ class TUITypedControlSuite extends munit.FunSuite:
     val tui      = TUI(terminal)
     tui.addChild(MutableTypedFrame(ComponentRender(
       Vector(""),
-      Vector(TerminalControlPlacement(0, 0, control))
+      Vector(TerminalControlPlacement(0, 0, control)),
+      Vector.empty
     )))
 
     intercept[IllegalArgumentException](tui.start())
@@ -446,8 +501,9 @@ class TUITypedControlSuite extends munit.FunSuite:
     val terminal = VirtualTerminal(10, 5)
     val tui      = TUI(terminal, TUIOptions(hardwareCursorPositioning = true))
     tui.addChild(MutableTypedFrame(ComponentRender(
-      Vector("", "", s"ab${CursorMarker.Sequence}c"),
-      Vector(TerminalControlPlacement(0, 0, control))
+      Vector("", "", "abc"),
+      Vector(TerminalControlPlacement(0, 0, control)),
+      Vector(CursorPlacement(2, 2))
     )))
 
     tui.start()
@@ -455,11 +511,11 @@ class TUITypedControlSuite extends munit.FunSuite:
     assert(terminal.output.contains(s"${encode(control)}\r${TUI.LineReset}\r\n"), terminal.output)
     assert(terminal.output.contains(s"\r\u001b[2C${TUI.SyncEnd}"), terminal.output)
 
-  test("image-like ordinary strings receive no control geometry or Kitty cleanup"):
+  test("image-like ordinary strings are inert while typed image controls remain semantic"):
     val kittyText = "\u001b_Ga=T,f=100,i=99,c=4,r=3,C=1;AAAA\u001b\\"
     val iTermText = "\u001b]1337;File=inline=1;width=4;height=3:AAAA\u0007"
     val component = MutableTypedFrame(ComponentRender.text(Vector(kittyText, iTermText, "after")))
-    val terminal  = VirtualTerminal(20, 5)
+    val terminal  = VirtualTerminal(120, 5)
     val tui       = TUI(terminal)
     tui.addChild(component)
     tui.start()
@@ -470,7 +526,11 @@ class TUITypedControlSuite extends munit.FunSuite:
     tui.flushRender()
 
     assert(terminal.output.contains("plain" + TUI.LineReset), terminal.output)
-    assert(terminal.output.contains(iTermText + TUI.LineReset), terminal.output)
+    assert(
+      terminal.output.contains(Ansi.visibleControlText(iTermText) + TUI.LineReset),
+      terminal.output
+    )
+    assert(!terminal.output.contains(iTermText), terminal.output)
     assert(!terminal.output.contains("\u001b_Ga=d,"), terminal.output)
 
   private def frameWithControl(
@@ -478,7 +538,7 @@ class TUITypedControlSuite extends munit.FunSuite:
       row: Int,
       lines: Vector[String] = Vector("", "")
   ): ComponentRender =
-    ComponentRender(lines, Vector(TerminalControlPlacement(row, 0, control)))
+    ComponentRender(lines, Vector(TerminalControlPlacement(row, 0, control)), Vector.empty)
 
   private def kittyControl(
       payload: String,

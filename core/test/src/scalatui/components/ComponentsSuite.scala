@@ -3,7 +3,7 @@ package scalatui.components
 import scalatui.TestInputStreams
 
 import scalatui.ansi.Ansi
-import scalatui.core.CursorMarker
+import scalatui.core.CursorPlacement
 import scalatui.terminal.{
   KeyDescriptor,
   KeybindingManager,
@@ -133,19 +133,41 @@ class ComponentsSuite extends munit.FunSuite:
     assertEquals(input.value, "\nb")
     assertEquals(submitted, "\nb")
 
-  test("input emits cursor marker without changing semantic value"):
+  test("focused input emits structural cursor metadata without changing semantic value"):
     val input    = Input("ab")
     input.focused = true
-    val rendered = input.render(10).lines.head
-    assert(rendered.contains(CursorMarker.Sequence), rendered)
+    val rendered = input.render(10)
     assertEquals(input.value, "ab")
-    assertEquals(Ansi.strip(rendered), "ab ")
+    assertEquals(Ansi.strip(rendered.lines.head), "ab ")
+    assertEquals(rendered.cursorPlacements, Vector(CursorPlacement(0, 2)))
 
-  test("unfocused input does not emit cursor marker"):
+  test("unfocused input does not emit cursor metadata"):
     val input    = Input("ab")
-    val rendered = input.render(10).lines.head
+    val rendered = input.render(10)
 
-    assert(!rendered.contains(CursorMarker.Sequence), rendered)
+    assertEquals(rendered.cursorPlacements, Vector.empty)
+
+  test("input cursor metadata follows fake-cursor truncation"):
+    val truncated = Input("abcd")
+    truncated.focused = true
+    val omitted   = truncated.render(2)
+    assertEquals(Ansi.strip(omitted.lines.head), "ab")
+    assertEquals(omitted.cursorPlacements, Vector.empty)
+
+    val visible   = Input("abcd")
+    visible.focused = true
+    visible.handleInput(TerminalInput.Key(TerminalKey.Home))
+    visible.handleInput(TerminalInput.Key(TerminalKey.Right))
+    val surviving = visible.render(2)
+    assertEquals(Ansi.strip(surviving.lines.head), "ab")
+    assertEquals(surviving.cursorPlacements, Vector(CursorPlacement(0, 1)))
+
+    val overWide       = Input("界")
+    overWide.focused = true
+    overWide.handleInput(TerminalInput.Key(TerminalKey.Home))
+    val overWideRender = overWide.render(1)
+    assertEquals(overWideRender.lines.map(Ansi.strip), Vector(""))
+    assertEquals(overWideRender.cursorPlacements, Vector.empty)
 
   test("input supports readline-style ctrl shortcuts"):
     val input = Input("hello world")
@@ -183,6 +205,55 @@ class ComponentsSuite extends munit.FunSuite:
     assertEquals(input.value, "one ")
     input.handleInput(TerminalInput.Key(TerminalKey.Character("y"), KeyModifiers(alt = true)))
     assertEquals(input.value, "two")
+    input.handleInput(TerminalInput.Key(TerminalKey.Character("y"), KeyModifiers(alt = true)))
+    assertEquals(input.value, "one ")
+    assert(input.undo())
+    assertEquals(input.value, "two")
+
+  test("input yank-pop preserves neighbors joined by Unicode grapheme segmentation"):
+    val cases = Vector(
+      ("combining", "A", "\u0301", false),
+      ("prepend", "B", "\u0600", true),
+      ("Hangul", "\u1100", "\u1161", false),
+      ("Indic", "\u0915\u094d", "\u0915", false),
+      ("GB11", "👩\u200d", "💻", false),
+      ("regional indicators", "🇦", "🇹", false)
+    )
+
+    cases.foreach { case (label, original, yanked, insertAtStart) =>
+      val input = Input()
+      Vector("x", yanked).foreach { candidate =>
+        input.setValue(candidate)
+        input.handleInput(TerminalInput.Key(TerminalKey.Character("u"), KeyModifiers(ctrl = true)))
+      }
+      input.setValue(original)
+      if insertAtStart then
+        input.handleInput(TerminalInput.Key(TerminalKey.Character("a"), KeyModifiers(ctrl = true)))
+
+      input.handleInput(TerminalInput.Key(TerminalKey.Character("y"), KeyModifiers(ctrl = true)))
+      val joined = if insertAtStart then yanked + original else original + yanked
+      assertEquals(input.value, joined, label)
+
+      input.handleInput(TerminalInput.Key(TerminalKey.Character("y"), KeyModifiers(alt = true)))
+      val replaced = if insertAtStart then "x" + original else original + "x"
+      assertEquals(input.value, replaced, label)
+
+      input.handleInput(TerminalInput.Key(TerminalKey.Backspace))
+      assertEquals(input.value, original, label)
+    }
+
+  test("input clears the yank-pop base after another editing action"):
+    val input = Input()
+    Vector("first", "second").foreach { candidate =>
+      input.setValue(candidate)
+      input.handleInput(TerminalInput.Key(TerminalKey.Character("u"), KeyModifiers(ctrl = true)))
+    }
+    input.setValue("base")
+    assert(input.yank())
+    input.handleInput(TerminalInput.Key(TerminalKey.Character("x")))
+
+    assert(!input.yankPop())
+    assertEquals(input.value, "basesecondx")
 
   test("input supports pi-tui word movement and forward deletion bindings"):
     val input = Input("hello, 世界 again")

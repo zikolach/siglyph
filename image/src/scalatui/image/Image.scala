@@ -264,7 +264,8 @@ final class Image(
           imageId = result.imageId.orElse(imageId)
           ComponentRender(
             Vector.fill(result.rows)(""),
-            Vector(TerminalControlPlacement(row = 0, column = 0, result.control))
+            Vector(TerminalControlPlacement(row = 0, column = 0, result.control)),
+            Vector.empty
           )
         case None         =>
           ComponentRender.text(theme.fallbackStyle(TerminalImageProtocol.fallback(

@@ -1,6 +1,5 @@
 package scalatui.components
 
-import scalatui.ansi.Ansi
 import scalatui.autocomplete.*
 import scalatui.core.*
 import scalatui.editing.{EditorBuffer, EditorCursor, KillRing, UndoStack, WordNavigation}
@@ -19,10 +18,19 @@ import scalatui.unicode.Unicode
  * Multiline text editor component backed by a [[scalatui.editing.EditorBuffer]].
  *
  * The editor owns focus state, delegates logical text mutations to `EditorBuffer`, wraps text to
- * the requested component width, renders a fake inverse-video cursor with a zero-width cursor
- * marker when focused, and can integrate with autocomplete providers by showing selectable
+ * the requested component width, renders a fake inverse-video cursor with structural cursor
+ * metadata when focused, and can integrate with autocomplete providers by showing selectable
  * suggestions through a TUI overlay host. Editing behavior includes `pi-tui`-aligned undo-only,
  * kill-ring/yank/yank-pop commands, word movement/deletion, and large-paste marker expansion.
+ * Logical cursor and streamed-paste counts use Unicode 17.0.0 UAX #29 default extended grapheme
+ * clusters on JVM and Scala Native. Bounded segmentation state does not limit retained editor
+ * content, and terminal display width remains a separate project-specific policy. Layout measures
+ * sanitized final printable geometry. Rejected controls may expand to several wrapped display units
+ * that retain one source range; supported bounded SGR and OSC 8 remain atomic and executable.
+ * Autocomplete ownership suppresses Editor cursor metadata. Non-positive widths suppress printable
+ * output and cursor metadata. At a positive impossible width, rendering omits the over-wide cursor
+ * unit but retains its logical ownership and application content, places the cursor at visual
+ * column zero, and emits no replacement or partial cluster.
  *
  * @param initialText
  *   starting logical editor contents
@@ -207,18 +215,23 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     synchronized(handleInputLocked(input))
 
   override def render(width: Int): ComponentRender = synchronized {
-    val layout = EditorLayout.fromBuffer(buffer, width)
-    lastRenderedVisualHeight = layout.lines.length
+    val plan             = EditorLayout.renderPlan(buffer, width)
+    lastRenderedVisualHeight = plan.layout.lines.length
     lastRenderedWidth = width
-    val lines  = layout.lines.zipWithIndex.map { (line, index) =>
-      val rendered =
-        if focused && currentAutocomplete.isEmpty && index === layout.cursor.row then
-          renderCursor(line)
-        else line.text
-      Ansi.truncateToWidth(rendered, width, "")
+    val cursorPlacements = Vector.newBuilder[CursorPlacement]
+    val lines            = plan.rows.zipWithIndex.map { (row, index) =>
+      if focused && currentAutocomplete.isEmpty && index === plan.layout.cursor.row then
+        if row.omitted then
+          if width > 0 then cursorPlacements += CursorPlacement(index, 0)
+          ""
+        else
+          val (line, column) = row.focusedText(plan.cursorBoundary, width)
+          column.foreach(value => cursorPlacements += CursorPlacement(index, value))
+          line
+      else row.normalText(width)
     }
     refreshAutocompleteOverlayPlacement(requestRender = false)
-    ComponentRender.text(lines)
+    ComponentRender(lines, Vector.empty, cursorPlacements.result())
   }
 
   private def handleInputLocked(input: TerminalInput): InputResult =
@@ -611,44 +624,26 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
       else false
 
   private def pageScroll(direction: Int): InputResult =
-    val layout     = EditorLayout.fromBuffer(buffer, math.max(1, lastRenderedWidth))
+    val plan       = EditorLayout.renderPlan(buffer, math.max(1, lastRenderedWidth))
     val pageSize   = 5
-    val targetRow  = layout.cursor.row + direction * pageSize
-    val boundedRow = math.max(0, math.min(layout.lines.length - 1, targetRow))
-    if boundedRow === layout.cursor.row then InputResult.NoRender
-    else moveToVisualLine(layout, boundedRow)
+    val targetRow  = plan.layout.cursor.row + direction * pageSize
+    val boundedRow = math.max(0, math.min(plan.layout.lines.length - 1, targetRow))
+    if boundedRow === plan.layout.cursor.row then InputResult.NoRender
+    else moveToVisualLine(plan, boundedRow)
 
-  private def moveToVisualLine(layout: EditorLayout, targetRow: Int): InputResult =
-    val targetLine     = layout.lines(targetRow)
-    val lineClusters   = buffer.clustersForLine(targetLine.logicalLine)
-    val lineSlice      = lineClusters.slice(targetLine.startColumn, targetLine.endColumn)
-    val targetColIndex = visualColumnToClusterIndex(lineSlice, layout.cursor.column)
-    val targetCursor   = EditorCursor(
+  private def moveToVisualLine(plan: EditorRenderPlan, targetRow: Int): InputResult =
+    val targetLine   = plan.layout.lines(targetRow)
+    val targetCursor = EditorCursor(
       targetLine.logicalLine,
-      math.min(targetLine.startColumn + targetColIndex, targetLine.endColumn)
+      plan.sourceColumnAt(targetRow, plan.layout.cursor.column)
     )
-    val before         = buffer.cursor
+    val before       = buffer.cursor
     buffer.setCursor(targetCursor)
     if before === targetCursor then InputResult.NoRender
     else
       resetEditingAction()
       refreshAutocompleteIfActive()
       InputResult.Render
-
-  private def visualColumnToClusterIndex(clusters: Vector[String], visualColumn: Int): Int =
-    if clusters.isEmpty || visualColumn <= 0 then 0
-    else
-      var offset  = 0
-      var emitted = 0
-      var found   = Option.empty[Int]
-      while offset < clusters.length && emitted < visualColumn && found.isEmpty do
-        val cluster = clusters(offset)
-        val width   = Unicode.graphemeWidth(cluster)
-        if emitted + width > visualColumn then found = Some(offset)
-        else
-          emitted += width
-          offset += 1
-      found.getOrElse(offset)
 
   private def maybeTriggerAutocompleteAfterText(inserted: String): Unit =
     if provider.nonEmpty && autocompleteTrigger.triggerSlash && (inserted === "/") && currentLineBeforeCursor === "/"
@@ -899,15 +894,6 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
           case None         => EditorOptions.FallbackAutocompleteOverlayOptions
       case EditorAutocompletePlacement.Custom(options)  => options
     base.copy(maxHeight = base.maxHeight.orElse(Some(OverlaySize.Absolute(autocompleteMaxVisible))))
-
-  private def renderCursor(line: EditorVisualLine): String =
-    val clusters      = buffer.clustersForLine(line.logicalLine)
-    val segment       = clusters.slice(line.startColumn, line.endColumn)
-    val cursorInLine  = buffer.cursor.column - line.startColumn
-    val before        = segment.take(cursorInLine).mkString
-    val cursorCluster = segment.lift(cursorInLine).getOrElse(" ")
-    val after         = segment.drop(cursorInLine + 1).mkString
-    s"$before${CursorMarker.Sequence}\u001b[7m$cursorCluster\u001b[27m$after"
 
 object Editor:
   private final class PasteSession(val baseSnapshot: EditorBuffer.Snapshot):

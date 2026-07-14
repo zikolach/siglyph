@@ -4,7 +4,7 @@ import scalatui.TestInputStreams
 
 import scalatui.ansi.Ansi
 import scalatui.autocomplete.*
-import scalatui.core.{CursorMarker, InputResult, OverlayOptions, OverlaySize, TUI}
+import scalatui.core.{CursorPlacement, InputResult, OverlayOptions, OverlaySize, TUI}
 import scalatui.editing.EditorCursor
 import scalatui.terminal.{
   KeyDescriptor,
@@ -22,25 +22,63 @@ class EditorSuite extends munit.FunSuite:
     val editor = Editor("abc")
     editor.setCursor(EditorCursor(0, 1))
 
-    assertEquals(editor.render(10).lines.head, "abc")
+    assertEquals(editor.render(10), scalatui.core.ComponentRender.text("abc"))
 
     editor.focused = true
-    assertEquals(editor.render(10).lines.head, s"a${CursorMarker.Sequence}\u001b[7mb\u001b[27mc")
+    val focused = editor.render(10)
+    assertEquals(focused.lines.head, "a\u001b[7mb\u001b[27mc")
+    assertEquals(focused.cursorPlacements, Vector(CursorPlacement(0, 1)))
+
+  test("omits oversized cursor clusters without mutating editor text"):
+    val clusters = Vector("界", "\u1100\u1161\u11a8", "\u0915\u094d\u0915", "👩‍💻", "🇦🇹")
+
+    clusters.foreach { cluster =>
+      Vector(false, true).foreach { focused =>
+        val editor   = Editor(cluster)
+        editor.setCursor(EditorCursor(0, 0))
+        editor.focused = focused
+        val rendered = editor.render(1)
+
+        assert(rendered.lines.forall(Ansi.visibleWidth(_) <= 1), rendered.toString)
+        assertEquals(rendered.lines.map(Ansi.strip), Vector(""), cluster)
+        assert(!rendered.lines.exists(_.contains("�")), rendered.toString)
+        assertEquals(editor.text, cluster)
+        if focused then
+          assertEquals(rendered.cursorPlacements, Vector(CursorPlacement(0, 0)), cluster)
+        else assertEquals(rendered.cursorPlacements, Vector.empty, cluster)
+      }
+    }
+
+  test("preserves normal-width fake cursor rendering for complete clusters"):
+    val cluster = "👩‍💻"
+    val editor  = Editor(cluster)
+    editor.setCursor(EditorCursor(0, 0))
+    editor.focused = true
+
+    val rendered = editor.render(2)
+    assertEquals(Ansi.strip(rendered.lines.head), cluster)
+    assertEquals(rendered.lines.head, s"\u001b[7m$cluster\u001b[27m")
+    assertEquals(rendered.cursorPlacements, Vector(CursorPlacement(0, 0)))
+    assertEquals(editor.text, cluster)
 
   test("renders inverse space at line end and keeps output within width"):
+
     val editor = Editor("abcd")
     editor.focused = true
 
-    val lines = editor.render(2).lines
+    val rendered = editor.render(2)
 
-    assertEquals(lines.map(Ansi.strip), Vector("ab", "cd"))
-    assert(lines.forall(line => Ansi.visibleWidth(line) <= 2), lines.toString)
+    assertEquals(rendered.lines.map(Ansi.strip), Vector("ab", "cd"))
+    assert(rendered.lines.forall(line => Ansi.visibleWidth(line) <= 2), rendered.toString)
+    assertEquals(rendered.cursorPlacements, Vector.empty)
 
-    val roomy = Editor("ab")
+    val roomy       = Editor("ab")
     roomy.focused = true
-    assertEquals(roomy.render(5).lines.head, s"ab${CursorMarker.Sequence}\u001b[7m \u001b[27m")
+    val roomyRender = roomy.render(5)
+    assertEquals(roomyRender.lines.head, "ab\u001b[7m \u001b[27m")
+    assertEquals(roomyRender.cursorPlacements, Vector(CursorPlacement(0, 2)))
 
-  test("editor suppresses cursor marker while autocomplete owns input"):
+  test("editor suppresses cursor metadata while autocomplete owns input"):
     val editor = Editor(
       "/",
       EditorOptions(
@@ -52,8 +90,36 @@ class EditorSuite extends munit.FunSuite:
 
     assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Tab)), InputResult.Render)
 
-    val rendered = editor.render(20).lines.head
-    assert(!rendered.contains(CursorMarker.Sequence), rendered)
+    val rendered = editor.render(20)
+    assertEquals(rendered.cursorPlacements, Vector.empty)
+
+  test("pasted former cursor APC and ESC or C1 string candidates stay inert"):
+    val formerApc  = "\u001b_" + "pi" + ":c\u001b\\"
+    val candidates = Vector(
+      formerApc,
+      "\u001b_payload",
+      "\u009fpayload\u009c",
+      "\u009fpayload"
+    )
+
+    candidates.foreach { candidate =>
+      val editor   = Editor()
+      TestInputStreams.paste(candidate + "x").foreach(editor.handleInputResult)
+      val expected = Ansi.sanitize(candidate + "x")
+
+      val unfocused = editor.render(200)
+      assertEquals(Ansi.strip(unfocused.lines.head), expected, candidate)
+      assertEquals(unfocused.cursorPlacements, Vector.empty, candidate)
+
+      editor.focused = true
+      val focused = editor.render(200)
+      assertEquals(Ansi.strip(focused.lines.head), expected + " ", candidate)
+      assertEquals(
+        focused.cursorPlacements,
+        Vector(CursorPlacement(0, Ansi.visibleWidth(expected))),
+        candidate
+      )
+    }
 
   test("inserts printable input and multiline paste via editor buffer"):
     var changed = Vector.empty[String]
@@ -205,6 +271,29 @@ class EditorSuite extends munit.FunSuite:
 
     assertEquals(editor.undo(), true)
     assertEquals(editor.text, "ab")
+
+  test("typed programmatic and streamed insertion cursor follows final neighbor joins"):
+    val cases = Vector(
+      ("AB", 1, "\u0301", "B"),
+      ("AB", 1, "\u0600", "A"),
+      ("\u1100\u11a8", 1, "\u1161", ""),
+      ("\u0915\u0915", 1, "\u094d", ""),
+      ("👩💻", 1, "\u200d", ""),
+      ("🇹", 0, "🇦", "")
+    )
+
+    cases.foreach { case (initial, column, inserted, afterBackspace) =>
+      (0 to 2).foreach { mode =>
+        val editor = Editor(initial)
+        editor.setCursor(EditorCursor(0, column))
+        mode match
+          case 0 => editor.handleInputResult(TerminalInput.Key(TerminalKey.Character(inserted)))
+          case 1 => editor.insertAtCursor(inserted)
+          case _ => TestInputStreams.paste(inserted).foreach(editor.handleInputResult)
+        editor.handleInputResult(TerminalInput.Key(TerminalKey.Backspace))
+        assertEquals(editor.text, afterBackspace, s"$inserted mode=$mode")
+      }
+    }
 
   test("insertAtCursor requests render when attached and preserves large paste markers"):
     val terminal = VirtualTerminal(80, 8)
@@ -1133,8 +1222,97 @@ class EditorSuite extends munit.FunSuite:
     SlashCommandAutocompleteProvider(Vector(SlashCommand("help", Some("Show help"))))
 
   private def visibleFrameLines(output: String): Vector[String] =
-    val lines = Ansi.strip(output).replace(
-      "\r\n",
-      "\n"
-    ).replace('\r', '\n').split("\n", -1).toVector.map(_.trim)
+    val trustedText = "\u001b\\[[0-?]*[ -/]*[@-~]".r.replaceAllIn(output, "")
+    val lines       = trustedText.replace("\r\n", "\n").replace('\r', '\n').split(
+      "\n",
+      -1
+    ).toVector.map(_.trim)
     lines.dropWhile(_.isEmpty).reverse.dropWhile(_.isEmpty).reverse
+
+  test("editor emits no cursor placement at zero or negative widths"):
+    Vector(0, -1, -20).foreach { width =>
+      val editor   = Editor("abc")
+      editor.focused = true
+      val rendered = editor.render(width)
+
+      assertEquals(rendered.cursorPlacements, Vector.empty, width.toString)
+      assertEquals(rendered.lines.forall(_.isEmpty), true, width.toString)
+      assertEquals(rendered.validate(width), Right(()), width.toString)
+      assertEquals(editor.text, "abc", width.toString)
+    }
+
+  test("default-padded width-one Box validates a focused impossible-width editor"):
+    val editor = Editor("界")
+    editor.focused = true
+    val box    = Box()
+    box.addChild(editor)
+
+    val rendered = box.render(1)
+    assertEquals(rendered.lines.map(Ansi.strip), Vector(" "))
+    assertEquals(rendered.cursorPlacements, Vector.empty)
+    assertEquals(rendered.validate(1), Right(()))
+    assertEquals(editor.text, "界")
+
+  test("focused editor keeps positive impossible-width cursor ownership at column zero"):
+    val editor = Editor("界")
+    editor.focused = true
+
+    val rendered = editor.render(1)
+    assertEquals(rendered.lines, Vector(""))
+    assertEquals(rendered.cursorPlacements, Vector(CursorPlacement(0, 0)))
+    assertEquals(rendered.validate(1), Right(()))
+
+  test("focused cursor never divides supported SGR or OSC 8 metadata"):
+    val red        = "\u001b[31m"
+    val open       = "\u001b]8;;https://example.com\u001b\\"
+    val close      = "\u001b]8;;\u001b\\"
+    val value      = "a" + red + open + "b" + close + Ansi.Reset + "c"
+    val boundaries = Vector(
+      1,
+      2,
+      scalatui.unicode.Unicode.graphemeClusters("a" + red).length,
+      scalatui.unicode.Unicode.graphemeClusters("a" + red + open).length,
+      scalatui.unicode.Unicode.graphemeClusters("a" + red + open + "b").length,
+      scalatui.unicode.Unicode.graphemeClusters(value).length
+    ).distinct
+
+    boundaries.foreach { boundary =>
+      val editor   = Editor(value)
+      editor.setCursor(EditorCursor(0, boundary))
+      editor.focused = true
+      val rendered = editor.render(80)
+      val line     = rendered.lines.head
+
+      assertEquals(Ansi.strip(line).trim, "abc", boundary.toString)
+      assertEquals(line.sliding(red.length).count(_ == red), 1, boundary.toString)
+      assertEquals(line.sliding(open.length).count(_ == open), 1, boundary.toString)
+      assertEquals(line.sliding(close.length).count(_ == close), 1, boundary.toString)
+      assertEquals(rendered.cursorPlacements.length, 1, boundary.toString)
+      assertEquals(rendered.validate(80), Right(()), boundary.toString)
+    }
+
+  test("focused and unfocused editor emit complete rejected expansions across wraps"):
+    val source   = "a\t\u0000\u007f\u0085\u001bPpayload\u001b\\z"
+    val expected = Ansi.sanitize(source)
+
+    Vector(false, true).foreach { focused =>
+      val editor   = Editor(source)
+      editor.setCursor(EditorCursor(0, 0))
+      editor.focused = focused
+      val rendered = editor.render(4)
+
+      assert(rendered.lines.forall(Ansi.visibleWidth(_) <= 4), rendered.toString)
+      assertEquals(Ansi.strip(rendered.lines.mkString), expected, focused.toString)
+      if focused then assertEquals(rendered.cursorPlacements, Vector(CursorPlacement(0, 0)))
+      else assertEquals(rendered.cursorPlacements, Vector.empty)
+      assertEquals(editor.text, source)
+    }
+
+  test("editor projected layout keeps unlimited application content exact"):
+    val source   = "x".repeat(100000) + "\t"
+    val editor   = Editor(source)
+    val rendered = editor.render(80)
+
+    assertEquals(Ansi.strip(rendered.lines.mkString), Ansi.sanitize(source))
+    assertEquals(editor.text, source)
+    assert(rendered.lines.forall(Ansi.visibleWidth(_) <= 80), rendered.lines.length.toString)

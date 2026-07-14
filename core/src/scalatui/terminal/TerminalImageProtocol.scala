@@ -256,19 +256,13 @@ object TerminalImageProtocol:
       filename: Option[String],
       width: Int
   ): String =
-    val name = escapeMetadataControls(filename.fold("image")(identity))
-    val mime = escapeMetadataControls(mimeType)
+    val name = Ansi.visibleControlText(filename.fold("image")(identity))
+    val mime = Ansi.visibleControlText(mimeType)
     Ansi.truncateToWidth(
       s"[image: $name, $mime, ${dimensions.widthPx}x${dimensions.heightPx}]",
       math.max(0, width),
       ""
     )
-
-  private def escapeMetadataControls(value: String): String =
-    value.flatMap { char =>
-      if char <= '\u001f' || (char >= '\u007f' && char <= '\u009f') then f"\\u${char.toInt}%04X"
-      else char.toString
-    }
 
 /** Bounded Kitty image identity state that never wraps into a non-positive value. */
 private[terminal] final class KittyImageIdAllocator(initialNextId: Int = 1):

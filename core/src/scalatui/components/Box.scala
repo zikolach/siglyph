@@ -1,10 +1,17 @@
 package scalatui.components
 
 import scalatui.ansi.Ansi
-import scalatui.core.{Component, ComponentRender, TerminalControlPlacement}
+import scalatui.core.{Component, ComponentRender, CursorPlacement, TerminalControlPlacement}
 
 import scala.collection.mutable.ArrayBuffer
 
+/**
+ * A padded vertical component container.
+ *
+ * Each child frame is validated against its own rows and the requested inner width before padding
+ * or sibling composition. Invalid control or cursor metadata is rejected rather than made valid by
+ * outer padding or rows.
+ */
 final class Box(paddingX: Int = 1, paddingY: Int = 0, style: String => String = identity)
     extends Component:
   private val childrenBuffer    = ArrayBuffer.empty[Component]
@@ -22,14 +29,15 @@ final class Box(paddingX: Int = 1, paddingY: Int = 0, style: String => String = 
   override def invalidate(): Unit = childrenBuffer.foreach(_.invalidate())
 
   override def render(width: Int): ComponentRender =
-    val innerWidth = math.max(0, width - horizontalPadding * 2)
-    val horizontal = " ".repeat(horizontalPadding)
-    val vertical   = Vector.fill(verticalPadding)(style(" ".repeat(width)))
-    val bodyLines  = Vector.newBuilder[String]
-    val controls   = Vector.newBuilder[TerminalControlPlacement]
-    var bodyRow    = 0
+    val innerWidth       = math.max(0, width - horizontalPadding * 2)
+    val horizontal       = " ".repeat(horizontalPadding)
+    val vertical         = Vector.fill(verticalPadding)(style(" ".repeat(width)))
+    val bodyLines        = Vector.newBuilder[String]
+    val controls         = Vector.newBuilder[TerminalControlPlacement]
+    val cursorPlacements = Vector.newBuilder[CursorPlacement]
+    var bodyRow          = 0
     childrenBuffer.foreach { child =>
-      val frame = child.render(innerWidth)
+      val frame = child.render(innerWidth).validated(innerWidth)
       frame.lines.foreach { line =>
         val padded = horizontal + Ansi.padRight(line, innerWidth) + horizontal
         bodyLines += style(Ansi.truncateToWidth(padded, width, ""))
@@ -40,6 +48,16 @@ final class Box(paddingX: Int = 1, paddingY: Int = 0, style: String => String = 
           columnOffset = horizontalPadding
         )
       )
+      frame.cursorPlacements.foreach(placement =>
+        cursorPlacements += placement.translated(
+          rowOffset = verticalPadding + bodyRow,
+          columnOffset = horizontalPadding
+        )
+      )
       bodyRow += frame.lines.length
     }
-    ComponentRender(vertical ++ bodyLines.result() ++ vertical, controls.result())
+    ComponentRender(
+      vertical ++ bodyLines.result() ++ vertical,
+      controls.result(),
+      cursorPlacements.result()
+    )

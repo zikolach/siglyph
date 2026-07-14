@@ -1,7 +1,14 @@
 package scalatui.components
 
 import scalatui.ansi.Ansi
-import scalatui.core.{Component, ComponentRender, CursorMarker, Focusable, InputResult}
+import scalatui.core.{
+  Component,
+  ComponentRender,
+  CursorPlacement,
+  FakeCursorRender,
+  Focusable,
+  InputResult
+}
 import scalatui.editing.{KillRing, UndoStack, WordNavigation}
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{
@@ -15,7 +22,13 @@ import scalatui.terminal.{
 }
 import scalatui.unicode.Unicode
 
-/** Single-line text input with Unicode-aware editing and pi-tui-style undo/yank commands. */
+/**
+ * Single-line text input with pi-tui-style undo/yank commands. Cursor and streamed-paste accounting
+ * use Unicode 17.0.0 UAX #29 default extended grapheme clusters on JVM and Scala Native.
+ * Segmentation state is bounded and does not limit retained input content. Focused rendering emits
+ * structured cursor metadata only when width truncation preserves the complete fake-cursor token;
+ * unfocused rendering emits no cursor metadata.
+ */
 final class Input(
     initialValue: String = "",
     keybindings: KeybindingManager = KeybindingManager()
@@ -28,7 +41,7 @@ final class Input(
   private val undoStack        = UndoStack[Input.State]()
   private val killRing         = KillRing()
   private var lastAction       = Option.empty[Input.Action]
-  private var lastYankClusters = 0
+  private var yankBaseState    = Option.empty[Input.State]
 
   def value: String = pasteSession.fold(currentValue)(_.value)
 
@@ -36,8 +49,7 @@ final class Input(
     pasteSession = None
     currentValue = value
     cursorCluster = Unicode.graphemeClusters(value).length
-    lastAction = None
-    lastYankClusters = 0
+    resetAction()
 
   /** Undo the most recent editing snapshot, returning whether state changed. */
   def undo(): Boolean =
@@ -46,40 +58,43 @@ final class Input(
       case Some(Input.State(value, cursor)) =>
         currentValue = value
         cursorCluster = math.max(0, math.min(cursor, clusters.length))
-        lastAction = None
-        lastYankClusters = 0
+        resetAction()
         true
       case None                             => false
 
-  /** Insert the most recent killed text at the cursor, returning whether state changed. */
+  /**
+   * Insert the most recent killed text and retain the exact pre-yank state for yank-pop.
+   *
+   * @return
+   *   whether state changed
+   */
   def yank(): Boolean =
     finishPaste()
     killRing.peek match
       case Some(text) =>
-        pushUndo()
+        val base = Input.State(currentValue, cursorCluster)
+        pushUndoSnapshot(base)
         insertRaw(text)
         lastAction = Some(Input.Action.Yank)
-        lastYankClusters = Unicode.graphemeClusters(text).length
+        yankBaseState = Some(base)
         true
       case None       => false
 
-  /** Replace the most recent yank with the next kill-ring entry. */
+  /** Replace the most recent yank from its exact pre-yank state with the next kill-ring entry. */
   def yankPop(): Boolean =
     finishPaste()
-    if !lastAction.contains(Input.Action.Yank) || killRing.length <= 1 || lastYankClusters <= 0 then
-      false
+    if !lastAction.contains(Input.Action.Yank) || killRing.length <= 1 then false
     else
-      pushUndo()
-      val cs          = clusters
-      val replaceFrom = math.max(0, cursorCluster - lastYankClusters)
-      currentValue = (cs.take(replaceFrom) ++ cs.drop(cursorCluster)).mkString
-      cursorCluster = replaceFrom
-      killRing.rotate()
-      val text        = killRing.peek.getOrElse("")
-      insertRaw(text)
-      lastAction = Some(Input.Action.Yank)
-      lastYankClusters = Unicode.graphemeClusters(text).length
-      true
+      yankBaseState match
+        case None       => false
+        case Some(base) =>
+          pushUndo()
+          restore(base)
+          killRing.rotate()
+          insertRaw(killRing.peek.getOrElse(""))
+          lastAction = Some(Input.Action.Yank)
+          yankBaseState = Some(base)
+          true
 
   override def focused: Boolean                = isFocused
   override def focused_=(value: Boolean): Unit = isFocused = value
@@ -105,14 +120,19 @@ final class Input(
         InputResult.Render
 
   override def render(width: Int): ComponentRender =
-    val cs             = clusters
-    val visibleCursor  = pasteSession.fold(cursorCluster)(_.cursorCluster)
-    val before         = cs.take(visibleCursor).mkString
-    val at             = cs.lift(visibleCursor).getOrElse(" ")
-    val after          = cs.drop(visibleCursor + 1).mkString
-    val marker         = if isFocused then CursorMarker.Sequence else ""
-    val renderedCursor = if isFocused then s"\u001b[7m$at\u001b[27m" else at
-    ComponentRender.text(Ansi.truncateToWidth(before + marker + renderedCursor + after, width, ""))
+    val cs            = clusters
+    val visibleCursor = pasteSession.fold(cursorCluster)(_.cursorCluster)
+    val before        = cs.take(visibleCursor).mkString
+    val at            = cs.lift(visibleCursor).getOrElse(" ")
+    val after         = cs.drop(visibleCursor + 1).mkString
+    if isFocused then
+      val rendered = FakeCursorRender.render(before, at, after, width)
+      ComponentRender(
+        Vector(rendered.line),
+        Vector.empty,
+        rendered.cursorColumn.map(column => CursorPlacement(0, column)).toVector
+      )
+    else ComponentRender.text(Ansi.truncateToWidth(Ansi.sanitize(before + at + after), width, ""))
 
   private def startPaste(): Unit =
     val cs     = clusters
@@ -135,8 +155,7 @@ final class Input(
           undoStack.push(Input.State(session.baseValue, session.baseCursor))
           currentValue = session.value
           cursorCluster = session.cursorCluster
-          lastAction = None
-          lastYankClusters = 0
+          resetAction()
           true
 
   private def handleNonPasteInput(input: TerminalInput): Unit =
@@ -186,13 +205,15 @@ final class Input(
       if text.exists(_.isWhitespace) || !lastAction.contains(Input.Action.TypeWord) then pushUndo()
       insertRaw(text)
       lastAction = Some(Input.Action.TypeWord)
-      lastYankClusters = 0
+      yankBaseState = None
 
   private def insertRaw(text: String): Unit =
-    val cs       = clusters
-    val inserted = Unicode.graphemeClusters(text)
-    currentValue = (cs.take(cursorCluster) ++ inserted ++ cs.drop(cursorCluster)).mkString
-    cursorCluster += inserted.length
+    val cs            = clusters
+    val prefix        = cs.take(cursorCluster).mkString
+    val insertedValue = prefix + text + cs.drop(cursorCluster).mkString
+    val finalClusters = Unicode.graphemeClusters(insertedValue)
+    currentValue = insertedValue
+    cursorCluster = Unicode.graphemeCursorAfterCodeUnit(finalClusters, prefix.length + text.length)
 
   private def deleteBackwards(): Unit =
     if cursorCluster > 0 then
@@ -221,7 +242,7 @@ final class Input(
         currentValue = (cs.take(start) ++ cs.drop(cursorCluster)).mkString
         cursorCluster = start
         lastAction = Some(Input.Action.Kill)
-        lastYankClusters = 0
+        yankBaseState = None
 
   private def deleteWordForwards(): Unit =
     val cs = clusters
@@ -234,7 +255,7 @@ final class Input(
         killRing.push(deleted, prepend = false, accumulate = wasKill)
         currentValue = (cs.take(cursorCluster) ++ cs.drop(end)).mkString
         lastAction = Some(Input.Action.Kill)
-        lastYankClusters = 0
+        yankBaseState = None
 
   private def deleteToStart(): Unit =
     val cs = clusters
@@ -245,7 +266,7 @@ final class Input(
       currentValue = cs.drop(cursorCluster).mkString
       cursorCluster = 0
       lastAction = Some(Input.Action.Kill)
-      lastYankClusters = 0
+      yankBaseState = None
 
   private def deleteToEnd(): Unit =
     val cs = clusters
@@ -255,7 +276,7 @@ final class Input(
       killRing.push(deleted, prepend = false, accumulate = lastAction.contains(Input.Action.Kill))
       currentValue = cs.take(cursorCluster).mkString
       lastAction = Some(Input.Action.Kill)
-      lastYankClusters = 0
+      yankBaseState = None
 
   private def moveLeft(): Unit =
     cursorCluster = math.max(0, cursorCluster - 1)
@@ -283,10 +304,16 @@ final class Input(
 
   private def resetAction(): Unit =
     lastAction = None
-    lastYankClusters = 0
+    yankBaseState = None
 
   private def pushUndo(): Unit =
-    undoStack.push(Input.State(currentValue, cursorCluster))
+    pushUndoSnapshot(Input.State(currentValue, cursorCluster))
+
+  private def pushUndoSnapshot(state: Input.State): Unit = undoStack.push(state)
+
+  private def restore(state: Input.State): Unit =
+    currentValue = state.value
+    cursorCluster = state.cursorCluster
 
   private def clusters: Vector[String] = Unicode.graphemeClusters(value)
 
@@ -304,11 +331,12 @@ object Input:
     private val graphemeCounter = Unicode.IncrementalGraphemeCounter()
     private var acceptedChars   = 0L
     private var appendCalls     = 0L
+    private var finalCursor     = Option.empty[Int]
 
     graphemeCounter.process(prefix)
 
     def value: String      = prefixBuilder.result() + suffix
-    def cursorCluster: Int = graphemeCounter.count.toInt
+    def cursorCluster: Int = finalCursor.getOrElse(graphemeCounter.count.toInt)
     def isEmpty: Boolean   = acceptedChars === 0L
 
     private[scalatui] def acceptedCharacterCount: Long = acceptedChars
@@ -319,6 +347,8 @@ object Input:
 
     def finish(): Unit =
       appendDecoded(decoder.flush())
+      val finalClusters = Unicode.graphemeClusters(value)
+      finalCursor = Some(Unicode.graphemeCursorAfterCodeUnit(finalClusters, prefixBuilder.length))
 
     private def appendDecoded(decoded: String): Unit =
       val normalized = decoded.replace('\n', ' ').replace('\r', ' ')

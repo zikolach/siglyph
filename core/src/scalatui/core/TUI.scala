@@ -39,10 +39,10 @@ enum TUIScreenMode derives CanEqual:
  * Runtime options for [[TUI]].
  *
  * @param hardwareCursorPositioning
- *   When true, the shared renderer strips focused editor cursor markers from the final frame and
- *   moves the terminal hardware cursor to the marker position after output. The default is false so
- *   existing applications keep relying on the rendered fake cursor only. This option is
- *   backend-independent and does not require application code to emit raw terminal escape strings.
+ *   When true, the shared renderer selects the first row-major surviving structured cursor
+ *   candidate and moves the terminal hardware cursor there after output. The default is false, so
+ *   applications rely on the rendered fake cursor only. This option is backend-independent and
+ *   ordinary strings cannot influence cursor placement.
  * @param screenMode
  *   Terminal screen buffer mode for this TUI lifecycle. The default [[TUIScreenMode.Normal]] keeps
  *   existing normal-screen behavior. [[TUIScreenMode.Alternate]] enters the terminal alternate
@@ -1005,10 +1005,12 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
       .sortBy(_.focusOrder)
       .flatMap { entry =>
         val initialLayout = OverlayRenderer.resolve(entry.options, overlayHeight = 0, width, height)
-        val rawFrame      = entry.component.render(initialLayout.width)
+        val rawFrame      = entry.component.render(initialLayout.width).validated(initialLayout.width)
         val clippedLines  = initialLayout.maxHeight.fold(rawFrame.lines)(rawFrame.lines.take)
         val controls      = rawFrame.controls.filter(_.row < clippedLines.length)
-        val clippedFrame  = ComponentRender(clippedLines, controls).validated(initialLayout.width)
+        val cursors       = rawFrame.cursorPlacements.filter(_.row < clippedLines.length)
+        val clippedFrame  =
+          ComponentRender(clippedLines, controls, cursors).validated(initialLayout.width)
         val layout        = OverlayRenderer.resolve(entry.options, clippedLines.length, width, height)
         Option.when(clippedLines.nonEmpty)(clippedFrame -> layout)
       }
@@ -1353,7 +1355,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     builder.append(SyncEnd)
     builder.append(AutoWrapOn)
 
-  private def positionHardwareCursorOnly(position: Option[CursorMarker.Position]): Unit =
+  private def positionHardwareCursorOnly(position: Option[CursorPlacement]): Unit =
     if options.hardwareCursorPositioning then
       position.foreach { target =>
         val builder = StringBuilder()
@@ -1366,8 +1368,14 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
       }
 
   private def prepareFrame(frame: ComponentRender, width: Int): TUI.PreparedFrame =
-    val scanned = CursorMarker.stripAndLocate(applyLineResets(sanitizeLines(frame.lines, width)))
-    TUI.PreparedFrame(scanned.lines, scanned.position, frame.controls)
+    val selectedCursor = frame.cursorPlacements.zipWithIndex
+      .minByOption { case (placement, index) => (placement.row, placement.column, index) }
+      .map(_._1)
+    TUI.PreparedFrame(
+      applyLineResets(sanitizeLines(frame.lines, width)),
+      selectedCursor,
+      frame.controls
+    )
 
   private def appendHardwareCursorMove(
       builder: StringBuilder,
@@ -1402,7 +1410,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   private def sanitizeLines(lines: Vector[String], width: Int): Vector[String] =
     lines.zipWithIndex.map { (line, index) =>
       val lineWidth = Ansi.visibleWidth(line)
-      if lineWidth <= width then line
+      if lineWidth <= width then Ansi.sanitize(line)
       else
         val sanitized = Ansi.truncateToWidth(line, width, "")
         sanitizationCount += 1
@@ -1466,7 +1474,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
 object TUI:
   private final case class PreparedFrame(
       lines: Vector[String],
-      position: Option[CursorMarker.Position],
+      position: Option[CursorPlacement],
       controls: Vector[TerminalControlPlacement]
   ) derives CanEqual
 
