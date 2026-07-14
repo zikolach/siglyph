@@ -277,7 +277,8 @@ class TUIConcurrencySuite extends munit.FunSuite:
         val control = TerminalImageProtocol.encodeKitty(payload, width, 1, 1)
         ComponentRender(
           Vector("x" * width),
-          Vector(TerminalControlPlacement(0, 0, control))
+          Vector(TerminalControlPlacement(0, 0, control)),
+          Vector.empty
         )
     val tui       = TUI(terminal)
     tui.addChild(component)
@@ -1828,7 +1829,11 @@ class TUIConcurrencySuite extends munit.FunSuite:
     )
     tui.addChild(new Component:
       override def render(width: Int): ComponentRender =
-        ComponentRender.text(Vector(s"frame${CursorMarker.Sequence}")))
+        ComponentRender(
+          Vector("frame"),
+          Vector.empty,
+          Vector(CursorPlacement(0, 5))
+        ))
     tui.start()
     val cancelQuery = tui.queryTerminalBackgroundColor(_ => ())
     assert(tui.setTerminalTitle("ordered-title"))

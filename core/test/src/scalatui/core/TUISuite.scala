@@ -13,14 +13,9 @@ import scalatui.components.{
 }
 import scalatui.terminal.{
   ImageCellDimensions,
-  ImageDimensions,
-  ImageProtocol,
-  ImageRenderOptions,
-  Base64ImagePayload,
   KeyEventType,
   KeyModifiers,
   RgbColor,
-  TerminalCapabilities,
   Terminal,
   TerminalColorProtocol,
   TerminalColorScheme,
@@ -38,8 +33,12 @@ class TUISuite extends munit.FunSuite:
   final class MutableLine(var value: String) extends Component:
     override def render(width: Int): ComponentRender = ComponentRender.text(Vector(value))
 
-  final class MutableFrame(var values: Vector[String]) extends Component:
+  final class MutableFrame(var values: Vector[String])  extends Component:
     override def render(width: Int): ComponentRender = ComponentRender.text(values)
+  final class MutableRender(var frame: ComponentRender) extends Component:
+    override def render(width: Int): ComponentRender = frame
+
+  private val formerCursorApc = "\u001b_" + "pi" + ":c\u001b\\"
 
   final class AsyncStartupTerminal(
       inputs: Vector[TerminalInput],
@@ -453,24 +452,58 @@ class TUISuite extends munit.FunSuite:
     assert(terminal.showCursorCalled)
     assert(terminal.stopCalled)
 
-  test("hardware cursor positioning is disabled by default and strips markers"):
+  test("invalid child cursor geometry cannot use a sibling row before synchronized output"):
     val terminal = VirtualTerminal(20, 5)
     val tui      = TUI(terminal)
-    tui.addChild(MutableLine(s"ab${CursorMarker.Sequence}\u001b[7mc\u001b[27m"))
+    tui.addChild(MutableRender(ComponentRender(
+      Vector("line"),
+      Vector.empty,
+      Vector(CursorPlacement(1, 0))
+    )))
+    tui.addChild(MutableLine("sibling"))
 
-    tui.start()
+    intercept[IllegalArgumentException](tui.start())
 
-    assert(!terminal.output.contains(CursorMarker.Sequence), terminal.output)
-    assert(terminal.output.contains("ab\u001b[7mc\u001b[27m" + TUI.LineReset), terminal.output)
+    assert(!terminal.output.contains(TUI.SyncStart), terminal.output)
 
-  test("hardware cursor positioning moves cursor to marker when enabled"):
+  test("TUI selects the first row-major structured cursor candidate"):
     val terminal = VirtualTerminal(20, 5)
     val tui      = TUI(terminal, TUIOptions(hardwareCursorPositioning = true))
-    tui.addChild(MutableLine(s"ab${CursorMarker.Sequence}\u001b[7mc\u001b[27m"))
+    tui.addChild(MutableRender(ComponentRender(
+      Vector("abcd", "next"),
+      Vector.empty,
+      Vector(CursorPlacement(1, 0), CursorPlacement(0, 3), CursorPlacement(0, 1))
+    )))
 
     tui.start()
 
-    assert(!terminal.output.contains(CursorMarker.Sequence), terminal.output)
+    assert(terminal.output.contains(s"\u001b[1A\r\u001b[1C${TUI.SyncEnd}"), terminal.output)
+
+  test("hardware cursor positioning is disabled by default"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal)
+    tui.addChild(MutableRender(ComponentRender(
+      Vector("ab\u001b[7mc\u001b[27m"),
+      Vector.empty,
+      Vector(CursorPlacement(0, 2))
+    )))
+
+    tui.start()
+
+    assert(terminal.output.contains("ab\u001b[7mc\u001b[27m" + TUI.LineReset), terminal.output)
+    assert(!terminal.output.contains(s"\r\u001b[2C${TUI.SyncEnd}"), terminal.output)
+
+  test("hardware cursor positioning moves to structured metadata when enabled"):
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = TUI(terminal, TUIOptions(hardwareCursorPositioning = true))
+    tui.addChild(MutableRender(ComponentRender(
+      Vector("ab\u001b[7mc\u001b[27m"),
+      Vector.empty,
+      Vector(CursorPlacement(0, 2))
+    )))
+
+    tui.start()
+
     assert(terminal.output.contains(s"\r\u001b[2C${TUI.SyncEnd}"), terminal.output)
 
   test("hardware cursor positioning preserves no-marker render behavior"):
@@ -483,14 +516,37 @@ class TUISuite extends munit.FunSuite:
     assert(terminal.output.contains("hello" + TUI.LineReset + TUI.SyncEnd), terminal.output)
     assert(!terminal.output.contains("\u001b[2C"), terminal.output)
 
-  test("overlay composition determines surviving cursor marker"):
+  test("ordinary former cursor APC bytes are visible and cannot override structured metadata"):
+    val terminal = VirtualTerminal(80, 5)
+    val tui      = TUI(terminal, TUIOptions(hardwareCursorPositioning = true))
+    tui.addChild(MutableRender(ComponentRender(
+      Vector("a" + formerCursorApc + "b"),
+      Vector.empty,
+      Vector(CursorPlacement(0, 1))
+    )))
+
+    tui.start()
+
+    assert(terminal.output.contains(Ansi.visibleControlText(formerCursorApc)), terminal.output)
+    assert(terminal.output.contains(s"\r\u001b[1C${TUI.SyncEnd}"), terminal.output)
+
+  test("overlay clipping removes cursor candidates outside clipped rows"):
     val terminal = VirtualTerminal(20, 5)
     val tui      = TUI(terminal, TUIOptions(hardwareCursorPositioning = true))
-    tui.addChild(MutableLine(s"a${CursorMarker.Sequence}\u001b[7mb\u001b[27m"))
+    tui.addChild(MutableRender(ComponentRender(
+      Vector("base", "", "tail"),
+      Vector.empty,
+      Vector(CursorPlacement(2, 4))
+    )))
     tui.showOverlay(
-      MutableLine("zz"),
+      MutableRender(ComponentRender(
+        Vector("x", "y"),
+        Vector.empty,
+        Vector(CursorPlacement(1, 0))
+      )),
       OverlayOptions(
-        width = Some(OverlaySize.Absolute(2)),
+        width = Some(OverlaySize.Absolute(1)),
+        maxHeight = Some(OverlaySize.Absolute(1)),
         row = Some(OverlaySize.Absolute(0)),
         col = Some(OverlaySize.Absolute(0)),
         focusCapturing = false
@@ -499,21 +555,48 @@ class TUISuite extends munit.FunSuite:
 
     tui.start()
 
-    assert(!terminal.output.contains(CursorMarker.Sequence), terminal.output)
-    assert(!terminal.output.contains("\u001b[1C"), terminal.output)
-    assert(Ansi.strip(terminal.output).contains("zz"), terminal.output)
+    assert(terminal.output.contains(s"\r\u001b[4C${TUI.SyncEnd}"), terminal.output)
 
-  test("differential renderer compares marker-stripped frames"):
+  test("overlay validates raw cursor metadata before clipping or parent composition"):
     val terminal = VirtualTerminal(20, 5)
     val tui      = TUI(terminal)
-    tui.addChild(MutableLine(s"a${CursorMarker.Sequence}\u001b[7mb\u001b[27m"))
+    tui.addChild(MutableFrame(Vector("base", "parent row")))
+    tui.showOverlay(
+      MutableRender(ComponentRender(
+        Vector("overlay"),
+        Vector.empty,
+        Vector(CursorPlacement(1, 0))
+      )),
+      OverlayOptions(
+        width = Some(OverlaySize.Absolute(7)),
+        maxHeight = Some(OverlaySize.Absolute(1)),
+        row = Some(OverlaySize.Absolute(0)),
+        col = Some(OverlaySize.Absolute(0)),
+        focusCapturing = false
+      )
+    )
+
+    intercept[IllegalArgumentException](tui.start())
+
+    assert(!terminal.output.contains(TUI.SyncStart), terminal.output)
+
+  test("cursor-only differential update moves hardware cursor without repainting"):
+    val terminal  = VirtualTerminal(20, 5)
+    val component = MutableRender(ComponentRender(
+      Vector("abc"),
+      Vector.empty,
+      Vector(CursorPlacement(0, 1))
+    ))
+    val tui       = TUI(terminal, TUIOptions(hardwareCursorPositioning = true))
+    tui.addChild(component)
     tui.start()
     terminal.clearWrites()
 
+    component.frame = component.frame.copy(cursorPlacements = Vector(CursorPlacement(0, 2)))
     tui.requestRender()
     tui.flushRender()
 
-    assertEquals(terminal.output, "")
+    assertEquals(terminal.output, "\r\u001b[2C")
 
   test("partial render moves to first changed line and writes changed tail"):
     val terminal = VirtualTerminal(20, 5)
@@ -664,9 +747,10 @@ class TUISuite extends munit.FunSuite:
 
     tui.start()
 
-    val plainLines = visibleOutputLines(terminal.output)
-    assert(plainLines.exists(_.contains("a界")), terminal.output)
-    assert(plainLines.forall(_.length <= 3), plainLines.toString)
+    val plainLines  = terminal.viewportLines.filter(_.nonEmpty)
+    val contentLine = plainLines.find(_.contains("a界"))
+    assert(contentLine.nonEmpty)
+    assert(contentLine.exists(Ansi.visibleWidth(_) <= 3))
     assertEquals(tui.sanitizedLineCount, 1)
 
   test("one-column render remains width safe"):
@@ -676,7 +760,7 @@ class TUISuite extends munit.FunSuite:
 
     tui.start()
 
-    assert(visibleOutputLines(terminal.output).forall(Ansi.visibleWidth(_) <= 1), terminal.output)
+    assert(terminal.viewportLines.forall(Ansi.visibleWidth(_) <= 1), terminal.output)
     assertEquals(tui.sanitizedLineCount, 1)
 
   test("shrinking terminal to one column repaints width-safe output with pi-tui full clear"):
@@ -693,8 +777,33 @@ class TUISuite extends munit.FunSuite:
       terminal.output.startsWith(TUI.SyncStart + TUI.AutoWrapOff + "\u001b[2J\u001b[H\u001b[3J"),
       terminal.output
     )
-    assert(visibleOutputLines(terminal.output).forall(Ansi.visibleWidth(_) <= 1), terminal.output)
+    assert(terminal.viewportLines.forall(Ansi.visibleWidth(_) <= 1), terminal.output)
     assertEquals(tui.sanitizedLineCount, 1)
+
+  test("full-frame output makes unsupported controls visible and inert"):
+    val terminal = VirtualTerminal(80, 5)
+    val rejected = "\u001b]52;c;payload\u0007\u001b_Gkitty\u001b\\a\u0008b"
+    val tui      = TUI(terminal)
+    tui.addChild(MutableLine(rejected))
+
+    tui.start()
+
+    assert(!terminal.output.contains("\u001b]52;c;payload"))
+    assert(!terminal.output.contains("\u001b_Gkitty"))
+    assert(terminal.output.contains(Ansi.visibleControlText(rejected)))
+  test("full-frame output keeps complete and unterminated DCS payloads inert"):
+    val embedded = "payload\u001b[31m\u001b]8;;https://example.com\u0007link"
+    Vector("\u001bP" + embedded + "\u001b\\", "\u001bP" + embedded).foreach { candidate =>
+      val terminal = VirtualTerminal(256, 5)
+      val tui      = TUI(terminal)
+      tui.addChild(MutableLine(candidate))
+
+      tui.start()
+
+      assert(!terminal.output.contains("\u001bP"), terminal.output)
+      assert(!terminal.output.contains("\u001b]8;;https://example.com"), terminal.output)
+      assert(terminal.output.contains(Ansi.visibleControlText(candidate)), terminal.output)
+    }
 
   test("input-triggered over-wide render is sanitized without uncaught exception"):
     val terminal  = VirtualTerminal(3, 5)
@@ -1228,9 +1337,6 @@ class TUISuite extends munit.FunSuite:
 
     assertEquals(delivered, Vector(TerminalInput.Key(TerminalKey.Character("x"))))
 
-  private def visibleOutputLines(output: String): Vector[String] =
-    Ansi.strip(output).replace("\r\n", "\n").replace('\r', '\n').split("\n", -1).toVector
-
   private def assertNoAlternateScreen(output: String): Unit =
     assert(!output.contains(TUI.AlternateScreenEnter), output)
     assert(!output.contains(TUI.AlternateScreenExit), output)
@@ -1355,7 +1461,7 @@ class TUISuite extends munit.FunSuite:
 
     tui.start()
 
-    assert(visibleOutputLines(terminal.output).exists(_.contains("aXYZe")), terminal.output)
+    assert(terminal.viewportLines.exists(_.contains("aXYZe")), terminal.output)
 
   test("non-capturing overlay preserves base input focus"):
     val terminal    = VirtualTerminal(10, 3)
@@ -1441,4 +1547,4 @@ class TUISuite extends munit.FunSuite:
       terminal.output.startsWith(TUI.SyncStart + TUI.AutoWrapOff + "\u001b[2J\u001b[H\u001b[3J"),
       terminal.output
     )
-    assert(visibleOutputLines(terminal.output).exists(_.contains("wi")), terminal.output)
+    assert(terminal.viewportLines.exists(_.contains("wi")), terminal.output)

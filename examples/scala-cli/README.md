@@ -71,7 +71,8 @@ val rendered = TerminalImageProtocol.renderBase64Image(
 val frame = rendered.fold(ComponentRender.text("Image output is unavailable")) { image =>
   ComponentRender(
     lines = Vector.fill(image.rows)(""),
-    controls = Vector(TerminalControlPlacement(row = 0, column = 0, image.control))
+    controls = Vector(TerminalControlPlacement(row = 0, column = 0, image.control)),
+    cursorPlacements = Vector.empty
   )
 }
 ```

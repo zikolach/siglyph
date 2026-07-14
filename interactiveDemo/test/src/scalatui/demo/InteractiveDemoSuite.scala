@@ -16,7 +16,7 @@ class InteractiveDemoSuite extends munit.FunSuite:
 
       tui.start()
 
-      assertWidthSafe(terminal.output, width)
+      assertWidthSafe(terminal, width)
     }
 
   test("interactive demo remains interactive after narrow resize"):
@@ -29,11 +29,11 @@ class InteractiveDemoSuite extends munit.FunSuite:
     terminal.resize(1, 10)
     terminal.sendInput(TerminalInput.Key(TerminalKey.Character("x")))
 
-    assertWidthSafe(terminal.output, 1)
+    assertWidthSafe(terminal, 1)
     assert(terminal.output.nonEmpty, terminal.output)
 
   test("interactive demo shows slash-command autocomplete overlay"):
-    val terminal = VirtualTerminal(60, 24)
+    val terminal = VirtualTerminal(60, 40)
     val tui      = TUI(terminal)
     InteractiveDemo.install(tui)
     tui.start()
@@ -44,14 +44,13 @@ class InteractiveDemoSuite extends munit.FunSuite:
     tui.requestRender(force = true)
     tui.flushRender()
 
-    val suggestions = Ansi.strip(terminal.output)
-    assert(suggestions.contains("help"), suggestions)
-    assert(suggestions.contains("clear"), suggestions)
-    val lines       = suggestions.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1).toVector
-    val editorLine  = lines.indexWhere(_.contains("Editor"))
-    val helpLine    = lines.indexWhere(_.contains("help"))
-    assert(editorLine >= 0, suggestions)
-    assert(helpLine > editorLine, suggestions)
+    val suggestionLines = terminal.viewportLines
+    assert(suggestionLines.exists(_.contains("help")), suggestionLines)
+    assert(suggestionLines.exists(_.contains("clear")), suggestionLines)
+    val editorLine      = suggestionLines.indexWhere(_.contains("Editor"))
+    val helpLine        = suggestionLines.indexWhere(_.contains("help"))
+    assert(editorLine >= 0, suggestionLines)
+    assert(helpLine > editorLine, suggestionLines)
 
     terminal.clearWrites()
     terminal.sendInput(TerminalInput.Key(TerminalKey.Down))
@@ -59,15 +58,13 @@ class InteractiveDemoSuite extends munit.FunSuite:
     tui.requestRender(force = true)
     tui.flushRender()
 
-    val postEnter = Ansi.strip(terminal.output)
-    val lastFrame = postEnter.split("siglyph showcase demo").last
     assert(
-      !lastFrame.contains("help — Show demo help"),
-      postEnter
+      !terminal.viewportLines.exists(_.contains("help — Show demo help")),
+      terminal.viewportLines
     )
     assert(
-      lastFrame.contains("Submitted: (none)"),
-      postEnter
+      terminal.viewportLines.exists(_.contains("Submitted: (none)")),
+      terminal.viewportLines
     )
 
   test("interactive demo shows accurate file-preview hidden-line counts"):
@@ -101,14 +98,15 @@ class InteractiveDemoSuite extends munit.FunSuite:
       tui.requestRender(force = true)
       tui.flushRender()
 
-      val output    = Ansi.strip(terminal.output)
-      val lastFrame = output.split("siglyph showcase demo").last
-      assert(lastFrame.contains("... (+7 lines hidden)"), output)
+      assert(
+        terminal.viewportLines.exists(_.contains("... (+7 lines hidden)")),
+        terminal.viewportLines
+      )
     finally
       Files.deleteIfExists(tempFile)
 
   test("interactive demo lets Tab reach editor autocomplete"):
-    val terminal = VirtualTerminal(60, 24)
+    val terminal = VirtualTerminal(60, 40)
     val tui      = TUI(terminal)
     InteractiveDemo.install(tui)
     tui.start()
@@ -121,9 +119,8 @@ class InteractiveDemoSuite extends munit.FunSuite:
     tui.requestRender(force = true)
     tui.flushRender()
 
-    val output = Ansi.strip(terminal.output)
-    assert(output.contains("AGENTS.md"), output)
-    assert(output.contains("Editor (focused)"), output)
+    assert(terminal.viewportLines.exists(_.contains("AGENTS.md")), terminal.viewportLines)
+    assert(terminal.viewportLines.exists(_.contains("Editor (focused)")), terminal.viewportLines)
 
   test("interactive demo actions tick and cancel loader components"):
     val terminal = VirtualTerminal(80, 24)
@@ -140,15 +137,15 @@ class InteractiveDemoSuite extends munit.FunSuite:
     terminal.sendInput(TerminalInput.Key(TerminalKey.Enter))
 
     assert(
-      Ansi.strip(terminal.output).contains("◓ Tick me from Actions"),
-      Ansi.strip(terminal.output)
+      terminal.viewportLines.exists(_.contains("◓ Tick me from Actions")),
+      terminal.viewportLines
     )
 
     terminal.clearWrites()
     terminal.sendInput(TerminalInput.Key(TerminalKey.Down))
     terminal.sendInput(TerminalInput.Key(TerminalKey.Enter))
 
-    assert(Ansi.strip(terminal.output).contains("! Cancelled"), Ansi.strip(terminal.output))
+    assert(terminal.viewportLines.exists(_.contains("! Cancelled")), terminal.viewportLines)
 
   test("interactive demo exposes terminal integration actions"):
     val terminal = VirtualTerminal(100, 24)
@@ -157,8 +154,8 @@ class InteractiveDemoSuite extends munit.FunSuite:
     tui.start()
 
     assert(
-      Ansi.strip(terminal.output).contains("Terminal integration"),
-      Ansi.strip(terminal.output)
+      terminal.viewportLines.exists(_.contains("Terminal integration")),
+      terminal.viewportLines
     )
     terminal.clearWrites()
 
@@ -168,8 +165,8 @@ class InteractiveDemoSuite extends munit.FunSuite:
 
     assert(terminal.output.contains("\u001b]0;siglyph demo\u0007"), terminal.output)
     assert(
-      Ansi.strip(terminal.output).contains("Terminal title supported"),
-      Ansi.strip(terminal.output)
+      terminal.viewportLines.exists(_.contains("Terminal title supported")),
+      terminal.viewportLines
     )
 
     terminal.clearWrites()
@@ -178,8 +175,8 @@ class InteractiveDemoSuite extends munit.FunSuite:
 
     assert(terminal.output.contains("\u001b]9;4;3\u0007"), terminal.output)
     assert(
-      Ansi.strip(terminal.output).contains("Terminal progress on supported"),
-      Ansi.strip(terminal.output)
+      terminal.viewportLines.exists(_.contains("Terminal progress on supported")),
+      terminal.viewportLines
     )
 
   test("interactive demo keeps autocomplete overlay safe during narrow resize"):
@@ -193,8 +190,11 @@ class InteractiveDemoSuite extends munit.FunSuite:
     terminal.clearWrites()
     terminal.resize(12, 8)
 
-    assertWidthSafe(terminal.output, 12)
-    assert(Ansi.strip(terminal.output).contains("help"), "expected suggestions after resize")
+    assertWidthSafe(terminal, 12)
+    assert(
+      terminal.viewportLines.exists(_.contains("help")),
+      "expected suggestions after resize"
+    )
 
   test("demo query subscription keeps at most one unanswered query"):
     val subscription = DemoQuerySubscription()
@@ -291,8 +291,7 @@ class InteractiveDemoSuite extends munit.FunSuite:
     assertEquals(subscription.start(query)(_ => ())((_, _) => ()), Some(3L))
     assertEquals(completions, Vector(2L))
 
-  private def assertWidthSafe(output: String, width: Int): Unit =
-    val visibleLines = Ansi.strip(output).replace("\r\n", "\n").replace('\r', '\n').split("\n", -1)
-    visibleLines.foreach { line =>
+  private def assertWidthSafe(terminal: VirtualTerminal, width: Int): Unit =
+    terminal.viewportLines.foreach { line =>
       assert(Ansi.visibleWidth(line) <= width, s"width=$width line=${line}")
     }

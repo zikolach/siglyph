@@ -129,13 +129,16 @@ trait RenderOriginAware:
  * This is intentionally lightweight rather than a retained layout tree: it helps application and
  * demo code compose line-oriented frames while allowing components such as
  * [[scalatui.components.Editor]] to place owned overlays adjacent to their rendered area.
- * `startRow` and `startCol` notify [[RenderOriginAware]] components only. Returned control
- * coordinates remain frame-local and are rebased only by rows accumulated in this builder.
+ * `startRow` and `startCol` notify [[RenderOriginAware]] components only. Every child frame is
+ * validated against its own rows and this builder's requested width before any metadata is rebased
+ * or later siblings are appended. Returned control and cursor coordinates remain frame-local and
+ * are rebased only by rows accumulated in this builder.
  */
 final class ComponentFrameBuilder(width: Int, startRow: Int = 0, startCol: Int = 0):
-  private val renderedLines    = Vector.newBuilder[String]
-  private val renderedControls = Vector.newBuilder[TerminalControlPlacement]
-  private var localRow         = 0
+  private val renderedLines            = Vector.newBuilder[String]
+  private val renderedControls         = Vector.newBuilder[TerminalControlPlacement]
+  private val renderedCursorPlacements = Vector.newBuilder[CursorPlacement]
+  private var localRow                 = 0
 
   /** Append ordinary lines and advance the local row without adding semantic controls. */
   def addLines(lines: Vector[String]): Unit =
@@ -145,13 +148,19 @@ final class ComponentFrameBuilder(width: Int, startRow: Int = 0, startCol: Int =
   /** Append one ordinary line and advance the local row without adding semantic controls. */
   def addLine(line: String): Unit = addLines(Vector(line))
 
-  /** Append a typed child frame and rebase controls only by accumulated local rows. */
+  /**
+   * Validate and append a typed child frame, then rebase metadata only by accumulated local rows.
+   */
   def addRender(frame: ComponentRender): Unit =
-    renderedLines ++= frame.lines
-    frame.controls.foreach(placement =>
+    val childFrame = frame.validated(width)
+    renderedLines ++= childFrame.lines
+    childFrame.controls.foreach(placement =>
       renderedControls += placement.translated(rowOffset = localRow)
     )
-    localRow += frame.lines.length
+    childFrame.cursorPlacements.foreach(placement =>
+      renderedCursorPlacements += placement.translated(rowOffset = localRow)
+    )
+    localRow += childFrame.lines.length
 
   /**
    * Render and append a component, supplying its render origin when it supports that capability.
@@ -164,8 +173,11 @@ final class ComponentFrameBuilder(width: Int, startRow: Int = 0, startCol: Int =
     addRender(component.render(width))
 
   /**
-   * Return accumulated ordinary lines and frame-relative controls.
-   *
-   * The caller or TUI must validate the returned control footprints against the final frame width.
+   * Return accumulated ordinary lines and frame-relative metadata. Callers must still validate the
+   * final composed frame.
    */
-  def result(): ComponentRender = ComponentRender(renderedLines.result(), renderedControls.result())
+  def result(): ComponentRender = ComponentRender(
+    renderedLines.result(),
+    renderedControls.result(),
+    renderedCursorPlacements.result()
+  )

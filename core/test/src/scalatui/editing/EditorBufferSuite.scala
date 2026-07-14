@@ -44,6 +44,38 @@ class EditorBufferSuite extends munit.FunSuite:
     assertEquals(buffer.text, "ab")
     assertEquals(buffer.cursor, EditorCursor(0, 1))
 
+  test("inserts moves and deletes focused Unicode clusters atomically at every position"):
+    val clusters = Vector("\u1100\u1161\u11a8", "\u0915\u094d\u0915", "e\u0301", "👩‍💻", "🇦🇹")
+    clusters.foreach { cluster =>
+      Vector(0, 1, 2).foreach { position =>
+        val buffer = EditorBuffer.fromText("AB", EditorCursor(0, position))
+        buffer.insert(cluster)
+        assertEquals(buffer.cursor, EditorCursor(0, position + 1), cluster)
+        buffer.moveLeft()
+        buffer.delete()
+        assertEquals(buffer.text, "AB", cluster)
+      }
+    }
+
+  test("insertion cursor follows final segmentation when both neighbors join"):
+    val cases = Vector(
+      ("AB", 1, "\u0301", "A\u0301B", EditorCursor(0, 1), "B"),
+      ("AB", 1, "\u0600", "A\u0600B", EditorCursor(0, 2), "A"),
+      ("\u1100\u11a8", 1, "\u1161", "\u1100\u1161\u11a8", EditorCursor(0, 1), ""),
+      ("\u0915\u0915", 1, "\u094d", "\u0915\u094d\u0915", EditorCursor(0, 1), ""),
+      ("👩💻", 1, "\u200d", "👩‍💻", EditorCursor(0, 1), ""),
+      ("🇹", 0, "🇦", "🇦🇹", EditorCursor(0, 1), "")
+    )
+
+    cases.foreach { case (initial, column, inserted, expected, cursor, afterBackspace) =>
+      val buffer = EditorBuffer.fromText(initial, EditorCursor(0, column))
+      buffer.insert(inserted)
+      assertEquals(buffer.text, expected, expected)
+      assertEquals(buffer.cursor, cursor, expected)
+      buffer.backspace()
+      assertEquals(buffer.text, afterBackspace, expected)
+    }
+
   test("newline splits current line"):
     val buffer = EditorBuffer.fromText("hello", EditorCursor(0, 2))
     buffer.insertNewline()

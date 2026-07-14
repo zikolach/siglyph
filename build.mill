@@ -119,7 +119,9 @@ object coreNative extends SiglyphNativePublishModule {
   object test extends ScalaNativeTests {
     def sources       = Task.Sources(
       workspaceRoot / "core" / "test" / "src" / "scalatui" / "TestInputStreams.scala",
+      workspaceRoot / "core" / "test" / "src" / "scalatui" / "ansi" / "AnsiSuite.scala",
       workspaceRoot / "core" / "test" / "src" / "scalatui" / "components" / "EditorSuite.scala",
+      workspaceRoot / "core" / "test" / "src" / "scalatui" / "components" / "EditorLayoutSuite.scala",
       workspaceRoot / "core" / "test" / "src" / "scalatui" / "components" / "FilterPasteSessionSuite.scala",
       workspaceRoot / "core" / "test" / "src" / "scalatui" / "components" / "InputPasteSuite.scala",
       workspaceRoot / "core" / "test" / "src" / "scalatui" / "core" / "ComponentRenderSuite.scala",
@@ -130,7 +132,9 @@ object coreNative extends SiglyphNativePublishModule {
       workspaceRoot / "core" / "test" / "src" / "scalatui" / "terminal" / "Base64ImagePayloadSuite.scala",
       workspaceRoot / "core" / "test" / "src" / "scalatui" / "terminal" / "TerminalImageProtocolSuite.scala",
       workspaceRoot / "core" / "test" / "src" / "scalatui" / "terminal" / "TerminalInputBufferSuite.scala",
-      workspaceRoot / "core" / "test" / "src" / "scalatui" / "terminal" / "TerminalInputParserSuite.scala"
+      workspaceRoot / "core" / "test" / "src" / "scalatui" / "terminal" / "TerminalInputParserSuite.scala",
+      workspaceRoot / "core" / "test" / "src" / "scalatui" / "unicode" / "UnicodeGraphemeBreakFixtures.scala",
+      workspaceRoot / "core" / "test" / "src" / "scalatui" / "unicode" / "UnicodeSuite.scala"
     )
     def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
     def testFramework = "munit.Framework"

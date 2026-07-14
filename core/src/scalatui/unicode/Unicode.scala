@@ -3,72 +3,156 @@ package scalatui.unicode
 import scalatui.syntax.Containment.*
 import scalatui.syntax.Equality.*
 
+private[scalatui] final class GraphemeBoundaryEngine:
+  import GraphemeBoundaryEngine.Gcb
+
+  private var started             = false
+  private var previous            = Gcb.Other
+  private var regionalParity      = false
+  private var epExtendContext     = false
+  private var zwjAfterEpExtends   = false
+  private var incbConsonantActive = false
+  private var incbLinkerSeen      = false
+
+  /** Returns whether a grapheme break occurs immediately before `codePoint`. */
+  def accept(codePoint: Int): Boolean =
+    val current = Gcb.of(codePoint)
+    val breaks  =
+      if !started then true
+      else if previous === Gcb.CR && current === Gcb.LF then false
+      else if previous.isControl || current.isControl then true
+      else if previous === Gcb.L && (current === Gcb.L || current === Gcb.V || current === Gcb.LV || current === Gcb.LVT)
+      then false
+      else if (previous === Gcb.LV || previous === Gcb.V) && (current === Gcb.V || current === Gcb.T)
+      then false
+      else if (previous === Gcb.LVT || previous === Gcb.T) && current === Gcb.T then false
+      else if current === Gcb.Extend || current === Gcb.ZWJ then false
+      else if current === Gcb.SpacingMark then false
+      else if previous === Gcb.Prepend then false
+      else if incbConsonantActive && incbLinkerSeen && UnicodeTables.isIncbConsonant(codePoint) then
+        false
+      else if zwjAfterEpExtends && UnicodeTables.isExtendedPictographic(codePoint) then false
+      else if previous === Gcb.RegionalIndicator && current === Gcb.RegionalIndicator then
+        !regionalParity
+      else true
+
+    val nextZwjAfterEpExtends = current === Gcb.ZWJ && epExtendContext
+    epExtendContext =
+      UnicodeTables.isExtendedPictographic(codePoint) ||
+        (current === Gcb.Extend && epExtendContext)
+    zwjAfterEpExtends = nextZwjAfterEpExtends
+
+    if UnicodeTables.isIncbConsonant(codePoint) then
+      incbConsonantActive = true
+      incbLinkerSeen = false
+    else if incbConsonantActive && UnicodeTables.isIncbLinker(codePoint) then incbLinkerSeen = true
+    else if !UnicodeTables.isIncbExtend(codePoint) then
+      incbConsonantActive = false
+      incbLinkerSeen = false
+
+    regionalParity =
+      if current === Gcb.RegionalIndicator then
+        if started && previous === Gcb.RegionalIndicator then !regionalParity else true
+      else false
+    previous = current
+    started = true
+    breaks
+
+  def reset(): Unit =
+    started = false
+    previous = Gcb.Other
+    regionalParity = false
+    epExtendContext = false
+    zwjAfterEpExtends = false
+    incbConsonantActive = false
+    incbLinkerSeen = false
+
+  private[unicode] def stateWordCount: Int = 7
+
+private[scalatui] object GraphemeBoundaryEngine:
+  private enum Gcb:
+    case Other, CR, LF, Control, Extend, ZWJ, RegionalIndicator, Prepend, SpacingMark, L, V, T, LV,
+      LVT
+
+    def isControl: Boolean = this === CR || this === LF || this === Control
+
+  private object Gcb:
+    def of(codePoint: Int): Gcb =
+      if UnicodeTables.isGraphemeCr(codePoint) then Gcb.CR
+      else if UnicodeTables.isGraphemeLf(codePoint) then Gcb.LF
+      else if UnicodeTables.isGraphemeControl(codePoint) then Gcb.Control
+      else if UnicodeTables.isGraphemeExtend(codePoint) then Gcb.Extend
+      else if UnicodeTables.isGraphemeZwj(codePoint) then Gcb.ZWJ
+      else if UnicodeTables.isRegionalIndicator(codePoint) then Gcb.RegionalIndicator
+      else if UnicodeTables.isGraphemePrepend(codePoint) then Gcb.Prepend
+      else if UnicodeTables.isGraphemeSpacingMark(codePoint) then Gcb.SpacingMark
+      else if UnicodeTables.isGraphemeL(codePoint) then Gcb.L
+      else if UnicodeTables.isGraphemeV(codePoint) then Gcb.V
+      else if UnicodeTables.isGraphemeT(codePoint) then Gcb.T
+      else if UnicodeTables.isGraphemeLv(codePoint) then Gcb.LV
+      else if UnicodeTables.isGraphemeLvt(codePoint) then Gcb.LVT
+      else Gcb.Other
+
+/**
+ * Dependency-free Unicode text operations shared by JVM and Scala Native.
+ *
+ * Grapheme boundaries follow Unicode 17.0.0 UAX #29 default extended grapheme clusters. The bounded
+ * segmenter retains no input text. Display width remains a separate terminal policy and is not
+ * defined by UAX #29. Tailored segmentation and runtime Unicode fallbacks are not provided.
+ */
 object Unicode:
   val version: String = UnicodeTables.version
 
   final case class Grapheme(text: String, width: Int) derives CanEqual
 
   private[scalatui] final class IncrementalGraphemeCounter:
-    private var previous          = Option.empty[Int]
-    private var regionalInCluster = 0
-    private var currentCount      = 0L
+    private val engine       = GraphemeBoundaryEngine()
+    private var currentCount = 0L
 
     def count: Long = currentCount
 
     def process(value: String): Unit =
-      var index = 0
-      while index < value.length do
-        val current = value.codePointAt(index)
-        previous match
-          case None           =>
-            currentCount += 1
-            regionalInCluster = if isRegionalIndicator(current) then 1 else 0
-          case Some(previous) =>
-            val breaks = shouldBreak(previous, current, regionalInCluster)
-            if breaks then
-              currentCount += 1
-              regionalInCluster = if isRegionalIndicator(current) then 1 else 0
-            else if isRegionalIndicator(current) then regionalInCluster += 1
-            else if !isExtendLike(current) then regionalInCluster = 0
-        previous = Some(current)
-        index += Character.charCount(current)
+      foreachCodePoint(value) { codePoint =>
+        if engine.accept(codePoint) then currentCount += 1
+      }
 
     def clear(): Unit =
-      previous = None
-      regionalInCluster = 0
+      engine.reset()
       currentCount = 0L
 
   def codePoints(value: String): Vector[Int] =
     val builder = Vector.newBuilder[Int]
-    var i       = 0
-    while i < value.length do
-      val cp = value.codePointAt(i)
-      builder += cp
-      i += Character.charCount(cp)
+    foreachCodePoint(value)(builder += _)
     builder.result()
 
   def graphemeClusters(value: String): Vector[String] =
     if value.isEmpty then Vector.empty
     else
-      val cps               = codePointSlices(value)
-      val out               = Vector.newBuilder[String]
-      var clusterStart      = cps.head.start
-      var prev              = cps.head.codePoint
-      var regionalInCluster = if isRegionalIndicator(prev) then 1 else 0
-      var i                 = 1
-      while i < cps.length do
-        val curr  = cps(i).codePoint
-        val break = shouldBreak(prev, curr, regionalInCluster)
-        if break then
-          out += value.substring(clusterStart, cps(i).start)
-          clusterStart = cps(i).start
-          regionalInCluster = if isRegionalIndicator(curr) then 1 else 0
-        else if isRegionalIndicator(curr) then regionalInCluster += 1
-        else if !isExtendLike(curr) then regionalInCluster = 0
-        prev = curr
-        i += 1
+      val engine       = GraphemeBoundaryEngine()
+      val out          = Vector.newBuilder[String]
+      var clusterStart = 0
+      var index        = 0
+      while index < value.length do
+        val codePoint = value.codePointAt(index)
+        if engine.accept(codePoint) && index > clusterStart then
+          out += value.substring(clusterStart, index)
+          clusterStart = index
+        index += Character.charCount(codePoint)
       out += value.substring(clusterStart)
       out.result()
+
+  /** Return the first final grapheme boundary at or after a UTF-16 insertion boundary. */
+  private[scalatui] def graphemeCursorAfterCodeUnit(
+      clusters: Vector[String],
+      codeUnitOffset: Int
+  ): Int =
+    val target = math.max(0, codeUnitOffset)
+    var index  = 0
+    var end    = 0
+    while index < clusters.length && end < target do
+      end += clusters(index).length
+      index += 1
+    index
 
   def graphemeWidth(cluster: String): Int =
     if cluster === "\t" then 3
@@ -94,38 +178,9 @@ object Unicode:
     else if UnicodeTables.isEmojiPresentation(codePoint) then 2
     else 1
 
-  private final case class CodePointSlice(codePoint: Int, start: Int, end: Int)
-
-  private def codePointSlices(value: String): Vector[CodePointSlice] =
-    val builder = Vector.newBuilder[CodePointSlice]
-    var i       = 0
-    while i < value.length do
-      val cp  = value.codePointAt(i)
-      val end = i + Character.charCount(cp)
-      builder += CodePointSlice(cp, i, end)
-      i = end
-    builder.result()
-
-  private def shouldBreak(prev: Int, curr: Int, regionalInCluster: Int): Boolean =
-    if UnicodeTables.isGraphemeCr(prev) && UnicodeTables.isGraphemeLf(curr) then false
-    else if isControlBreak(prev) || isControlBreak(curr) then true
-    else if isExtendLike(curr) then false
-    else if UnicodeTables.isGraphemePrepend(prev) then false
-    else if UnicodeTables.isGraphemeZwj(prev) && UnicodeTables.isExtendedPictographic(curr) then
-      false
-    else if isRegionalIndicator(prev) && isRegionalIndicator(curr) then
-      (regionalInCluster % 2) === 0
-    else true
-
-  private def isControlBreak(codePoint: Int): Boolean =
-    UnicodeTables.isGraphemeCr(codePoint) || UnicodeTables.isGraphemeLf(
-      codePoint
-    ) || UnicodeTables.isGraphemeControl(codePoint)
-
-  private def isExtendLike(codePoint: Int): Boolean =
-    UnicodeTables.isGraphemeExtend(codePoint) || UnicodeTables.isGraphemeZwj(
-      codePoint
-    ) || UnicodeTables.isGraphemeSpacingMark(codePoint)
-
-  private def isRegionalIndicator(codePoint: Int): Boolean =
-    UnicodeTables.isRegionalIndicator(codePoint)
+  private def foreachCodePoint(value: String)(consume: Int => Unit): Unit =
+    var index = 0
+    while index < value.length do
+      val codePoint = value.codePointAt(index)
+      consume(codePoint)
+      index += Character.charCount(codePoint)

@@ -56,36 +56,63 @@ object OverlayRenderer:
 
     ResolvedOverlay(width = width, row = row, col = col, maxHeight = maxHeight)
 
+  /**
+   * Composite validated frame-local metadata at this public pure boundary.
+   *
+   * The base and final frame use `terminalWidth`. Each overlay uses its resolved width before any
+   * translation or occlusion. Invalid metadata fails with [[ComponentRenderValidationError]]'s
+   * bounded redacted diagnostics, including when no overlays are supplied.
+   */
   def composite(
       baseFrame: ComponentRender,
       overlays: Vector[(ComponentRender, ResolvedOverlay)],
       terminalWidth: Int,
       terminalHeight: Int
   ): ComponentRender =
-    if overlays.isEmpty then baseFrame
-    else
-      val termWidth     = math.max(1, terminalWidth)
-      val termHeight    = math.max(1, terminalHeight)
-      val minHeight     = overlays.foldLeft(baseFrame.lines.length) {
-        case (height, (frame, layout)) => math.max(height, layout.row + frame.lines.length)
-      }
-      val lineBuffer    = baseFrame.lines.padTo(minHeight, "").toArray
-      val viewportStart = math.max(0, minHeight - termHeight)
-      var controls      = baseFrame.controls
-
-      overlays.foreach { case (frame, layout) =>
-        val finalRow = viewportStart + layout.row
-        controls = controls.filterNot(intersectsOverlay(_, finalRow, layout, frame.lines.length))
-        controls ++= frame.controls.map(_.translated(finalRow, layout.col))
-        frame.lines.zipWithIndex.foreach { case (line, offset) =>
-          val index = finalRow + offset
-          if index >= 0 && index < lineBuffer.length then
-            lineBuffer(index) =
-              compositeLine(lineBuffer(index), line, layout.col, layout.width, termWidth)
+    val validatedBase     = baseFrame.validated(terminalWidth)
+    val validatedOverlays = overlays.map { case (frame, layout) =>
+      frame.validated(layout.width) -> layout
+    }
+    val result            =
+      if validatedOverlays.isEmpty then validatedBase
+      else
+        val termWidth        = math.max(1, terminalWidth)
+        val termHeight       = math.max(1, terminalHeight)
+        val minHeight        = validatedOverlays.foldLeft(validatedBase.lines.length) {
+          case (height, (frame, layout)) => math.max(height, layout.row + frame.lines.length)
         }
-      }
+        val lineBuffer       = validatedBase.lines.padTo(minHeight, "").toArray
+        val viewportStart    = math.max(0, minHeight - termHeight)
+        var controls         = validatedBase.controls
+        var cursorPlacements = validatedBase.cursorPlacements
 
-      ComponentRender(lineBuffer.toVector, controls)
+        validatedOverlays.foreach { case (frame, layout) =>
+          val finalRow = viewportStart + layout.row
+          controls = controls.filterNot(intersectsOverlay(_, finalRow, layout, frame.lines.length))
+          controls ++= frame.controls.map(_.translated(finalRow, layout.col))
+          cursorPlacements = cursorPlacements.filterNot(
+            cursorIntersectsOverlay(_, finalRow, layout, frame.lines.length)
+          )
+          cursorPlacements ++= frame.cursorPlacements.map(_.translated(finalRow, layout.col))
+          frame.lines.zipWithIndex.foreach { case (line, offset) =>
+            val index = finalRow + offset
+            if index >= 0 && index < lineBuffer.length then
+              lineBuffer(index) =
+                compositeLine(lineBuffer(index), line, layout.col, layout.width, termWidth)
+          }
+        }
+
+        ComponentRender(lineBuffer.toVector, controls, cursorPlacements)
+    result.validated(terminalWidth)
+
+  private def cursorIntersectsOverlay(
+      placement: CursorPlacement,
+      overlayRow: Int,
+      layout: ResolvedOverlay,
+      overlayHeight: Int
+  ): Boolean =
+    placement.row >= overlayRow && placement.row < overlayRow + overlayHeight &&
+      placement.column >= layout.col && placement.column < layout.col + layout.width
 
   private def intersectsOverlay(
       placement: TerminalControlPlacement,

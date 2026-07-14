@@ -16,8 +16,10 @@ final case class EditorCursor(line: Int, column: Int) derives CanEqual
 /**
  * Pure multiline text model for future editor components.
  *
- * Cursor columns are logical grapheme-cluster offsets, not terminal display columns or UTF-16
- * offsets.
+ * Cursor columns are Unicode 17.0.0 UAX #29 default extended grapheme-cluster offsets, not terminal
+ * display columns or UTF-16 offsets. This shared JVM/Native model retains exact, unlimited source
+ * text and its source-grapheme ownership. ANSI sanitization and display projection never mutate the
+ * buffer. Only the dependency-free segmenter's state is bounded.
  */
 final class EditorBuffer private (
     private var currentLines: Vector[String],
@@ -239,11 +241,15 @@ final class EditorBuffer private (
 
   private def insertClusters(inserted: Vector[String]): Unit =
     if inserted.nonEmpty then
-      val cs = currentLineClusters
-      replaceCurrentLine(
-        (cs.take(currentCursor.column) ++ inserted ++ cs.drop(currentCursor.column)).mkString
+      val cs            = currentLineClusters
+      val prefix        = cs.take(currentCursor.column).mkString
+      val insertedText  = inserted.mkString
+      val replacement   = prefix + insertedText + cs.drop(currentCursor.column).mkString
+      val finalClusters = lineClusters(replacement)
+      replaceCurrentLine(replacement)
+      currentCursor = currentCursor.copy(column =
+        Unicode.graphemeCursorAfterCodeUnit(finalClusters, prefix.length + insertedText.length)
       )
-      currentCursor = currentCursor.copy(column = currentCursor.column + inserted.length)
 
   private def replaceCurrentLine(value: String): Unit =
     currentLines = currentLines.updated(currentCursor.line, value)
@@ -281,17 +287,18 @@ final class EditorBuffer private (
   private def insertPasteLines(parts: Vector[String]): Unit =
     if parts.length === 1 then insertClusters(Unicode.graphemeClusters(parts.head))
     else
-      val cs          = currentLineClusters
-      val prefix      = cs.take(currentCursor.column).mkString
-      val suffix      = cs.drop(currentCursor.column).mkString
-      val replacement = Vector(prefix + parts.head) ++ parts.slice(
+      val cs            = currentLineClusters
+      val prefix        = cs.take(currentCursor.column).mkString
+      val suffix        = cs.drop(currentCursor.column).mkString
+      val replacement   = Vector(prefix + parts.head) ++ parts.slice(
         1,
         parts.length - 1
       ) ++ Vector(parts.last + suffix)
       currentLines = currentLines.patch(currentCursor.line, replacement, 1)
+      val finalClusters = lineClusters(replacement.last)
       currentCursor = EditorCursor(
         currentCursor.line + parts.length - 1,
-        Unicode.graphemeClusters(parts.last).length
+        Unicode.graphemeCursorAfterCodeUnit(finalClusters, parts.last.length)
       )
 
   private def expandPasteMarkers(value: String): String =
