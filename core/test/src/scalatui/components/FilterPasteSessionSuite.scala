@@ -141,7 +141,7 @@ class FilterPasteSessionSuite extends munit.FunSuite:
     assertEquals(list.query, "ga")
     assertEquals(list.selected.map(_.value), Some("beta"))
     assertEquals(changes, Vector.empty)
-    assert(Ansi.strip(list.render(40).mkString("\n")).contains("Gamma"))
+    assert(Ansi.strip(list.render(40).lines.mkString("\n")).contains("Gamma"))
     assertEquals(changes, Vector.empty)
 
     assertEquals(list.handleInputResult(TerminalInput.PasteEnd), InputResult.Render)
@@ -164,7 +164,7 @@ class FilterPasteSessionSuite extends munit.FunSuite:
     assertEquals(list.handleInputResult(pasteChunk("a")), InputResult.NoRender)
     assertEquals(list.query, "ga")
     assertEquals(list.selected.map(_.id), Some("beta"))
-    val active = Ansi.strip(list.render(40).mkString("\n"))
+    val active = Ansi.strip(list.render(40).lines.mkString("\n"))
     assert(active.contains("Search: ga"), active)
     assert(active.contains("Gamma"), active)
     assertEquals(list.selected.map(_.id), Some("beta"))
@@ -195,8 +195,8 @@ class FilterPasteSessionSuite extends munit.FunSuite:
       select.handleInputResult(pasteChunk("z"))
       settings.handleInputResult(pasteChunk("z"))
 
-      assert(Ansi.strip(select.render(40).mkString("\n")).contains("Alpha"))
-      val settingsRender = Ansi.strip(settings.render(200).mkString("\n"))
+      assert(Ansi.strip(select.render(40).lines.mkString("\n")).contains("Alpha"))
+      val settingsRender = Ansi.strip(settings.render(200).lines.mkString("\n"))
       assert(settingsRender.contains("Search: " + settings.query), settingsRender)
       assert(settingsRender.contains("Alpha"), settingsRender)
       assertEquals(select.selected.map(_.value), Some("alpha"))
@@ -209,8 +209,8 @@ class FilterPasteSessionSuite extends munit.FunSuite:
     assertEquals(select.selected, None)
     assertEquals(settings.selected, None)
     assertEquals(selectionChanges, Vector(None))
-    assert(Ansi.strip(select.render(40).mkString("\n")).contains("No items"))
-    assert(Ansi.strip(settings.render(200).mkString("\n")).contains("No matching settings"))
+    assert(Ansi.strip(select.render(40).lines.mkString("\n")).contains("No items"))
+    assert(Ansi.strip(settings.render(200).lines.mkString("\n")).contains("No matching settings"))
 
   test("filter paste interruption commits before later input for both lists"):
     val select   = SelectList(

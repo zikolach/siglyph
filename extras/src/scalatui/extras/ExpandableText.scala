@@ -1,7 +1,7 @@
 package scalatui.extras
 
 import scalatui.ansi.Ansi
-import scalatui.core.Component
+import scalatui.core.{Component, ComponentRender}
 import scalatui.syntax.Equality.*
 
 /** Styling hooks for [[ExpandableText]]. */
@@ -44,7 +44,9 @@ final class ExpandableText(
     cachedWidth = -1
     cachedLines = Vector.empty
 
-  override def render(width: Int): Vector[String] =
+  override def render(width: Int): ComponentRender = ComponentRender.text(renderLines(width))
+
+  private def renderLines(width: Int): Vector[String] =
     val content = if expandedState then expandedText() else collapsedText()
     if cachedWidth === width && cachedState === expandedState && cachedContent === content then
       cachedLines

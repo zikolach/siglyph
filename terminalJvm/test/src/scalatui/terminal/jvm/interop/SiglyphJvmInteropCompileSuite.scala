@@ -24,6 +24,12 @@ final class SiglyphJvmInteropCompileSuite extends munit.FunSuite:
       "class InvalidPayload extends Base64ImagePayload {}"
     ).foreach(source => compileJavaFailure(javaFailureSource(source)))
 
+  test("Java cannot construct arbitrary raw terminal controls"):
+    compileJavaFailure(RawTerminalControlConstruction)
+
+  test("Java cannot implement the removed line-vector component render contract"):
+    compileJavaFailure(LegacyComponentRender)
+
   test("JVM payload bytecode keeps construction private and protocol APIs typed"):
     val payloadClass = classOf[scalatui.terminal.Base64ImagePayload]
     val constructors = payloadClass.getDeclaredConstructors.toVector
@@ -48,6 +54,13 @@ final class SiglyphJvmInteropCompileSuite extends munit.FunSuite:
       assert(overloads.forall(_.getParameterTypes.head == payloadClass), name)
       assert(overloads.forall(!_.getParameterTypes.contains(classOf[String])), name)
     }
+
+    val controlClass = classOf[scalatui.terminal.TerminalRenderControl]
+    assert(!controlClass.isInterface)
+    assert(controlClass.getConstructors.isEmpty)
+    assert(controlClass.getDeclaredConstructors.forall(constructor =>
+      java.lang.reflect.Modifier.isPrivate(constructor.getModifiers)
+    ))
 
   test("Kotlin smoke source compiles through JVM interop facade"):
     assert(!KotlinSmoke.contains("$lessinit$greater$default"))
@@ -165,6 +178,25 @@ final class JavaInteropSmoke {
   void use() {
     Base64ImagePayload.from("TQ==");
     Base64ImagePayload.encode(new byte[] { 77 });
+  }
+}
+"""
+
+  private val RawTerminalControlConstruction = """
+import scalatui.terminal.TerminalRenderControl;
+
+final class JavaInteropSmoke {
+  TerminalRenderControl control = new TerminalRenderControl();
+}
+"""
+
+  private val LegacyComponentRender = """
+import scalatui.core.Component;
+import scala.collection.immutable.Vector;
+
+abstract class JavaInteropSmoke implements Component {
+  public Vector<String> render(int width) {
+    return Vector.empty();
   }
 }
 """

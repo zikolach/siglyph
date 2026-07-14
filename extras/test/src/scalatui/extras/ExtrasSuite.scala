@@ -6,19 +6,19 @@ class ExtrasSuite extends munit.FunSuite:
   test("expandable text renders collapsed and expanded states within width"):
     val text = ExpandableText("short", "expanded value wraps", paddingX = 1)
 
-    val collapsed = text.render(8)
+    val collapsed = text.render(8).lines
     assert(collapsed.exists(line => Ansi.strip(line).contains("short")), collapsed.toString)
     assert(collapsed.forall(Ansi.visibleWidth(_) <= 8), collapsed.toString)
 
     text.setExpanded(true)
-    val expanded = text.render(24)
+    val expanded = text.render(24).lines
     assert(
       expanded.exists(line => Ansi.strip(line).contains("expanded value wraps")),
       expanded.toString
     )
     assert(expanded.forall(Ansi.visibleWidth(_) <= 24), expanded.toString)
 
-    val narrow = text.render(8)
+    val narrow = text.render(8).lines
     assert(narrow.forall(Ansi.visibleWidth(_) <= 8), narrow.toString)
 
   test("expandable text updates cached output when state or provider output changes"):
@@ -26,16 +26,19 @@ class ExtrasSuite extends munit.FunSuite:
     var expandedValue  = "two"
     val text           = new ExpandableText(() => collapsedValue, () => expandedValue)
 
-    assertEquals(text.render(20).map(line => Ansi.strip(line).trim), Vector("one"))
+    assertEquals(text.render(20).lines.map(line => Ansi.strip(line).trim), Vector("one"))
 
     collapsedValue = "changed"
-    assertEquals(text.render(20).map(line => Ansi.strip(line).trim), Vector("changed"))
+    assertEquals(text.render(20).lines.map(line => Ansi.strip(line).trim), Vector("changed"))
 
     text.setExpanded(true)
-    assertEquals(text.render(20).map(line => Ansi.strip(line).trim), Vector("two"))
+    assertEquals(text.render(20).lines.map(line => Ansi.strip(line).trim), Vector("two"))
 
     expandedValue = "changed expanded"
-    assertEquals(text.render(20).map(line => Ansi.strip(line).trim), Vector("changed expanded"))
+    assertEquals(
+      text.render(20).lines.map(line => Ansi.strip(line).trim),
+      Vector("changed expanded")
+    )
 
   test("expandable section renders title, body, hint, and narrow widths safely"):
     val section = ExpandableSection(
@@ -46,7 +49,7 @@ class ExtrasSuite extends munit.FunSuite:
       paddingX = 1
     )
 
-    val collapsed = section.render(12)
+    val collapsed = section.render(12).lines
     assert(collapsed.exists(line => Ansi.strip(line).contains("Details")), collapsed.toString)
     assert(collapsed.exists(line => Ansi.strip(line).contains("short")), collapsed.toString)
     assert(collapsed.exists(line => Ansi.strip(line).contains("press")), collapsed.toString)
@@ -54,7 +57,7 @@ class ExtrasSuite extends munit.FunSuite:
     assert(collapsed.forall(Ansi.visibleWidth(_) <= 12), collapsed.toString)
 
     section.setExpanded(true)
-    val expanded = section.render(24)
+    val expanded = section.render(24).lines
     assert(expanded.exists(line => Ansi.strip(line).contains("Details")), expanded.toString)
     assert(
       expanded.exists(line => Ansi.strip(line).contains("long expanded body")),
@@ -63,7 +66,7 @@ class ExtrasSuite extends munit.FunSuite:
     assert(!expanded.exists(line => Ansi.strip(line).contains("press")), expanded.toString)
     assert(expanded.forall(Ansi.visibleWidth(_) <= 24), expanded.toString)
 
-    val narrow = section.render(1)
+    val narrow = section.render(1).lines
     assert(narrow.nonEmpty)
     assert(narrow.forall(Ansi.visibleWidth(_) <= 1), narrow.toString)
 
@@ -76,10 +79,10 @@ class ExtrasSuite extends munit.FunSuite:
       hintVisibility = ExpansionHintVisibility.ExpandedOnly
     )
 
-    assert(!section.render(40).exists(line => Ansi.strip(line).contains("shown")))
+    assert(!section.render(40).lines.exists(line => Ansi.strip(line).contains("shown")))
 
     section.setExpanded(true)
-    assert(section.render(40).exists(line => Ansi.strip(line).contains("shown")))
+    assert(section.render(40).lines.exists(line => Ansi.strip(line).contains("shown")))
 
   test("expansion controller applies state and stops mutating unregistered expandables"):
     val first  = RecordingExpandable()
@@ -131,8 +134,8 @@ class ExtrasSuite extends munit.FunSuite:
     controller.register(text.asInstanceOf[Expandable])
     controller.register(section.asInstanceOf[Expandable])
     assertEquals(controller.setExpanded(true), true)
-    assert(text.render(20).exists(line => Ansi.strip(line).contains("expanded")))
-    assert(section.render(20).exists(line => Ansi.strip(line).contains("expanded")))
+    assert(text.render(20).lines.exists(line => Ansi.strip(line).contains("expanded")))
+    assert(section.render(20).lines.exists(line => Ansi.strip(line).contains("expanded")))
 
 private final class RecordingExpandable extends Expandable:
   var states = Vector.empty[Boolean]

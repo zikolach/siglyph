@@ -1,7 +1,7 @@
 package scalatui.components
 
 import scalatui.ansi.Ansi
-import scalatui.core.{Component, InputResult}
+import scalatui.core.{Component, ComponentRender, InputResult}
 import scalatui.matching.FuzzyMatcher
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{TerminalInput, TerminalKey}
@@ -80,7 +80,7 @@ final class SelectList private (
   /** Cancel selection and close the overlay interaction. */
   def cancelSelection(): Unit = onCancel()
 
-  override def render(width: Int): Vector[String] =
+  override def render(width: Int): ComponentRender = ComponentRender.text {
     val safeWidth = math.max(0, width)
     if safeWidth <= 0 then Vector("")
     else
@@ -89,6 +89,7 @@ final class SelectList private (
         Vector(fit(options.theme.noMatchText(options.noMatchText), safeWidth))
       else
         renderItems(matchingItems, safeWidth, normalizedScrollOffset(matchingItems.length))
+  }
 
   private def renderItems(
       matchingItems: Vector[SelectItem],

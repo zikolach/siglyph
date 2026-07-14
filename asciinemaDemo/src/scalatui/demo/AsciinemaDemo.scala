@@ -50,7 +50,7 @@ private object AsciinemaScenarios:
   private def play(frames: Vector[TimedFrame]): Unit =
     frames.foreach { frame =>
       print("\u001b[2J\u001b[H")
-      frame.component.render(Width).foreach(println)
+      frame.component.render(Width).lines.foreach(println)
       Console.out.flush()
       val pause = (PauseMillis * frame.hold).toLong
       if pause > 0L then Thread.sleep(pause)

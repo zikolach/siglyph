@@ -15,17 +15,17 @@ import scalatui.terminal.{
 class ComponentsSuite extends munit.FunSuite:
   test("text wraps and pads within width"):
     val text  = Text("hello world", paddingX = 1)
-    val lines = text.render(8)
+    val lines = text.render(8).lines
     assert(lines.forall(Ansi.visibleWidth(_) <= 8), lines.toString)
     assertEquals(lines.headOption.exists(_.startsWith(" ")), true)
 
   test("spacer renders empty lines"):
-    assertEquals(Spacer(2).render(10), Vector("", ""))
+    assertEquals(Spacer(2).render(10).lines, Vector("", ""))
 
   test("box wraps child with padding"):
     val box   = Box(paddingX = 1, paddingY = 1)
     box.addChild(Text("x", paddingX = 0))
-    val lines = box.render(5)
+    val lines = box.render(5).lines
     assertEquals(lines.length, 3)
     assert(lines.forall(Ansi.visibleWidth(_) <= 5), lines.toString)
 
@@ -38,8 +38,8 @@ class ComponentsSuite extends munit.FunSuite:
     list.handleInput(TerminalInput.Key(TerminalKey.Enter))
 
     assertEquals(selected.map(_.value), Some("b"))
-    assertEquals(list.render(20).head.startsWith("  A"), true)
-    assertEquals(list.render(20)(1).startsWith("> B"), true)
+    assertEquals(list.render(20).lines.head.startsWith("  A"), true)
+    assertEquals(list.render(20).lines(1).startsWith("> B"), true)
 
   test("input edits unicode and submits"):
     val input = Input()
@@ -136,14 +136,14 @@ class ComponentsSuite extends munit.FunSuite:
   test("input emits cursor marker without changing semantic value"):
     val input    = Input("ab")
     input.focused = true
-    val rendered = input.render(10).head
+    val rendered = input.render(10).lines.head
     assert(rendered.contains(CursorMarker.Sequence), rendered)
     assertEquals(input.value, "ab")
     assertEquals(Ansi.strip(rendered), "ab ")
 
   test("unfocused input does not emit cursor marker"):
     val input    = Input("ab")
-    val rendered = input.render(10).head
+    val rendered = input.render(10).lines.head
 
     assert(!rendered.contains(CursorMarker.Sequence), rendered)
 

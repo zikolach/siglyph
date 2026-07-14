@@ -1,7 +1,7 @@
 package scalatui.components
 
 import scalatui.ansi.Ansi
-import scalatui.core.Component
+import scalatui.core.{Component, ComponentRender}
 import scalatui.syntax.Equality.*
 
 final class Text(
@@ -22,8 +22,8 @@ final class Text(
     cachedWidth = -1
     cachedLines = Vector.empty
 
-  override def render(width: Int): Vector[String] =
-    if cachedWidth === width then cachedLines
+  override def render(width: Int): ComponentRender =
+    ComponentRender.text(if cachedWidth === width then cachedLines
     else
       val innerWidth = math.max(0, width - paddingX * 2)
       val horizontal = " ".repeat(math.max(0, paddingX))
@@ -34,4 +34,4 @@ final class Text(
       }
       cachedWidth = width
       cachedLines = vertical ++ body ++ vertical
-      cachedLines
+      cachedLines)

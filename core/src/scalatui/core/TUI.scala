@@ -13,7 +13,9 @@ import scalatui.terminal.{
   TerminalInputChunk,
   TerminalKey,
   TerminalRawKind,
-  TerminalRawTermination
+  TerminalRawTermination,
+  TerminalRenderControl,
+  TerminalRenderControlEncoder
 }
 
 import scala.collection.mutable.ArrayBuffer
@@ -85,7 +87,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   private var queryWriteReservations                  = 0
   private var nextQueryFlightId                       = 0L
   private var nextQuerySubscriberId                   = 0L
-  private var previousLines                           = Vector.empty[String]
+  private var previousFrame                           = Option.empty[TUI.PreparedFrame]
   private var previousWidth                           = 0
   private var previousHeight                          = 0
   private var cursorRow                               = 0
@@ -993,19 +995,25 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
       !inputTarget.exists(_.wantsKeyRelease)
     case _                                                  => false
 
-  private def renderOverlays(baseLines: Vector[String], width: Int, height: Int): Vector[String] =
+  private def renderOverlays(
+      baseFrame: ComponentRender,
+      width: Int,
+      height: Int
+  ): ComponentRender =
     val visible  = overlayStack.toVector.filter(isOverlayVisible)
     val rendered = visible
       .sortBy(_.focusOrder)
       .flatMap { entry =>
         val initialLayout = OverlayRenderer.resolve(entry.options, overlayHeight = 0, width, height)
-        val rawLines      = entry.component.render(initialLayout.width)
-        val clippedLines  = initialLayout.maxHeight.fold(rawLines)(rawLines.take)
+        val rawFrame      = entry.component.render(initialLayout.width)
+        val clippedLines  = initialLayout.maxHeight.fold(rawFrame.lines)(rawFrame.lines.take)
+        val controls      = rawFrame.controls.filter(_.row < clippedLines.length)
+        val clippedFrame  = ComponentRender(clippedLines, controls).validated(initialLayout.width)
         val layout        = OverlayRenderer.resolve(entry.options, clippedLines.length, width, height)
-        Option.when(clippedLines.nonEmpty)(clippedLines -> layout)
+        Option.when(clippedLines.nonEmpty)(clippedFrame -> layout)
       }
     latestOverlayVisibility = visible.nonEmpty
-    OverlayRenderer.composite(baseLines, rendered, width, height)
+    OverlayRenderer.composite(baseFrame, rendered, width, height)
 
   private def makeOverlayHandle(entry: TUI.OverlayEntry): OverlayHandle = new OverlayHandle:
     override def id: OverlayId = entry.id
@@ -1170,13 +1178,12 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     case _                                                                          => false
 
   private def renderNow(force: Boolean, clear: Boolean): Unit =
-    val generation   = lifecycleLock.synchronized(resizeGeneration)
-    val width        = positiveDimension(terminal.columns)
-    val height       = positiveDimension(terminal.rows)
-    val rawLines     = root.render(width)
-    val overlayLines = renderOverlays(rawLines, width, height)
-    val frame        = prepareFrame(overlayLines, width)
-    val newLines     = frame.lines
+    val generation = lifecycleLock.synchronized(resizeGeneration)
+    val width      = positiveDimension(terminal.columns)
+    val height     = positiveDimension(terminal.rows)
+    val rawFrame   = root.render(width)
+    val composed   = renderOverlays(rawFrame, width, height).validated(width)
+    val frame      = prepareFrame(composed, width)
 
     val currentWidth      = positiveDimension(terminal.columns)
     val currentHeight     = positiveDimension(terminal.rows)
@@ -1192,46 +1199,109 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     else
       val widthChanged  = (previousWidth !== 0) && (previousWidth !== width)
       val heightChanged = (previousHeight !== 0) && (previousHeight !== height)
-      if previousLines.isEmpty || force then
+      if previousFrame.isEmpty || force then
         fullRender(frame, width, height, clear = clear)
       else if widthChanged || heightChanged then
         fullRender(frame, width, height, clear = true)
       else
-        val firstChanged = firstChangedLine(previousLines, newLines)
+        val firstChanged = firstChangedRow(previousFrame.get, frame)
         if firstChanged >= 0 then partialRender(frame, firstChanged)
         else positionHardwareCursorOnly(frame.position)
-        previousLines = newLines
+        previousFrame = Some(frame)
         previousWidth = width
         previousHeight = height
 
   private def fullRender(
-      frame: CursorMarker.ScanResult,
+      frame: TUI.PreparedFrame,
       width: Int,
       height: Int,
       clear: Boolean
   ): Unit =
-    val builder = StringBuilder()
+    val builder    = StringBuilder()
     appendRenderStart(builder)
     if clear then builder.append(clearSequence)
-    builder.append(frame.lines.mkString("\r\n"))
-    appendHardwareCursorMove(builder, frame)
+    else
+      previousFrame.foreach { _ =>
+        appendVerticalMove(builder, fromRow = cursorRow, toRow = 0)
+        builder.append("\r")
+      }
+    val paintedRow = appendFrameContent(
+      builder,
+      frame,
+      fromRow = 0,
+      kittyLifecycleCleanup(previousFrame, frame, fromRow = 0)
+    )
+    appendHardwareCursorMove(builder, frame, paintedRow)
     appendRenderEnd(builder)
     writeRenderBuffer(builder.result())
-    previousLines = frame.lines
+    previousFrame = Some(frame)
     previousWidth = width
     previousHeight = height
-    cursorRow = finalCursorRow(frame)
+    cursorRow = finalCursorRow(frame, paintedRow)
 
-  private def partialRender(frame: CursorMarker.ScanResult, firstChanged: Int): Unit =
-    val builder = StringBuilder()
+  private def partialRender(frame: TUI.PreparedFrame, firstChanged: Int): Unit =
+    val builder    = StringBuilder()
     appendRenderStart(builder)
     appendVerticalMove(builder, fromRow = cursorRow, toRow = firstChanged)
     builder.append("\r\u001b[J")
-    builder.append(frame.lines.drop(firstChanged).mkString("\r\n"))
-    appendHardwareCursorMove(builder, frame)
+    val paintedRow = appendFrameContent(
+      builder,
+      frame,
+      firstChanged,
+      kittyLifecycleCleanup(previousFrame, frame, fromRow = firstChanged)
+    )
+    appendHardwareCursorMove(builder, frame, paintedRow)
     appendRenderEnd(builder)
     writeRenderBuffer(builder.result())
-    cursorRow = finalCursorRow(frame)
+    cursorRow = finalCursorRow(frame, paintedRow)
+
+  private def appendFrameContent(
+      builder: StringBuilder,
+      frame: TUI.PreparedFrame,
+      fromRow: Int,
+      cleanupControls: Vector[TerminalRenderControl]
+  ): Int =
+    cleanupControls.foreach { control =>
+      builder.append(TerminalRenderControlEncoder.encode(control))
+      builder.append("\r")
+    }
+    val controlsByRow = frame.controls.filter(_.row >= fromRow).groupBy(_.row)
+    var row           = fromRow
+    while row < frame.lines.length do
+      controlsByRow.getOrElse(row, Vector.empty).foreach { placement =>
+        appendMoveRight(builder, placement.column)
+        builder.append(TerminalRenderControlEncoder.encode(placement.control))
+        builder.append("\r")
+      }
+      builder.append(frame.lines(row))
+      if row < frame.lines.length - 1 then builder.append("\r\n")
+      row += 1
+    if frame.lines.length > fromRow then frame.lines.length - 1 else fromRow
+
+  private def kittyLifecycleCleanup(
+      oldFrame: Option[TUI.PreparedFrame],
+      newFrame: TUI.PreparedFrame,
+      fromRow: Int
+  ): Vector[TerminalRenderControl] =
+    val newActiveIds = newFrame.controls.iterator.flatMap(kittyImageId).toSet
+    val emittedIds   = newFrame.controls.iterator
+      .filter(_.row >= fromRow)
+      .flatMap(kittyImageId)
+      .toSet
+    oldFrame.toVector
+      .flatMap(_.controls)
+      .filter(placement =>
+        kittyImageId(placement).exists(imageId =>
+          !newActiveIds(imageId) || emittedIds(imageId)
+        )
+      )
+      .flatMap(placement => TerminalRenderControl.cleanupForReplacement(placement.control))
+
+  private def kittyImageId(placement: TerminalControlPlacement): Option[Int] =
+    placement.control.details match
+      case kitty: scalatui.terminal.TerminalRenderControlDetails.KittyImage =>
+        Some(kitty.imageId)
+      case _                                                                => None
 
   private def writeRenderBuffer(buffer: String): Unit =
     autoWrapRestoreNeeded = true
@@ -1239,12 +1309,12 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     autoWrapRestoreNeeded = false
 
   private def parkCursorBelowContentIfNeeded(): Unit =
-    if previousLines.nonEmpty && !alternateScreenEntered then
+    if previousFrame.exists(_.lines.nonEmpty) && !alternateScreenEntered then
       val builder = StringBuilder()
       appendVerticalMove(
         builder,
         fromRow = cursorRow,
-        toRow = math.max(0, previousLines.length - 1)
+        toRow = math.max(0, previousFrame.fold(0)(_.lines.length) - 1)
       )
       builder.append("\r\n")
       writeTerminal(terminal.write(builder.result()))
@@ -1295,28 +1365,29 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
           cursorRow = target.row
       }
 
-  private def prepareFrame(lines: Vector[String], width: Int): CursorMarker.ScanResult =
-    CursorMarker.stripAndLocate(applyLineResets(sanitizeLines(lines, width)))
+  private def prepareFrame(frame: ComponentRender, width: Int): TUI.PreparedFrame =
+    val scanned = CursorMarker.stripAndLocate(applyLineResets(sanitizeLines(frame.lines, width)))
+    TUI.PreparedFrame(scanned.lines, scanned.position, frame.controls)
 
   private def appendHardwareCursorMove(
       builder: StringBuilder,
-      frame: CursorMarker.ScanResult
+      frame: TUI.PreparedFrame,
+      fromRow: Int
   ): Unit =
     if options.hardwareCursorPositioning then
       frame.position.foreach { target =>
         appendVerticalMove(
           builder,
-          fromRow = math.max(0, frame.lines.length - 1),
+          fromRow = fromRow,
           toRow = target.row
         )
         builder.append("\r")
         appendMoveRight(builder, target.column)
       }
 
-  private def finalCursorRow(frame: CursorMarker.ScanResult): Int =
-    if options.hardwareCursorPositioning then
-      frame.position.map(_.row).getOrElse(math.max(0, frame.lines.length - 1))
-    else math.max(0, frame.lines.length - 1)
+  private def finalCursorRow(frame: TUI.PreparedFrame, paintedRow: Int): Int =
+    if options.hardwareCursorPositioning then frame.position.map(_.row).getOrElse(paintedRow)
+    else paintedRow
 
   private def appendVerticalMove(builder: StringBuilder, fromRow: Int, toRow: Int): Unit =
     val delta = toRow - fromRow
@@ -1353,10 +1424,52 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     else if oldLines.length === newLines.length then -1
     else math.min(oldLines.length, newLines.length)
 
+  private def firstChangedRow(oldFrame: TUI.PreparedFrame, newFrame: TUI.PreparedFrame): Int =
+    val removedControls = oldFrame.controls.diff(newFrame.controls)
+    val addedControls   = newFrame.controls.diff(oldFrame.controls)
+    val lineRow         = firstChangedLine(oldFrame.lines, newFrame.lines)
+    val orderedRow      = firstOrderedControlDifferenceRow(oldFrame.controls, newFrame.controls)
+    val controlRow      = removedControls.iterator
+      .map(_.row)
+      .concat(addedControls.iterator.map(_.row))
+      .concat(Option.when(orderedRow >= 0)(orderedRow).iterator)
+      .minOption
+      .getOrElse(-1)
+    if lineRow < 0 then controlRow
+    else if controlRow < 0 then lineRow
+    else math.min(lineRow, controlRow)
+
+  private def firstOrderedControlDifferenceRow(
+      oldControls: Vector[TerminalControlPlacement],
+      newControls: Vector[TerminalControlPlacement]
+  ): Int =
+    val commonLength    = math.min(oldControls.length, newControls.length)
+    val firstDifference = (0 until commonLength).find(index =>
+      oldControls(index) !== newControls(index)
+    )
+    val changedFrom     = firstDifference.orElse(
+      Option.when(oldControls.length !== newControls.length)(commonLength)
+    )
+    changedFrom
+      .flatMap { index =>
+        oldControls.iterator
+          .drop(index)
+          .map(_.row)
+          .concat(newControls.iterator.drop(index).map(_.row))
+          .minOption
+      }
+      .getOrElse(-1)
+
   private def applyLineResets(lines: Vector[String]): Vector[String] =
     lines.map(_ + LineReset)
 
 object TUI:
+  private final case class PreparedFrame(
+      lines: Vector[String],
+      position: Option[CursorMarker.Position],
+      controls: Vector[TerminalControlPlacement]
+  ) derives CanEqual
+
   private enum LifecycleState derives CanEqual:
     case Starting, Running, Stopping, Cleaning, Stopped
 

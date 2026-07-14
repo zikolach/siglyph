@@ -1,7 +1,7 @@
 package scalatui.extras
 
 import scalatui.ansi.Ansi
-import scalatui.core.Component
+import scalatui.core.{Component, ComponentRender}
 import scalatui.syntax.Equality.*
 
 /** Controls when an [[ExpandableSection]] hint line is rendered. */
@@ -52,7 +52,9 @@ final class ExpandableSection(
     cachedWidth = -1
     cachedLines = Vector.empty
 
-  override def render(width: Int): Vector[String] =
+  override def render(width: Int): ComponentRender = ComponentRender.text(renderLines(width))
+
+  private def renderLines(width: Int): Vector[String] =
     val content = SectionContent(
       title(),
       if expandedState then expandedBody() else collapsedBody(),

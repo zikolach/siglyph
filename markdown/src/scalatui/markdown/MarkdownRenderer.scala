@@ -1,7 +1,7 @@
 package scalatui.markdown
 
 import scalatui.ansi.Ansi
-import scalatui.core.Component
+import scalatui.core.{Component, ComponentRender}
 import scalatui.syntax.Equality.*
 import scalatui.terminal.TerminalCapabilities
 
@@ -401,7 +401,9 @@ final class Markdown(
   def text: String                = currentText
   def text_=(value: String): Unit = currentText = value
 
-  override def render(width: Int): Vector[String] =
+  override def render(width: Int): ComponentRender = ComponentRender.text(renderLines(width))
+
+  private def renderLines(width: Int): Vector[String] =
     val safeWidth    = math.max(0, width)
     val horizontal   = " ".repeat(math.max(0, paddingX))
     val contentWidth = math.max(1, safeWidth - horizontal.length * 2)

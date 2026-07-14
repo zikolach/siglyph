@@ -27,6 +27,7 @@ import scalatui.terminal.jvm.SttyTerminal
     Text("Supported terminals render the image; unsupported terminals render fallback text.")
   )
   tui.addChild(Spacer(1))
+  // Image returns reserved ordinary rows plus a typed control. TUI encodes it at final output.
   tui.addChild(Image(source.payload, source.dimensions, capabilities))
   tui.addChild(Spacer(1))
   tui.addChild(Text("This line should appear below the image. Esc or Ctrl+C exits."))

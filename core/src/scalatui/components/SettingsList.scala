@@ -3,6 +3,7 @@ package scalatui.components
 import scalatui.ansi.Ansi
 import scalatui.core.{
   Component,
+  ComponentRender,
   ContextualComponent,
   InputResult,
   OverlayHandle,
@@ -199,7 +200,7 @@ final class SettingsList(
       InputResult.Render
     case _                                                => InputResult.Ignored
 
-  override def render(width: Int): Vector[String] =
+  override def render(width: Int): ComponentRender = ComponentRender.text {
     val safeWidth = math.max(0, width)
     if safeWidth <= 0 then Vector("")
     else
@@ -230,6 +231,7 @@ final class SettingsList(
           }
       if options.showHints then out += fit(options.theme.hint(options.hintText), safeWidth)
       out.result()
+  }
 
   private final case class IndexedSetting(originalIndex: Int, item: SettingItem)
 

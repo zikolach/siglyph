@@ -100,45 +100,69 @@ class OverlayRendererSuite extends munit.FunSuite:
 
   test("overlapping overlays composite in provided order"):
     val lines = OverlayRenderer.composite(
-      Vector("abcdef"),
+      ComponentRender.text("abcdef"),
       Vector(
-        Vector("XX") -> ResolvedOverlay(width = 2, row = 0, col = 1, maxHeight = None),
-        Vector("YY") -> ResolvedOverlay(width = 2, row = 0, col = 2, maxHeight = None)
+        ComponentRender.text("XX") -> ResolvedOverlay(
+          width = 2,
+          row = 0,
+          col = 1,
+          maxHeight = None
+        ),
+        ComponentRender.text("YY") -> ResolvedOverlay(
+          width = 2,
+          row = 0,
+          col = 2,
+          maxHeight = None
+        )
       ),
       terminalWidth = 6,
       terminalHeight = 1
     )
 
-    assertEquals(Ansi.strip(lines.head), "aXYYef")
+    assertEquals(Ansi.strip(lines.lines.head), "aXYYef")
 
   test("no overlays preserves base line count"):
     val lines = OverlayRenderer.composite(
-      Vector("one", "two"),
+      ComponentRender.text(Vector("one", "two")),
       Vector.empty,
       terminalWidth = 20,
       terminalHeight = 10
     )
 
-    assertEquals(lines, Vector("one", "two"))
+    assertEquals(lines, ComponentRender.text(Vector("one", "two")))
 
   test("overlay frame extends only to deepest required overlay row"):
     val lines = OverlayRenderer.composite(
-      Vector("base"),
-      Vector(Vector("menu") -> ResolvedOverlay(width = 10, row = 2, col = 0, maxHeight = None)),
+      ComponentRender.text("base"),
+      Vector(
+        ComponentRender.text("menu") -> ResolvedOverlay(
+          width = 10,
+          row = 2,
+          col = 0,
+          maxHeight = None
+        )
+      ),
       terminalWidth = 20,
       terminalHeight = 10
     )
 
-    assertEquals(lines.length, 3)
-    assertEquals(Ansi.strip(lines(2)).trim, "menu")
+    assertEquals(lines.lines.length, 3)
+    assertEquals(Ansi.strip(lines.lines(2)).trim, "menu")
 
   test("bottom anchored overlay may still extend to terminal height"):
     val lines = OverlayRenderer.composite(
-      Vector("base"),
-      Vector(Vector("bottom") -> ResolvedOverlay(width = 10, row = 9, col = 0, maxHeight = None)),
+      ComponentRender.text("base"),
+      Vector(
+        ComponentRender.text("bottom") -> ResolvedOverlay(
+          width = 10,
+          row = 9,
+          col = 0,
+          maxHeight = None
+        )
+      ),
       terminalWidth = 20,
       terminalHeight = 10
     )
 
-    assertEquals(lines.length, 10)
-    assertEquals(Ansi.strip(lines(9)).trim, "bottom")
+    assertEquals(lines.lines.length, 10)
+    assertEquals(Ansi.strip(lines.lines(9)).trim, "bottom")

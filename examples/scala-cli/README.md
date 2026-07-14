@@ -41,9 +41,45 @@ chmod +x hello.scala
 
 No external shell tools such as `fd`, `find`, or `bash` are used for completion.
 
-`image.scala` demonstrates `ImageSource.fromFile`, its validated `scalatui.terminal.Base64ImagePayload` in `ImageSource.payload`, terminal image capability detection, protocol rendering when Kitty/iTerm2-style images are supported, and readable fallback text otherwise. It accepts PNG, JPEG, GIF, and WebP files. Raw strings can instead be validated with `Base64ImagePayload.from` or the typed `scalatui.image.Image.fromBase64` factory, which returns `Either[scalatui.terminal.Base64ImagePayloadError, Image]`. Invalid input creates no component or output. In siglyph versions with runtime cell-size support, the image component uses terminal cell-size replies by default for row sizing and keeps following text below the image area. Applications that need deterministic fixed sizing can pass `ImageRenderOptions(cellDimensionsSource = ImageCellDimensionsSource.Fixed, cellDimensions = ...)`.
+Custom text-only components use the typed render result directly:
 
-Validation has the same lexical contract on JVM and Scala Native. It accepts standard padded base64, empty input, and decoder-valid unpadded lengths with modulo-four remainder zero, two, or three; remainder one is rejected. Validation transiently allocates and discards decoded bytes. iTerm2 filenames use standard base64 over UTF-8, and fallback metadata controls become visible `\\uXXXX` text before width truncation. Direct raw-string protocol and `Image` calls, and the old `ImageSource.base64Data` field, are source-breaking removals with no compatibility path.
+```scala
+import scalatui.ansi.Ansi
+import scalatui.core.{Component, ComponentRender}
+
+final class Label(value: String) extends Component:
+  override def render(width: Int): ComponentRender =
+    ComponentRender.text(Ansi.truncateToWidth(value, math.max(0, width), ""))
+```
+
+`image.scala` demonstrates `ImageSource.fromFile`, its validated `scalatui.terminal.Base64ImagePayload` in `ImageSource.payload`, terminal image capability detection, protocol rendering when Kitty/iTerm2-style images are supported, and readable fallback text otherwise. It accepts PNG, JPEG, GIF, and WebP files. Raw base64 text can instead be validated with `Base64ImagePayload.from` or the typed `scalatui.image.Image.fromBase64` factory, which returns `Either[scalatui.terminal.Base64ImagePayloadError, Image]`. Invalid input creates no component or output. In siglyph versions with runtime cell-size support, the image component uses terminal cell-size replies by default for row sizing and keeps following text below the image area. Applications that need deterministic fixed sizing can pass `ImageRenderOptions(cellDimensionsSource = ImageCellDimensionsSource.Fixed, cellDimensions = ...)`.
+
+The high-level `Image` component returns reserved ordinary rows plus a positioned typed control. A
+lower-level component can compose the same result without handling protocol strings:
+
+```scala
+import scalatui.core.{ComponentRender, TerminalControlPlacement}
+import scalatui.terminal.{TerminalCapabilities, TerminalImageProtocol}
+
+val rendered = TerminalImageProtocol.renderBase64Image(
+  source.payload,
+  source.dimensions,
+  TerminalCapabilities.detect(),
+  terminalWidth = 80
+)
+
+val frame = rendered.fold(ComponentRender.text("Image output is unavailable")) { image =>
+  ComponentRender(
+    lines = Vector.fill(image.rows)(""),
+    controls = Vector(TerminalControlPlacement(row = 0, column = 0, image.control))
+  )
+}
+```
+
+The TUI validates the control geometry and encodes the typed control only while assembling final
+synchronized output. Image-looking bytes in ordinary text gain no semantic control authority.
+
+Validation has the same lexical contract on JVM and Scala Native. It accepts standard padded base64, empty input, and decoder-valid unpadded lengths with modulo-four remainder zero, two, or three; remainder one is rejected. Validation transiently allocates and discards decoded bytes. iTerm2 filenames use standard base64 over UTF-8, and fallback metadata controls become visible `\\uXXXX` text before width truncation. Protocol helpers and `Image` require typed payloads, and `ImageSource.payload` replaces the old `ImageSource.base64Data` field. These are direct source breaks with no compatibility path. There is no API that promotes an arbitrary protocol escape string to a semantic control.
 
 To test unreleased changes from this checkout before the next Maven Central release, run the image example against local sources:
 

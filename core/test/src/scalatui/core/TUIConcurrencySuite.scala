@@ -1,6 +1,7 @@
 package scalatui.core
 
 import scalatui.terminal.{
+  Base64ImagePayload,
   RgbColor,
   Terminal,
   TerminalColorProtocol,
@@ -13,7 +14,8 @@ import scalatui.terminal.{
   TerminalProgressSupport,
   TerminalRawKind,
   TerminalRawTermination,
-  TerminalTitleSupport
+  TerminalTitleSupport,
+  TerminalRenderControlEncoder
 }
 
 class TUIConcurrencySuite extends munit.FunSuite:
@@ -120,11 +122,11 @@ class TUIConcurrencySuite extends munit.FunSuite:
     val allowRender   = Gate()
     var renders       = 0
     val component     = new Component:
-      override def render(width: Int): Vector[String] =
+      override def render(width: Int): ComponentRender =
         renderEntered.release()
         allowRender.await()
         application.synchronized { renders += 1 }
-        Vector("frame")
+        ComponentRender.text("frame")
     val tui           = TUI(terminal)
     tui.addChild(component)
 
@@ -166,7 +168,8 @@ class TUIConcurrencySuite extends munit.FunSuite:
           application.synchronized(received += s"$kind-$value")
         else received += s"$kind-$value"
       val component                                 = new Component:
-        override def render(width: Int): Vector[String]                   = Vector(received.mkString)
+        override def render(width: Int): ComponentRender                  =
+          ComponentRender.text(Vector(received.mkString))
         override def handleInputResult(input: TerminalInput): InputResult = input match
           case TerminalInput.Key(TerminalKey.Character(value), _) =>
             record("focused", value)
@@ -223,7 +226,7 @@ class TUIConcurrencySuite extends munit.FunSuite:
     var renders   = 0
     var runtime   = Option.empty[TUI]
     val component = new Component:
-      override def render(width: Int): Vector[String] =
+      override def render(width: Int): ComponentRender =
         depth += 1
         maxDepth = math.max(maxDepth, depth)
         renders += 1
@@ -233,7 +236,7 @@ class TUIConcurrencySuite extends munit.FunSuite:
           entered.release()
           release.await()
         depth -= 1
-        Vector(renders.toString)
+        ComponentRender.text(renders.toString)
     val tui       = TUI(terminal)
     runtime = Some(tui)
     tui.addChild(component)
@@ -263,14 +266,19 @@ class TUIConcurrencySuite extends munit.FunSuite:
     val release   = Gate()
     var widths    = Vector.empty[Int]
     var first     = true
+    val payload   = Base64ImagePayload.from("AAAA").toOption.get
     val component = new Component:
-      override def render(width: Int): Vector[String] =
+      override def render(width: Int): ComponentRender =
         widths :+= width
         if first then
           first = false
           entered.release()
           release.await()
-        Vector("x" * width)
+        val control = TerminalImageProtocol.encodeKitty(payload, width, 1, 1)
+        ComponentRender(
+          Vector("x" * width),
+          Vector(TerminalControlPlacement(0, 0, control))
+        )
     val tui       = TUI(terminal)
     tui.addChild(component)
 
@@ -285,6 +293,12 @@ class TUIConcurrencySuite extends munit.FunSuite:
     assert(!starter.isAlive)
     assertEquals(widths.last, 8)
     assert(terminal.output.contains("x" * 8))
+    assert(!terminal.output.contains(TerminalRenderControlEncoder.encode(
+      TerminalImageProtocol.encodeKitty(payload, 20, 1, 1)
+    )))
+    assert(terminal.output.contains(TerminalRenderControlEncoder.encode(
+      TerminalImageProtocol.encodeKitty(payload, 8, 1, 1)
+    )))
     terminal.send(TerminalInput.Key(TerminalKey.Character("z")))
     tui.stop()
 
@@ -297,11 +311,11 @@ class TUIConcurrencySuite extends munit.FunSuite:
     var gateRender      = false
     val tui             = TUI(terminal)
     tui.addChild(new Component:
-      override def render(width: Int): Vector[String] =
+      override def render(width: Int): ComponentRender =
         if gateRender then
           renderEntered.release()
           application.synchronized(())
-        Vector("frame"))
+        ComponentRender.text("frame"))
     tui.start()
     gateRender = true
 
@@ -1028,7 +1042,7 @@ class TUIConcurrencySuite extends munit.FunSuite:
     var focusValues          = Vector.empty[Boolean]
     val component            = new Component with ContextualComponent with Focusable:
       private var currentFocus                                   = false
-      override def render(width: Int): Vector[String]            = Vector("base")
+      override def render(width: Int): ComponentRender           = ComponentRender.text(Vector("base"))
       override def tuiContext_=(value: Option[TUIContext]): Unit =
         activeHooks += 1
         if activeHooks > 1 then concurrentHooks = true
@@ -1046,7 +1060,7 @@ class TUIConcurrencySuite extends munit.FunSuite:
     tui.setFocus(component)
     tui.start()
     val overlay              = new Component with ContextualComponent:
-      override def render(width: Int): Vector[String]            = Vector("overlay")
+      override def render(width: Int): ComponentRender           = ComponentRender.text(Vector("overlay"))
       override def tuiContext_=(value: Option[TUIContext]): Unit = contexts :+= value.nonEmpty
     var handle               = Option.empty[OverlayHandle]
     val shower               = Thread(() =>
@@ -1096,7 +1110,7 @@ class TUIConcurrencySuite extends munit.FunSuite:
     val failingTerminal = RecordingTerminal()
     val failingTui      = TUI(failingTerminal)
     failingTui.addChild(new Component:
-      override def render(width: Int): Vector[String] = throw RuntimeException("hook failure"))
+      override def render(width: Int): ComponentRender = throw RuntimeException("hook failure"))
     intercept[RuntimeException](failingTui.start())
     failingTui.stop()
     assertEquals(failingTerminal.stops, 1)
@@ -1107,7 +1121,7 @@ class TUIConcurrencySuite extends munit.FunSuite:
     val allowCallback   = Gate()
     var contexts        = Vector.empty[String]
     final class Child(val name: String) extends Component with ContextualComponent:
-      override def render(width: Int): Vector[String]            = Vector(name)
+      override def render(width: Int): ComponentRender           = ComponentRender.text(Vector(name))
       override def tuiContext_=(value: Option[TUIContext]): Unit =
         contexts :+= s"$name:${value.nonEmpty}"
     val first = Child("first")
@@ -1144,7 +1158,7 @@ class TUIConcurrencySuite extends munit.FunSuite:
     val allowRestore    = Gate()
     var attached        = Vector.empty[String]
     final class Child(val name: String) extends Component with ContextualComponent:
-      override def render(width: Int): Vector[String]            = Vector(name)
+      override def render(width: Int): ComponentRender           = ComponentRender.text(Vector(name))
       override def tuiContext_=(value: Option[TUIContext]): Unit =
         attached :+= s"$name:${value.nonEmpty}"
     val committed = Child("committed")
@@ -1197,14 +1211,14 @@ class TUIConcurrencySuite extends munit.FunSuite:
     val allowFailure  = Gate()
     var laterHooks    = 0
     val child         = new Component with ContextualComponent:
-      override def render(width: Int): Vector[String]            = Vector("child")
+      override def render(width: Int): ComponentRender           = ComponentRender.text(Vector("child"))
       override def tuiContext_=(value: Option[TUIContext]): Unit =
         if value.nonEmpty then
           attachEntered.release()
           allowFailure.await()
           throw RuntimeException("attach failed")
     val later         = new Component with ContextualComponent:
-      override def render(width: Int): Vector[String]            = Vector("later")
+      override def render(width: Int): ComponentRender           = ComponentRender.text(Vector("later"))
       override def tuiContext_=(value: Option[TUIContext]): Unit = laterHooks += 1
     val tui           = TUI(terminal)
     tui.start()
@@ -1274,7 +1288,7 @@ class TUIConcurrencySuite extends munit.FunSuite:
     val tui             = TUI(terminal)
 
     def nextStructural(): Component = new Component with ContextualComponent:
-      override def render(width: Int): Vector[String]            = Vector.empty
+      override def render(width: Int): ComponentRender           = ComponentRender.empty
       override def tuiContext_=(value: Option[TUIContext]): Unit =
         if tracking && value.nonEmpty then
           events += "structural"
@@ -1282,10 +1296,10 @@ class TUIConcurrencySuite extends munit.FunSuite:
           if structuralCount < 6 then tui.addChild(nextStructural())
 
     val focusable = new Component with Focusable:
-      private var current                             = false
-      override def render(width: Int): Vector[String] = Vector.empty
-      override def focused: Boolean                   = current
-      override def focused_=(value: Boolean): Unit    =
+      private var current                              = false
+      override def render(width: Int): ComponentRender = ComponentRender.empty
+      override def focused: Boolean                    = current
+      override def focused_=(value: Boolean): Unit     =
         current = value
         if tracking && value then
           events += "action"
@@ -1295,7 +1309,7 @@ class TUIConcurrencySuite extends munit.FunSuite:
             tui.setFocus(this)
 
     tui.addChild(new Component:
-      override def render(width: Int): Vector[String] =
+      override def render(width: Int): ComponentRender =
         if tracking then
           events += "render"
           renderCount += 1
@@ -1303,7 +1317,7 @@ class TUIConcurrencySuite extends munit.FunSuite:
             tui.requestRender()
             tui.requestRender(force = true)
             tui.requestRender()
-        Vector("frame"))
+        ComponentRender.text("frame"))
     tui.addInputListener {
       case TerminalInput.Key(TerminalKey.Character("hold"), _)  =>
         callbackEntered.release()
@@ -1405,10 +1419,10 @@ class TUIConcurrencySuite extends munit.FunSuite:
     var active           = 0
     var overlap          = false
     val action           = new Component with Focusable:
-      private var current                             = false
-      override def render(width: Int): Vector[String] = Vector.empty
-      override def focused: Boolean                   = current
-      override def focused_=(value: Boolean): Unit    =
+      private var current                              = false
+      override def render(width: Int): ComponentRender = ComponentRender.empty
+      override def focused: Boolean                    = current
+      override def focused_=(value: Boolean): Unit     =
         active += 1
         if active > 1 then overlap = true
         callbacks :+= "action"
@@ -1491,10 +1505,10 @@ class TUIConcurrencySuite extends munit.FunSuite:
     var callbacks       = 0
     var tui             = Option.empty[TUI]
     val focusable       = new Component with Focusable:
-      private var current                             = false
-      override def render(width: Int): Vector[String] = Vector.empty
-      override def focused: Boolean                   = current
-      override def focused_=(value: Boolean): Unit    =
+      private var current                              = false
+      override def render(width: Int): ComponentRender = ComponentRender.empty
+      override def focused: Boolean                    = current
+      override def focused_=(value: Boolean): Unit     =
         depth += 1
         maxDepth = math.max(maxDepth, depth)
         callbacks += 1
@@ -1529,10 +1543,10 @@ class TUIConcurrencySuite extends munit.FunSuite:
     val allowCallback   = Gate()
     var callbacks       = Vector.empty[String]
     val focusable       = new Component with Focusable:
-      private var current                             = false
-      override def render(width: Int): Vector[String] = Vector.empty
-      override def focused: Boolean                   = current
-      override def focused_=(value: Boolean): Unit    =
+      private var current                              = false
+      override def render(width: Int): ComponentRender = ComponentRender.empty
+      override def focused: Boolean                    = current
+      override def focused_=(value: Boolean): Unit     =
         current = value
         callbackEntered.release()
         allowCallback.await()
@@ -1635,21 +1649,21 @@ class TUIConcurrencySuite extends munit.FunSuite:
     val allowAttach   = Gate()
     var attached      = false
     val child         = new Component with ContextualComponent:
-      override def render(width: Int): Vector[String]            = Vector("child")
+      override def render(width: Int): ComponentRender           = ComponentRender.text(Vector("child"))
       override def tuiContext_=(value: Option[TUIContext]): Unit =
         if value.nonEmpty then
           attached = true
           attachEntered.release()
           allowAttach.await()
     val first         = new Component with Focusable:
-      var focused                                     = false
-      override def render(width: Int): Vector[String] = Vector("first")
+      var focused                                      = false
+      override def render(width: Int): ComponentRender = ComponentRender.text(Vector("first"))
     val second        = new Component with Focusable:
-      var focused                                     = false
-      override def render(width: Int): Vector[String] = Vector("second")
+      var focused                                      = false
+      override def render(width: Int): ComponentRender = ComponentRender.text(Vector("second"))
     val overlay       = new Component with Focusable:
-      var focused                                     = false
-      override def render(width: Int): Vector[String] = Vector("overlay")
+      var focused                                      = false
+      override def render(width: Int): ComponentRender = ComponentRender.text(Vector("overlay"))
     val tui           = TUI(terminal)
     tui.addChild(first)
     tui.addChild(second)
@@ -1703,7 +1717,8 @@ class TUIConcurrencySuite extends munit.FunSuite:
     }
     val startupTui      = TUI(startupTerminal)
     startupTui.addChild(new Component:
-      override def render(width: Int): Vector[String] = Vector("must-not-render"))
+      override def render(width: Int): ComponentRender =
+        ComponentRender.text(Vector("must-not-render")))
     val starter         = Thread(() => startupTui.start())
     starter.start()
     startupEntered.await()
@@ -1726,7 +1741,7 @@ class TUIConcurrencySuite extends munit.FunSuite:
     val uncontendedTerminal = RecordingTerminal()
     val uncontendedTui      = TUI(uncontendedTerminal)
     uncontendedTui.addChild(new Component:
-      override def render(width: Int): Vector[String] = Vector("line"))
+      override def render(width: Int): ComponentRender = ComponentRender.text(Vector("line")))
     uncontendedTui.start()
     uncontendedTui.stop()
     assertEquals(uncontendedTerminal.stops, 1)
@@ -1812,7 +1827,8 @@ class TUIConcurrencySuite extends munit.FunSuite:
       TUIOptions(hardwareCursorPositioning = true)
     )
     tui.addChild(new Component:
-      override def render(width: Int): Vector[String] = Vector(s"frame${CursorMarker.Sequence}"))
+      override def render(width: Int): ComponentRender =
+        ComponentRender.text(Vector(s"frame${CursorMarker.Sequence}")))
     tui.start()
     val cancelQuery = tui.queryTerminalBackgroundColor(_ => ())
     assert(tui.setTerminalTitle("ordered-title"))
@@ -1848,11 +1864,11 @@ class TUIConcurrencySuite extends munit.FunSuite:
     val release  = Gate()
     var block    = false
     tui.addChild(new Component:
-      override def render(width: Int): Vector[String] =
+      override def render(width: Int): ComponentRender =
         if block then
           entered.release()
           release.await()
-        Vector("frame"))
+        ComponentRender.text("frame"))
     tui.start()
     block = true
     val owner    = Thread(() => {

@@ -1,6 +1,7 @@
 package scalatui.image
 
 import scalatui.ansi.Ansi
+import scalatui.components.Box
 import scalatui.core.{Component, TUI}
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{
@@ -12,6 +13,8 @@ import scalatui.terminal.{
   ImageRenderOptions,
   TerminalCapabilities,
   TerminalImageProtocol,
+  TerminalRenderControl,
+  TerminalRenderControlEncoder,
   VirtualTerminal
 }
 
@@ -35,7 +38,78 @@ class ImageSuite extends munit.FunSuite:
     )
 
     assert(result.isRight, result.toString)
-    assert(result.toOption.get.render(10).head.contains(";TQ\u001b\\"))
+    val frame = result.toOption.get.render(10)
+    assertEquals(frame.lines.forall(_.isEmpty), true)
+    assertEquals(frame.controls.length, 1)
+    assert(TerminalRenderControlEncoder.encode(frame.controls.head.control).contains(";TQ\u001b\\"))
+
+  test("image renders zero and negative widths as empty ordinary output without a control"):
+    val image = Image(
+      payload("AAAA"),
+      ImageDimensions(100, 50),
+      TerminalCapabilities(trueColor = true, hyperlinks = true, images = Some(ImageProtocol.Kitty))
+    )
+
+    Vector(0, -1).foreach { width =>
+      val frame = image.render(width)
+      assertEquals(frame.lines, Vector(""))
+      assertEquals(frame.controls, Vector.empty)
+      assertEquals(frame.validate(width), Right(()))
+    }
+    assertEquals(image.currentImageId, None)
+
+  test("width-one boxed image TUI stays valid and resize does not encode a zero-width image"):
+    val image    = Image(
+      payload("AAAA"),
+      ImageDimensions(1, 1),
+      TerminalCapabilities(trueColor = true, hyperlinks = true, images = Some(ImageProtocol.Kitty))
+    )
+    val box      = Box(paddingX = 1)
+    box.addChild(image)
+    val terminal = VirtualTerminal(1, 5)
+    val tui      = TUI(terminal)
+    tui.addChild(box)
+
+    tui.start()
+    assert(!terminal.output.contains("\u001b_Ga=T"), terminal.output)
+
+    terminal.clearWrites()
+    terminal.resize(3, 5)
+    assert(terminal.output.contains("\u001b_Ga=T"), terminal.output)
+
+    terminal.clearWrites()
+    terminal.resize(1, 5)
+    assert(!terminal.output.contains("\u001b_Ga=T"), terminal.output)
+    assert(terminal.output.contains("\u001b_Ga=d,d=I"), terminal.output)
+
+  test("nested TUI boxes normalize negative image padding and preserve final geometry"):
+    val image = Image(
+      payload("AAAA"),
+      ImageDimensions(1, 1),
+      TerminalCapabilities(trueColor = true, hyperlinks = true, images = Some(ImageProtocol.Kitty)),
+      ImageRenderOptions(imageId = Some(43), maxWidthCells = Some(1))
+    )
+    val inner = Box(paddingX = -2, paddingY = -3)
+    inner.addChild(image)
+    val outer = Box(paddingX = 1, paddingY = 1)
+    outer.addChild(inner)
+
+    val frame = outer.render(5)
+    assertEquals(frame.lines.length, 3)
+    assertEquals(frame.lines.map(Ansi.visibleWidth), Vector(5, 5, 5))
+    assertEquals(
+      frame.controls.map(placement => placement.row -> placement.column),
+      Vector(1 -> 1)
+    )
+    assertEquals(frame.validate(5), Right(()))
+
+    val terminal = VirtualTerminal(5, 5)
+    val tui      = TUI(terminal)
+    tui.addChild(outer)
+    tui.start()
+
+    val encoded = TerminalRenderControlEncoder.encode(frame.controls.head.control)
+    assert(terminal.output.contains(s"\u001b[1C$encoded\r"), terminal.output)
 
   test("image component emits protocol rows and tracks Kitty id"):
     val image = Image(
@@ -45,11 +119,21 @@ class ImageSuite extends munit.FunSuite:
       ImageRenderOptions(imageId = Some(42), maxWidthCells = Some(10))
     )
 
-    val lines = image.render(20)
-    assert(lines.head.startsWith("\u001b_G"), lines.head)
-    assert(lines.head.contains("i=42"), lines.head)
+    val frame   = image.render(20)
+    val control = frame.controls.head.control.details
+      .asInstanceOf[TerminalRenderControl.Details.KittyImage]
+    assertEquals(frame.lines.forall(_.isEmpty), true)
+    assertEquals(frame.controls.head.row, 0)
+    assertEquals(frame.controls.head.column, 0)
+    assertEquals(control.imageId, 42)
+    assertEquals(control.payload, payload("AAAA"))
     assertEquals(image.currentImageId, Some(42))
-    assertEquals(image.cleanupSequence.exists(_.contains("i=42")), true)
+    val cleanup = image.cleanupSequence.get
+    assertEquals(
+      cleanup.details.asInstanceOf[TerminalRenderControl.Details.KittyCleanup].imageId,
+      Some(42)
+    )
+    assertEquals(TerminalRenderControlEncoder.encode(cleanup), "\u001b_Ga=d,d=I,i=42\u001b\\")
 
   test("image component renders fallback on unsupported terminals"):
     val image = Image(
@@ -59,7 +143,7 @@ class ImageSuite extends munit.FunSuite:
       ImageRenderOptions(mimeType = "image/png", filename = Some("diagram.png"))
     )
 
-    val lines = image.render(18)
+    val lines = image.render(18).lines
     assertEquals(lines.length, 1)
     assert(lines.head.contains("image"), lines.head)
     assert(Ansi.visibleWidth(lines.head) <= 18, lines.head)
@@ -73,20 +157,20 @@ class ImageSuite extends munit.FunSuite:
       ImageRenderOptions(mimeType = "image/\u0000png\u0085", filename = Some("pic\u001b\u007f.png"))
     )
 
-    val full = image.render(80).head
+    val full = image.render(80).lines.head
     assert(full.contains("pic\\u001B\\u007F.png"), full)
     assert(full.contains("image/\\u0000png\\u0085"), full)
     assert(!full.exists(char =>
       char === '\u0000' || char === '\u001b' || char === '\u007f' || char === '\u0085'
     ))
-    assert(Ansi.visibleWidth(image.render(12).head) <= 12)
+    assert(Ansi.visibleWidth(image.render(12).lines.head) <= 12)
 
     val exactFit = Image(
       payload("AAAA"),
       ImageDimensions(8, 6),
       TerminalCapabilities(trueColor = false, hyperlinks = false, images = None),
       ImageRenderOptions(mimeType = "image/png", filename = Some("\u001b"))
-    ).render(14).head
+    ).render(14).lines.head
     assertEquals(exactFit, s"[image: \\u001B${Ansi.Reset}")
     assert(!exactFit.stripSuffix(Ansi.Reset).exists(_ === '\u001b'), exactFit)
 
@@ -166,7 +250,7 @@ class ImageSuite extends munit.FunSuite:
 
   test("Kitty image component reserves rows from protocol result"):
     val dimensions = ImageDimensions(widthPx = 100, heightPx = 100)
-    val options    = ImageRenderOptions(maxWidthCells = Some(1))
+    val options    = ImageRenderOptions(maxWidthCells = Some(1), imageId = Some(42))
     val caps       = TerminalCapabilities(
       trueColor = true,
       hyperlinks = true,
@@ -184,10 +268,15 @@ class ImageSuite extends munit.FunSuite:
     ).get
 
     val image = Image(payload("AAAA"), dimensions, caps, options)
-    val lines = image.render(20)
+    val frame = image.render(20)
 
-    assertEquals(lines.length, expected.rows)
-    assertEquals(lines.length >= 1, true)
+    assertEquals(frame.lines.length, expected.rows)
+    assertEquals(frame.lines.forall(_.isEmpty), true)
+    assertEquals(
+      frame.controls,
+      Vector(scalatui.core.TerminalControlPlacement(0, 0, expected.control))
+    )
+    assertEquals(frame.validate(20), Right(()))
 
   test("iTerm2 image component reserves rows from protocol result"):
     val dimensions = ImageDimensions(widthPx = 100, heightPx = 100)
@@ -209,10 +298,15 @@ class ImageSuite extends munit.FunSuite:
     ).get
 
     val image = Image(payload("AAAA"), dimensions, caps, options)
-    val lines = image.render(20)
+    val frame = image.render(20)
 
-    assertEquals(lines.length, expected.rows)
-    assertEquals(lines.length >= 1, true)
+    assertEquals(frame.lines.length, expected.rows)
+    assertEquals(frame.lines.forall(_.isEmpty), true)
+    assertEquals(
+      frame.controls,
+      Vector(scalatui.core.TerminalControlPlacement(0, 0, expected.control))
+    )
+    assertEquals(frame.validate(20), Right(()))
 
   test("content after Kitty image appears below reserved rows"):
     val terminal     = VirtualTerminal(20, 10)
@@ -239,11 +333,7 @@ class ImageSuite extends munit.FunSuite:
     tui.addChild(after)
     tui.start()
 
-    val lines      = visibleOutputLines(terminal.output)
-    val afterIndex = lines.indexWhere(_.contains("after"))
-
-    assert(afterIndex >= 0)
-    assertEquals(afterIndex, expectedRows)
+    assertEquals(renderedRowBreaksBefore(terminal.output, "after"), expectedRows)
 
   test("content after iTerm2 image appears below reserved rows"):
     val terminal     = VirtualTerminal(20, 10)
@@ -270,21 +360,18 @@ class ImageSuite extends munit.FunSuite:
     tui.addChild(after)
     tui.start()
 
-    val lines      = visibleOutputLines(terminal.output)
-    val afterIndex = lines.indexWhere(_.contains("after"))
-
-    assert(afterIndex >= 0)
-    assertEquals(afterIndex, expectedRows)
+    assertEquals(renderedRowBreaksBefore(terminal.output, "after"), expectedRows)
 
   private final class FixedLine(var value: String) extends Component:
-    override def render(width: Int): Vector[String] = Vector(value)
+    override def render(width: Int): scalatui.core.ComponentRender =
+      scalatui.core.ComponentRender.text(value)
 
-  private def visibleOutputLines(output: String): Vector[String] =
-    Ansi.strip(output)
-      .replace("\r\n", "\n")
-      .replace('\r', '\n')
-      .split("\n", -1)
-      .toVector
+  private def renderedRowBreaksBefore(output: String, text: String): Int =
+    val renderStart = output.indexOf(TUI.SyncStart)
+    val textStart   = output.indexOf(text, renderStart)
+    assert(renderStart >= 0)
+    assert(textStart >= 0)
+    output.substring(renderStart, textStart).sliding(2).count(_ === "\r\n")
 
   private def pngBytes(width: Int, height: Int): Array[Byte] =
     Array[Byte](
