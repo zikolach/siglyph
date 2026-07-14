@@ -14,12 +14,53 @@ final class SiglyphJvmInteropCompileSuite extends munit.FunSuite:
     assert(!JavaSmoke.contains("$lessinit$greater$default"))
     compileJava(JavaSmoke)
 
+  test("Java can call Base64ImagePayload static factories"):
+    compileJava(Base64PayloadPositive)
+
+  test("Java cannot bypass Base64ImagePayload construction or finality"):
+    Vector(
+      "new Base64ImagePayload(\"TQ==\");",
+      "new Base64ImagePayload();",
+      "class InvalidPayload extends Base64ImagePayload {}"
+    ).foreach(source => compileJavaFailure(javaFailureSource(source)))
+
+  test("JVM payload bytecode keeps construction private and protocol APIs typed"):
+    val payloadClass = classOf[scalatui.terminal.Base64ImagePayload]
+    val constructors = payloadClass.getDeclaredConstructors.toVector
+    assert(!payloadClass.isInterface)
+    assert(java.lang.reflect.Modifier.isFinal(payloadClass.getModifiers))
+    assert(payloadClass.getConstructors.isEmpty)
+    assertEquals(constructors.length, 1)
+    assertEquals(constructors.head.getParameterTypes.toVector, Vector(classOf[String]))
+    assert(java.lang.reflect.Modifier.isPrivate(constructors.head.getModifiers))
+    intercept[IllegalAccessException](constructors.head.newInstance("TQ=="))
+
+    val valueField     = payloadClass.getDeclaredField("value")
+    assert(java.lang.reflect.Modifier.isPrivate(valueField.getModifiers))
+    assert(java.lang.reflect.Modifier.isFinal(valueField.getModifiers))
+    val forbiddenNames = Set("apply", "copy", "raw", "setValue", "value_=")
+    assert(payloadClass.getMethods.forall(method => !forbiddenNames.contains(method.getName)))
+
+    val protocolClass = Class.forName("scalatui.terminal.TerminalImageProtocol$")
+    Vector("renderBase64Image", "encodeKitty", "encodeITerm2").foreach { name =>
+      val overloads = protocolClass.getMethods.filter(_.getName == name)
+      assert(overloads.nonEmpty, name)
+      assert(overloads.forall(_.getParameterTypes.head == payloadClass), name)
+      assert(overloads.forall(!_.getParameterTypes.contains(classOf[String])), name)
+    }
+
   test("Kotlin smoke source compiles through JVM interop facade"):
     assert(!KotlinSmoke.contains("$lessinit$greater$default"))
     assert(!KotlinSmoke.contains("scala.Function1"))
     compileKotlin(KotlinSmoke)
 
   private def compileJava(source: String): Unit =
+    assertJavaCompilation(source, expectedSuccess = true)
+
+  private def compileJavaFailure(source: String): Unit =
+    assertJavaCompilation(source, expectedSuccess = false)
+
+  private def assertJavaCompilation(source: String, expectedSuccess: Boolean): Unit =
     val compiler = ToolProvider.getSystemJavaCompiler
     assert(compiler != null, "Java smoke compilation requires a JDK with javac")
     withTempDir("siglyph-java-interop") { dir =>
@@ -32,7 +73,8 @@ final class SiglyphJvmInteropCompileSuite extends munit.FunSuite:
         val units    = fileManager.getJavaFileObjectsFromFiles(List(sourceFile.toFile).asJava)
         val options  = List("-classpath", classpath, "-d", outputDir.toString).asJava
         val compiled = compiler.getTask(null, fileManager, diagnostics, options, null, units).call()
-        assert(compiled, renderDiagnostics(diagnostics))
+        if expectedSuccess then assert(compiled, renderDiagnostics(diagnostics))
+        else assert(!compiled, "Expected Java compilation to fail")
       finally fileManager.close()
     }
 
@@ -112,6 +154,27 @@ public final class JavaInteropSmoke {
     siglyph.addChild(tui, input);
     siglyph.setFocus(tui, input);
     siglyph.run(tui);
+  }
+}
+"""
+
+  private val Base64PayloadPositive = """
+import scalatui.terminal.Base64ImagePayload;
+
+final class JavaInteropSmoke {
+  void use() {
+    Base64ImagePayload.from("TQ==");
+    Base64ImagePayload.encode(new byte[] { 77 });
+  }
+}
+"""
+
+  private def javaFailureSource(statement: String): String = s"""
+import scalatui.terminal.Base64ImagePayload;
+
+class JavaInteropSmoke {
+  void use() {
+    $statement
   }
 }
 """

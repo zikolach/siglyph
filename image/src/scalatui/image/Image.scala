@@ -4,6 +4,8 @@ import scalatui.ansi.Ansi
 import scalatui.core.Component
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{
+  Base64ImagePayload,
+  Base64ImagePayloadError,
   ImageDimensions,
   ImageCellDimensions,
   ImageCellDimensionsSource,
@@ -15,14 +17,18 @@ import scalatui.terminal.{
 
 import java.io.IOException
 import java.nio.file.{Files, Path}
-import java.util.Base64
 
 /** Theme hooks for the optional terminal image component. */
 final case class ImageTheme(fallbackStyle: String => String = identity)
 
-/** Loaded image data ready for the existing terminal image component contract. */
+/**
+ * Loaded image data with a validated terminal payload, MIME type, dimensions, and optional name.
+ *
+ * The shared [[scalatui.terminal.Base64ImagePayload]] contract is identical on JVM and Scala Native
+ * and does not validate the image format or dimensions.
+ */
 final case class ImageSource(
-    base64Data: String,
+    payload: Base64ImagePayload,
     mimeType: String,
     dimensions: ImageDimensions,
     filename: Option[String] = None
@@ -39,6 +45,7 @@ object ImageHelperError:
 
 /** Dependency-light file and byte helpers for terminal image sources. */
 object ImageSource:
+  /** Load a supported image file and encode its bytes as a validated terminal payload. */
   def fromFile(path: Path): Either[ImageHelperError, ImageSource] =
     try
       if !Files.isRegularFile(path) || !Files.isReadable(path) then
@@ -60,7 +67,7 @@ object ImageSource:
   ): Either[ImageHelperError, ImageSource] =
     ImageDimensionsSniffer.sniff(bytes).map { metadata =>
       ImageSource(
-        Base64.getEncoder.encodeToString(bytes),
+        Base64ImagePayload.encode(bytes),
         metadata.mimeType,
         metadata.dimensions,
         filename
@@ -215,9 +222,8 @@ object ImageSizing:
 /**
  * Optional image component that emits Kitty/iTerm2 protocol escapes when supported.
  *
- * The component accepts already-base64 encoded image data and caller-supplied dimensions so this
- * module stays dependency-free. File loading, header parsing, scaling, or transcoding can be added
- * by future optional helper modules without changing this component contract.
+ * The component requires a [[scalatui.terminal.Base64ImagePayload]] and caller-supplied dimensions
+ * so this module stays dependency-free. It does not decode, validate, scale, or transcode images.
  *
  * By default, this high-level component opts into runtime terminal cell dimensions because it is
  * rendered inside a [[scalatui.core.TUI]] lifecycle that sends the cell-size query on start. Pass
@@ -226,7 +232,7 @@ object ImageSizing:
  * caller-supplied deterministic cell dimensions.
  */
 final class Image(
-    base64Data: String,
+    payload: Base64ImagePayload,
     dimensions: ImageDimensions,
     capabilities: TerminalCapabilities,
     options: ImageRenderOptions = ImageRenderOptions(
@@ -242,7 +248,7 @@ final class Image(
   override def render(width: Int): Vector[String] =
     val safeWidth = math.max(0, width)
     TerminalImageProtocol.renderBase64Image(
-      base64Data,
+      payload,
       dimensions,
       capabilities,
       math.max(1, safeWidth),
@@ -262,3 +268,24 @@ final class Image(
   /** Cleanup escape for the current image id when the active protocol supports one. */
   def cleanupSequence: Option[String] =
     imageId.flatMap(TerminalImageProtocol.deleteImage(_, capabilities))
+
+object Image:
+  /**
+   * Validate raw standard base64 before constructing an image component on JVM or Scala Native.
+   *
+   * Invalid input returns [[scalatui.terminal.Base64ImagePayloadError]] and creates no component or
+   * terminal output. Validation transiently allocates and discards decoded bytes. Image format,
+   * dimensions, payload size, terminal support, scaling, and transcoding are not validated here.
+   */
+  def fromBase64(
+      base64Data: String,
+      dimensions: ImageDimensions,
+      capabilities: TerminalCapabilities,
+      options: ImageRenderOptions = ImageRenderOptions(
+        cellDimensionsSource = ImageCellDimensionsSource.Runtime
+      ),
+      theme: ImageTheme = ImageTheme()
+  ): Either[Base64ImagePayloadError, Image] =
+    Base64ImagePayload.from(base64Data).map(payload =>
+      new Image(payload, dimensions, capabilities, options, theme)
+    )

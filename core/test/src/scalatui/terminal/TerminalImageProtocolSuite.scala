@@ -1,12 +1,13 @@
 package scalatui.terminal
 
 import scalatui.ansi.Ansi
+import scalatui.syntax.Equality.*
 
 class TerminalImageProtocolSuite extends munit.FunSuite:
   test("renders Kitty and iTerm2 protocol paths when capabilities allow"):
     val dimensions = ImageDimensions(100, 50)
     val kitty      = TerminalImageProtocol.renderBase64Image(
-      "AAAA",
+      payload("AAAA"),
       dimensions,
       TerminalCapabilities(trueColor = true, hyperlinks = true, images = Some(ImageProtocol.Kitty)),
       terminalWidth = 20,
@@ -18,7 +19,7 @@ class TerminalImageProtocolSuite extends munit.FunSuite:
     assert(kitty.rows >= 1)
 
     val iterm = TerminalImageProtocol.renderBase64Image(
-      "AAAA",
+      payload("AAAA"),
       dimensions,
       TerminalCapabilities(
         trueColor = true,
@@ -29,13 +30,46 @@ class TerminalImageProtocolSuite extends munit.FunSuite:
       ImageRenderOptions(filename = Some("pic.png"))
     ).get
     assert(iterm.sequence.startsWith("\u001b]1337;File="), iterm.sequence)
-    assert(iterm.sequence.contains("name=pic.png"), iterm.sequence)
+    assert(iterm.sequence.contains("name=cGljLnBuZw=="), iterm.sequence)
+
+  test("preserves valid payload spelling and emits only the intended frame terminator"):
+    val padded   = payload("TQ==")
+    val unpadded = payload("TQ")
+    val empty    = payload("")
+
+    Vector(padded, unpadded, empty).foreach { value =>
+      val sequence = TerminalImageProtocol.encodeKitty(value, 1, 2, 3)
+      assertEquals(sequence, s"\u001b_Ga=T,f=100,i=1,c=2,r=3,C=1;${value.value}\u001b\\")
+      assertEquals(sequence.sliding(2).count(_ === "\u001b\\"), 1)
+    }
+
+    Vector(padded, unpadded, empty).foreach { value =>
+      val sequence = TerminalImageProtocol.encodeITerm2(value, None, 2, 3)
+      assert(sequence.endsWith(s":${value.value}\u0007"), sequence)
+      assertEquals(sequence.count(_ === '\u0007'), 1)
+      assert(!sequence.contains("name="), sequence)
+    }
+
+  test("encodes Unicode and hostile iTerm2 filenames as UTF-8 standard base64"):
+    val unicode = TerminalImageProtocol.encodeITerm2(payload("AAAA"), Some("猫.png"), 2, 3)
+    assert(unicode.contains("name=54yrLnBuZw==;"), unicode)
+
+    val hostile = TerminalImageProtocol.encodeITerm2(
+      payload("AAAA"),
+      Some("pic\u0007\u001b\\.png"),
+      2,
+      3
+    )
+    assertEquals(hostile.count(_ === '\u001b'), 1)
+    assertEquals(hostile.count(_ === '\u0007'), 1)
+    assert(!hostile.contains("\u001b\\"), hostile)
+    assert(hostile.contains("name=cGljBxtcLnBuZw==;"), hostile)
 
   test("unknown terminals return no protocol render and no cleanup"):
     val caps = TerminalCapabilities(trueColor = false, hyperlinks = false, images = None)
     assertEquals(
       TerminalImageProtocol.renderBase64Image(
-        "AAAA",
+        payload("AAAA"),
         ImageDimensions(10, 10),
         caps,
         terminalWidth = 10
@@ -107,6 +141,29 @@ class TerminalImageProtocolSuite extends munit.FunSuite:
   test("cell-size query sequence is deterministic"):
     assertEquals(TerminalImageProtocol.QueryCellDimensions, "\u001b[16t")
 
+  test("fallback makes C0, DEL, and C1 metadata controls visible and stays width-safe"):
+    val fallback = TerminalImageProtocol.fallback(
+      ImageDimensions(8, 6),
+      "image/\u0000png\u0085",
+      Some("pic\u001b\u007f.png"),
+      width = 80
+    )
+    assert(fallback.contains("pic\\u001B\\u007F.png"), fallback)
+    assert(fallback.contains("image/\\u0000png\\u0085"), fallback)
+    assert(!fallback.exists(char =>
+      char === '\u0000' || char === '\u001b' || char === '\u007f' || char === '\u0085'
+    ))
+    assert(Ansi.visibleWidth(fallback) <= 80, fallback)
+
+    val exactFit = TerminalImageProtocol.fallback(
+      ImageDimensions(8, 6),
+      "image/png",
+      Some("\u001b"),
+      width = 14
+    )
+    assertEquals(exactFit, s"[image: \\u001B${Ansi.Reset}")
+    assert(!exactFit.stripSuffix(Ansi.Reset).exists(_ === '\u001b'), exactFit)
+
   test("fallback is readable and width-safe"):
     val fallback = TerminalImageProtocol.fallback(
       ImageDimensions(800, 600),
@@ -115,3 +172,6 @@ class TerminalImageProtocolSuite extends munit.FunSuite:
       width = 16
     )
     assert(Ansi.visibleWidth(fallback) <= 16, fallback)
+
+  private def payload(value: String): Base64ImagePayload =
+    Base64ImagePayload.from(value).toOption.get

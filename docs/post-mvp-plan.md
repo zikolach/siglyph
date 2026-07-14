@@ -50,10 +50,10 @@ Suggested follow-up chain for `pi-tui` parity:
 ## Images
 
 - Terminal capability detection and Kitty/iTerm2 protocol helpers are present in core.
-- The optional `image` module provides a dependency-free `Image` component for already-base64 image data and caller-supplied dimensions.
+- The optional `image` module provides a dependency-free `Image` component for validated `scalatui.terminal.Base64ImagePayload` data and caller-supplied dimensions. Raw strings use the typed `scalatui.image.Image.fromBase64` factory and `scalatui.terminal.Base64ImagePayloadError` failure.
 - The optional `image` module also provides helpers for loading files, detecting PNG/JPEG/GIF/WebP dimensions, and calculating bounded cell sizes.
 - Scaling, transcoding, or richer media handling should stay in optional modules if they require third-party dependencies.
-- Fallback rendering must remain readable text when image protocols are unsupported.
+- iTerm2 filenames are standard-base64 encoded from UTF-8. Unsupported-terminal fallback rendering keeps C0, DEL, and C1 metadata controls visible as escaped text before width truncation.
 
 ## Terminal runtime
 
@@ -71,4 +71,4 @@ Suggested follow-up chain for `pi-tui` parity:
 - The Scala Native POSIX backend is implemented, but terminal behavior remains scoped to macOS/Linux rather than Windows.
 - Loader animation is application- or test-driven through `tick()` rather than owning a Node-style interval.
 - Autocomplete path enumeration is available through the dependency-free `FileSystemPathCompletionProvider`; applications can still supply custom providers.
-- Image rendering still accepts caller-supplied base64 data and dimensions, and the optional `image` module can now load supported files or bytes into that contract.
+- Image rendering accepts caller-supplied validated base64 payloads and dimensions, and the optional `image` module can load supported files or bytes into that contract. The raw-string API removal is source-breaking and has no compatibility path.

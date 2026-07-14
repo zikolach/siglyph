@@ -2,7 +2,10 @@ package scalatui.image
 
 import scalatui.ansi.Ansi
 import scalatui.core.{Component, TUI}
+import scalatui.syntax.Equality.*
 import scalatui.terminal.{
+  Base64ImagePayload,
+  Base64ImagePayloadError,
   ImageCellDimensions,
   ImageDimensions,
   ImageProtocol,
@@ -15,9 +18,28 @@ import scalatui.terminal.{
 import java.nio.file.Files
 
 class ImageSuite extends munit.FunSuite:
+  test("raw base64 factory rejects invalid input before creating an image"):
+    val result = Image.fromBase64(
+      "AAAA\u001b\\",
+      ImageDimensions(1, 1),
+      TerminalCapabilities(trueColor = false, hyperlinks = false, images = None)
+    )
+
+    assertEquals(result, Left(Base64ImagePayloadError.InvalidStandardBase64))
+
+  test("raw base64 factory constructs and renders a valid image"):
+    val result = Image.fromBase64(
+      "TQ",
+      ImageDimensions(1, 1),
+      TerminalCapabilities(trueColor = true, hyperlinks = true, images = Some(ImageProtocol.Kitty))
+    )
+
+    assert(result.isRight, result.toString)
+    assert(result.toOption.get.render(10).head.contains(";TQ\u001b\\"))
+
   test("image component emits protocol rows and tracks Kitty id"):
     val image = Image(
-      "AAAA",
+      payload("AAAA"),
       ImageDimensions(100, 50),
       TerminalCapabilities(trueColor = true, hyperlinks = true, images = Some(ImageProtocol.Kitty)),
       ImageRenderOptions(imageId = Some(42), maxWidthCells = Some(10))
@@ -31,7 +53,7 @@ class ImageSuite extends munit.FunSuite:
 
   test("image component renders fallback on unsupported terminals"):
     val image = Image(
-      "AAAA",
+      payload("AAAA"),
       ImageDimensions(800, 600),
       TerminalCapabilities(trueColor = false, hyperlinks = false, images = None),
       ImageRenderOptions(mimeType = "image/png", filename = Some("diagram.png"))
@@ -43,6 +65,31 @@ class ImageSuite extends munit.FunSuite:
     assert(Ansi.visibleWidth(lines.head) <= 18, lines.head)
     assertEquals(image.cleanupSequence, None)
 
+  test("image fallback escapes controls before width truncation"):
+    val image = Image(
+      payload("AAAA"),
+      ImageDimensions(800, 600),
+      TerminalCapabilities(trueColor = false, hyperlinks = false, images = None),
+      ImageRenderOptions(mimeType = "image/\u0000png\u0085", filename = Some("pic\u001b\u007f.png"))
+    )
+
+    val full = image.render(80).head
+    assert(full.contains("pic\\u001B\\u007F.png"), full)
+    assert(full.contains("image/\\u0000png\\u0085"), full)
+    assert(!full.exists(char =>
+      char === '\u0000' || char === '\u001b' || char === '\u007f' || char === '\u0085'
+    ))
+    assert(Ansi.visibleWidth(image.render(12).head) <= 12)
+
+    val exactFit = Image(
+      payload("AAAA"),
+      ImageDimensions(8, 6),
+      TerminalCapabilities(trueColor = false, hyperlinks = false, images = None),
+      ImageRenderOptions(mimeType = "image/png", filename = Some("\u001b"))
+    ).render(14).head
+    assertEquals(exactFit, s"[image: \\u001B${Ansi.Reset}")
+    assert(!exactFit.stripSuffix(Ansi.Reset).exists(_ === '\u001b'), exactFit)
+
   test("image source helper loads PNG file into component source contract"):
     val path = Files.createTempFile("siglyph-image", ".png")
     try
@@ -53,7 +100,7 @@ class ImageSuite extends munit.FunSuite:
       assert(source.isRight, source.toString)
       assertEquals(source.toOption.map(_.mimeType), Some("image/png"))
       assertEquals(source.toOption.map(_.dimensions), Some(ImageDimensions(16, 32)))
-      assert(source.toOption.exists(_.base64Data.nonEmpty), source.toString)
+      assert(source.toOption.exists(_.payload.value.nonEmpty), source.toString)
     finally Files.deleteIfExists(path)
 
   test("dimension sniffer detects supported image formats"):
@@ -129,14 +176,14 @@ class ImageSuite extends munit.FunSuite:
     )
 
     val expected = TerminalImageProtocol.renderBase64Image(
-      "AAAA",
+      payload("AAAA"),
       dimensions,
       caps,
       terminalWidth = 20,
       options
     ).get
 
-    val image = Image("AAAA", dimensions, caps, options)
+    val image = Image(payload("AAAA"), dimensions, caps, options)
     val lines = image.render(20)
 
     assertEquals(lines.length, expected.rows)
@@ -154,14 +201,14 @@ class ImageSuite extends munit.FunSuite:
     )
 
     val expected = TerminalImageProtocol.renderBase64Image(
-      "AAAA",
+      payload("AAAA"),
       dimensions,
       caps,
       terminalWidth = 20,
       options
     ).get
 
-    val image = Image("AAAA", dimensions, caps, options)
+    val image = Image(payload("AAAA"), dimensions, caps, options)
     val lines = image.render(20)
 
     assertEquals(lines.length, expected.rows)
@@ -176,11 +223,11 @@ class ImageSuite extends munit.FunSuite:
       hyperlinks = true,
       images = Some(ImageProtocol.Kitty)
     )
-    val image        = Image("AAAA", dimensions, caps, options)
+    val image        = Image(payload("AAAA"), dimensions, caps, options)
     val after        = FixedLine("after")
     val expectedRows =
       TerminalImageProtocol.renderBase64Image(
-        "AAAA",
+        payload("AAAA"),
         dimensions,
         caps,
         terminalWidth = 20,
@@ -207,11 +254,11 @@ class ImageSuite extends munit.FunSuite:
       hyperlinks = true,
       images = Some(ImageProtocol.ITerm2)
     )
-    val image        = Image("AAAA", dimensions, caps, options)
+    val image        = Image(payload("AAAA"), dimensions, caps, options)
     val after        = FixedLine("after")
     val expectedRows =
       TerminalImageProtocol.renderBase64Image(
-        "AAAA",
+        payload("AAAA"),
         dimensions,
         caps,
         terminalWidth = 20,
@@ -302,3 +349,6 @@ class ImageSuite extends munit.FunSuite:
       ((value >> 8) & 0xff).toByte,
       ((value >> 16) & 0xff).toByte
     )
+
+  private def payload(value: String): Base64ImagePayload =
+    Base64ImagePayload.from(value).toOption.get

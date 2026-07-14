@@ -16,6 +16,7 @@ import scalatui.terminal.{
   ImageDimensions,
   ImageProtocol,
   ImageRenderOptions,
+  Base64ImagePayload,
   KeyEventType,
   KeyModifiers,
   RgbColor,
@@ -696,7 +697,7 @@ class TUISuite extends munit.FunSuite:
   test("image protocol escapes remain in synchronized sanitized output"):
     val terminal = VirtualTerminal(3, 5)
     val sequence = TerminalImageProtocol.renderBase64Image(
-      "AAAA",
+      Base64ImagePayload.from("AAAA").toOption.get,
       ImageDimensions(10, 10),
       TerminalCapabilities(trueColor = true, hyperlinks = true, images = Some(ImageProtocol.Kitty)),
       terminalWidth = 3,
