@@ -111,3 +111,9 @@
 - [x] 12.3 Add focused shared cursor and terminal-control tests for invalid base geometry, invalid overlay-local width and rows, unchanged valid composition, bounded redacted diagnostics, and explicit final-result validation.
 - [x] 12.4 Correct CursorMarker object wording and impossible-width cursor wording, then run focused JVM/Native suites, full core JVM/Native tests, all-module compile, formatting, Scalafix, strict OpenSpec validation, and relevant staged/unstaged diff checks without final PTY `__.test`.
 - [x] 12.5 Review-repair the Scala Native CI timeout in `AnsiSuite` by constructing the 1,000,000-repeat SGR history directly and reusing one retained-state scan, then run the focused JVM/Native suite, formatting, and strict change validation.
+
+## 13. Repair OpenSpec Delta Semantics Before Archive
+
+- [x] 13.1 Reclassify 12 requirements as added, record four removed requirements, add the developer API and terminal-runtime modifications, update proposal capability scope, and preserve unrelated text unchanged.
+- [x] 13.2 Correct bounded bracketed-paste event wording and verify no source delta retains a whole-paste event or authorizes string-marker scanning.
+- [x] 13.3 Run strict change and repository OpenSpec validation plus scoped diff and whitespace checks before archive.

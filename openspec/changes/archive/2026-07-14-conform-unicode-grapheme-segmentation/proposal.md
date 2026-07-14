@@ -33,9 +33,10 @@ Current whole-string and incremental grapheme logic omits required Unicode rules
 - `unicode-text`: Unicode 17.0.0 UAX #29 default extended grapheme cluster conformance, whole-string and incremental equivalence, bounded state, and deterministic versioned data.
 
 ### Modified Capabilities
-- `developer-api`: Pin Unicode table generation to immutable Unicode 17.0.0 sources and require deterministic runtime properties and official test fixtures.
-- `text-editing`: Require streamed and chunked cursor accounting to preserve Unicode 17.0.0 extended grapheme clusters across chunk and UTF-8 boundaries.
-- `component-rendering`: Require ANSI geometry and editor visual layout to treat Unicode 17.0.0 extended grapheme clusters atomically.
+- `developer-api`: Pin Unicode table generation to immutable Unicode 17.0.0 sources, require deterministic runtime properties and official test fixtures, and define the public hardware cursor option and documentation through structured `CursorPlacement` metadata rather than string markers.
+- `text-editing`: Require streamed and chunked cursor accounting to preserve Unicode 17.0.0 extended grapheme clusters across chunk and UTF-8 boundaries, and replace focused editing cursor-marker emission with structured cursor placements.
+- `component-rendering`: Require ANSI geometry and editor visual layout to treat Unicode 17.0.0 extended grapheme clusters atomically, and replace final string-marker handling with structured cursor validation, propagation, overlay occlusion, selection, and differential rendering.
+- `terminal-runtime`: Require bounded bracketed-paste event streaming and remove obsolete requirements that authorize rendered-string cursor-marker scanning and marker-driven positioning.
 
 ## Impact
 

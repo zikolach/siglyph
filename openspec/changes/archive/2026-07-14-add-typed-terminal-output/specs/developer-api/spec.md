@@ -1,3 +1,24 @@
+## MODIFIED Requirements
+
+### Requirement: Public alternate-screen runtime option
+The public core API SHALL expose a Scala-idiomatic opt-in option for running a `TUI` in terminal alternate-screen mode without changing existing defaults or component contracts.
+
+#### Scenario: Existing TUI construction remains normal-screen
+- **WHEN** existing application code constructs `TUI(terminal)` or `TUI(terminal, TUIOptions())`
+- **THEN** the TUI runs in normal-screen mode and existing source remains valid
+
+#### Scenario: Application opts into alternate screen through TUI options
+- **WHEN** an application configures alternate-screen mode through public `TUIOptions`
+- **THEN** the shared TUI runtime enters alternate screen for that TUI lifecycle without requiring application code to emit raw terminal escape strings
+
+#### Scenario: Component API remains width-only
+- **WHEN** alternate-screen mode is enabled
+- **THEN** components still render through `Component.render(width): ComponentRender` without requiring a height-aware component API
+
+#### Scenario: API compiles on JVM and Native core
+- **WHEN** the alternate-screen option is compiled for JVM core and Scala Native core modules
+- **THEN** it compiles without JVM-only, Native-only, or third-party runtime dependencies
+
 ## ADDED Requirements
 
 ### Requirement: Typed component render API

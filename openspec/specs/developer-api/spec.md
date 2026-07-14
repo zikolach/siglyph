@@ -40,15 +40,23 @@ The project SHALL treat TauTUI as a Node-free architectural reference but MUST v
 - **THEN** the implementation follows current `pi-tui` unless a deviation is documented in the design or spec
 
 ### Requirement: Unicode table generation
-The library SHALL generate Unicode display-width and grapheme-segmentation tables from the latest Unicode data using a Scala CLI script and commit the generated tables to the repository.
+The library SHALL use a Scala CLI script to generate committed Unicode display-width data, Unicode 17.0.0 grapheme-segmentation runtime properties, and official Unicode 17.0.0 GraphemeBreakTest-derived test vectors from immutable versioned source URLs.
 
 #### Scenario: Generated Unicode version is recorded
-- **WHEN** Unicode tables are generated
-- **THEN** the generated source records the Unicode data version and source URLs used
+- **WHEN** Unicode tables or grapheme test vectors are generated
+- **THEN** each generated output records Unicode version 17.0.0 and the exact immutable versioned source URLs used
 
 #### Scenario: Unicode tables are reproducible
-- **WHEN** the Unicode generation script is run with the same Unicode data version
-- **THEN** it reproduces the committed table contents
+- **WHEN** the Unicode generation script is run repeatedly with the same Unicode 17.0.0 inputs and generator revision
+- **THEN** it reproduces every committed runtime and test-data file byte-for-byte
+
+#### Scenario: Generated properties cover segmentation rules
+- **WHEN** Unicode 17.0.0 grapheme runtime data is generated
+- **THEN** it includes the Grapheme_Cluster_Break, Extended_Pictographic, and Indic_Conjunct_Break properties required for UAX #29 default extended grapheme clusters
+
+#### Scenario: Official fixtures are version matched
+- **WHEN** GraphemeBreakTest-derived vectors are generated
+- **THEN** the generator uses the immutable Unicode 17.0.0 GraphemeBreakTest source and fails if its version does not match the runtime property inputs
 
 ### Requirement: Test harness and regression suite
 The library SHALL include tests for rendering, terminal protocol parsing, Unicode width and editing, autocomplete, components, and virtual-terminal integration before a capability is considered complete. Test-only dependencies are allowed.
@@ -127,11 +135,15 @@ The editor-buffer and API-refinement change SHALL NOT add third-party runtime de
 - **THEN** no new runtime dependency is present beyond already-approved Scala Native and test-only dependencies
 
 ### Requirement: Documentation and Scaladoc for public APIs
-Changes that add or modify public APIs SHALL include project documentation and Scaladoc describing contract, platform scope, and important non-goals.
+Changes that add or modify public APIs SHALL include project documentation and Scaladoc describing contract, platform scope, important non-goals, and source-breaking migration where applicable.
 
 #### Scenario: Public API documentation accompanies implementation
 - **WHEN** a change adds a public type or public method intended for application use
 - **THEN** the implementation includes Scaladoc and the project documentation explains the capability or explicitly records why no documentation update is needed
+
+#### Scenario: Breaking image API documentation accompanies implementation
+- **WHEN** validated image payload types replace raw-string image signatures and fields
+- **THEN** Scaladoc, examples, and project documentation name `scalatui.terminal.Base64ImagePayload`, `scalatui.terminal.Base64ImagePayloadError`, and `scalatui.image.Image.fromBase64`, and explain typed validation, typed failure, JVM/Native scope, validation memory cost, and required source migration without advertising compatibility work
 
 #### Scenario: Future changes preserve documentation expectations
 - **WHEN** a future OpenSpec change proposes public API or user-visible behavior
@@ -323,19 +335,31 @@ The public component APIs SHALL expose configuration and callback points needed 
 - **THEN** new editing APIs are additive and do not break existing callback signatures or core module compatibility
 
 ### Requirement: Public image APIs are stable and dependency-light
-The developer API SHALL expose core image-related capability data types and optional image-module renderer helpers in a way that does not require platform-specific dependencies at call sites.
+The developer API SHALL expose public shared-core `scalatui.terminal.Base64ImagePayload` and typed `scalatui.terminal.Base64ImagePayloadError` values plus optional image-module renderer helpers without requiring platform-specific dependencies at call sites. `scalatui.terminal.Base64ImagePayload.from(String)` SHALL return `Either[scalatui.terminal.Base64ImagePayloadError, scalatui.terminal.Base64ImagePayload]`, `scalatui.terminal.Base64ImagePayload.encode(Array[Byte])` SHALL return a validated payload, and the error model SHALL include `InvalidStandardBase64`. `scalatui.image.Image.fromBase64` SHALL be the high-level raw-string factory and return `Either[scalatui.terminal.Base64ImagePayloadError, Image]`. **BREAKING**: protocol helpers and `Image` SHALL require `scalatui.terminal.Base64ImagePayload` rather than raw base64 `String`, and `ImageSource` SHALL store the validated payload; no compatibility overload, adapter, fallback path, or deprecation path SHALL be provided.
 
 #### Scenario: Applications can construct image options and helpers
 - **WHEN** an application depends on the optional image module and configures image rendering options
 - **THEN** it can do so from `scalatui` public types only, without JVM/Native-specific import branches
 
+#### Scenario: Application validates a raw payload
+- **WHEN** an application supplies a raw base64 string through `scalatui.terminal.Base64ImagePayload.from` or `scalatui.image.Image.fromBase64`
+- **THEN** it receives either a validated payload or a typed `scalatui.terminal.Base64ImagePayloadError` before any image component or protocol sequence is produced
+
+#### Scenario: Application encodes image bytes
+- **WHEN** an application passes image bytes to `scalatui.terminal.Base64ImagePayload.encode`
+- **THEN** it receives a validated standard-base64 payload usable by protocol helpers and `Image`
+
+#### Scenario: Breaking raw-string paths are removed
+- **WHEN** existing source passes raw base64 strings directly to protocol helpers or `Image`, or reads the `ImageSource` payload as a `String`
+- **THEN** that source must migrate to `scalatui.terminal.Base64ImagePayload` or `scalatui.image.Image.fromBase64` because no compatibility or deprecation path exists
+
 #### Scenario: Public API does not force terminal backend coupling
 - **WHEN** applications run on JVM or Scala Native
-- **THEN** image types and markdown/autocomplete models remain usable without depending on concrete terminal backend classes
+- **THEN** validated image types and markdown/autocomplete models remain usable without depending on concrete terminal backend classes
 
 #### Scenario: Core-only applications avoid image dependencies
 - **WHEN** an application does not opt into image rendering modules
-- **THEN** it can use `core` terminal capability APIs without transitively depending on image decoding, scaling, or media libraries
+- **THEN** it can use `core` terminal capability and validated image payload APIs without transitively depending on image decoding, scaling, media, or third-party base64 libraries
 
 ### Requirement: Public markdown/autocomplete contracts are composable
 The markdown and autocomplete contracts SHALL remain composable with existing `Component`, `TUI`, and effect runtimes.
@@ -361,7 +385,7 @@ The public core API SHALL expose a Scala-idiomatic opt-in option for running a `
 
 #### Scenario: Component API remains width-only
 - **WHEN** alternate-screen mode is enabled
-- **THEN** components still render through `Component.render(width): Vector[String]` without requiring a height-aware component API
+- **THEN** components still render through `Component.render(width): ComponentRender` without requiring a height-aware component API
 
 #### Scenario: API compiles on JVM and Native core
 - **WHEN** the alternate-screen option is compiled for JVM core and Scala Native core modules
@@ -383,26 +407,26 @@ The project documentation and Scaladoc SHALL describe alternate-screen mode, its
 - **THEN** it states that temporary modal alternate-screen sessions, a full-screen editor, and height-aware component rendering are not provided by this change
 
 ### Requirement: Public hardware cursor positioning option
-The public core API SHALL expose a backend-independent option for enabling or disabling marker-driven hardware cursor positioning without requiring application code to emit raw terminal escape sequences.
+The public core API SHALL expose the backend-independent `TUIOptions.hardwareCursorPositioning` option for enabling or disabling hardware cursor positioning from structured `ComponentRender.cursorPlacements`, without requiring application code to emit raw terminal escape sequences or cursor sentinel strings.
 
 #### Scenario: Default preserves existing cursor behavior
 - **WHEN** an application constructs a TUI without configuring hardware cursor positioning
-- **THEN** fake cursor rendering remains visible and no marker-derived hardware cursor movement is performed
+- **THEN** fake cursor rendering remains visible and no structured-cursor-derived hardware cursor movement is performed
 
 #### Scenario: Application opts in through public API
 - **WHEN** an application enables hardware cursor positioning through the public TUI options
-- **THEN** the shared TUI runtime uses focused editing cursor markers to place the terminal hardware cursor where supported by the backend abstraction
+- **THEN** the shared TUI runtime uses the selected surviving structured `CursorPlacement` to place the terminal hardware cursor where supported by the backend abstraction
 
 #### Scenario: API compiles on JVM and Native core
 - **WHEN** the hardware cursor positioning option is compiled for JVM core and Scala Native core modules
 - **THEN** it does not depend on JVM-only, Native-only, Node.js, or third-party runtime APIs
 
 ### Requirement: Hardware cursor positioning documentation
-The project documentation SHALL describe the hardware cursor positioning option, its opt-in default, fake-cursor preservation, and testing expectations.
+The project documentation SHALL describe `TUIOptions.hardwareCursorPositioning`, its opt-in default, fake-cursor preservation, structured cursor metadata source, ordinary-string behavior, and testing expectations.
 
 #### Scenario: Documentation lists behavior and caveats
 - **WHEN** a developer reads TUI runtime or editor documentation
-- **THEN** it explains that marker-driven hardware cursor positioning is opt-in, markers are stripped from output, and fake cursor rendering is preserved
+- **THEN** it explains that hardware cursor positioning is opt-in, uses the selected structured `CursorPlacement` rather than marker scanning, preserves fake cursor rendering, and treats ordinary former cursor bytes as inert text with no cursor authority
 
 #### Scenario: Smoke docs include IME/cursor checks
 - **WHEN** a developer performs interactive smoke testing
@@ -869,3 +893,29 @@ SelectList and SettingsList SHALL expose accepted active paste text through `que
 - **WHILE** a combined active query snapshot is cached
 - **WHEN** non-empty normalized paste text is accepted, including decoder-flush output
 - **THEN** the session immediately releases that snapshot, retains only the initial-query reference plus appended mutable text, and waits until the next read to build the replacement
+
+### Requirement: Typed component render API
+The public shared component API SHALL expose `ComponentRender`, `TerminalControlPlacement`, and read-only `TerminalRenderControl`, and **BREAKING** SHALL require `Component.render(width)` and `ComponentFrameBuilder.result()` to return the typed frame result instead of `Vector[String]`.
+
+#### Scenario: Application implements text component
+- **WHEN** application code implements a component containing ordinary text only
+- **THEN** it returns a text-only `ComponentRender` with no terminal-control values
+
+#### Scenario: Application requests supported semantic control
+- **WHEN** application code intentionally requests a supported terminal protocol through its typed helper
+- **THEN** it can place the returned semantic control without handling raw escape strings
+
+#### Scenario: Legacy render signature is absent
+- **WHEN** application code still implements `render(width): Vector[String]`
+- **THEN** compilation fails with no compatibility overload, implicit conversion, adapter, or deprecated parallel path
+
+### Requirement: Typed render API is documented
+Public render, placement, and control types SHALL include Scaladoc and project documentation covering source migration, JVM/Native scope, trust boundaries, geometry, validation failure, and explicit non-goals.
+
+#### Scenario: Migration documentation is complete
+- **WHEN** a component author reads the migration documentation
+- **THEN** it shows the direct text-only migration and explains that ordinary strings cannot request trusted terminal protocols
+
+#### Scenario: Non-goals are explicit
+- **WHEN** a developer reads terminal-control documentation
+- **THEN** it states that arbitrary trusted strings, protocol-prefix inference, compatibility rendering, and backend direct-write sanitization are not provided

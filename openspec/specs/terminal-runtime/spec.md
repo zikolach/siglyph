@@ -63,11 +63,11 @@ The library SHALL keep the terminal backend interface independent from target-sp
 - **THEN** the component rendering API and output semantics remain the same
 
 ### Requirement: Terminal protocol support
-The terminal runtime SHALL support bracketed paste, synchronized output, xterm-compatible modified keys, Kitty keyboard protocol negotiation where available, and OSC hyperlinks. Kitty/iTerm2 image escape emission SHALL be planned behind the same terminal abstraction but is not part of the first usable milestone.
+The terminal runtime SHALL support bounded bracketed-paste input, synchronized output, xterm-compatible modified keys, Kitty keyboard protocol negotiation where available, OSC hyperlinks, and typed Kitty/iTerm2 image controls behind shared terminal abstractions.
 
 #### Scenario: Bracketed paste event is preserved
 - **WHEN** a terminal sends bracketed paste start and end markers around pasted content
-- **THEN** the runtime delivers the pasted content as a paste-aware input event or equivalent editor-safe sequence
+- **THEN** the runtime emits `PasteStart`, zero or more bounded `PasteChunk` events that preserve the content exactly once, and `PasteEnd` without retaining the complete paste in transport
 
 #### Scenario: Synchronized output wraps frame writes
 - **WHEN** the renderer flushes a frame
@@ -77,6 +77,10 @@ The terminal runtime SHALL support bracketed paste, synchronized output, xterm-c
 - **WHEN** the terminal sends a Kitty CSI-u key sequence with modifiers
 - **THEN** the runtime normalizes it to the library key event model
 
+#### Scenario: Typed image controls use the semantic output path
+- **WHEN** a validated Kitty or iTerm2 image control is present in a component frame
+- **THEN** the runtime preserves it as typed semantic data and encodes it only at the final synchronized output boundary
+
 ### Requirement: Virtual terminal test backend
 The library SHALL provide a virtual terminal backend for tests that records writes, simulates dimensions, accepts scripted input, and exposes viewport state for assertions.
 
@@ -85,7 +89,7 @@ The library SHALL provide a virtual terminal backend for tests that records writ
 - **THEN** the backend exposes the written escape stream and rendered viewport for assertions
 
 ### Requirement: Buffered terminal input
-The terminal runtime SHALL buffer raw input chunks and emit complete logical input sequences before parsing them into typed terminal input events.
+The terminal runtime SHALL buffer incomplete raw input framing and emit bounded ordered typed input events without retaining complete paste or raw streams.
 
 #### Scenario: Split escape sequence
 - **WHEN** a terminal backend receives an arrow-key escape sequence split across multiple read chunks
@@ -93,11 +97,11 @@ The terminal runtime SHALL buffer raw input chunks and emit complete logical inp
 
 #### Scenario: Split bracketed paste
 - **WHEN** bracketed paste start, content, and end markers arrive across multiple chunks
-- **THEN** the runtime emits one paste event containing the full pasted content
+- **THEN** the runtime emits `PasteStart`, zero or more bounded `PasteChunk` events containing every content byte exactly once, and `PasteEnd`
 
 #### Scenario: Incomplete escape timeout
 - **WHEN** an escape sequence remains incomplete beyond the configured buffer timeout
-- **THEN** the runtime flushes the incomplete data as a raw or best-effort input event without blocking future input forever
+- **THEN** the runtime flushes the incomplete data as bounded raw or best-effort input without blocking future input forever
 
 ### Requirement: Control-key normalization
 The terminal input parser SHALL normalize supported raw ASCII control bytes into typed key events with control modifiers.
@@ -316,49 +320,19 @@ The terminal runtime SHALL continue to report image capability from environment 
 - **THEN** image-dependent code follows the injected protocol path deterministically
 
 ### Requirement: Output for protocol escapes is bounded by runtime safety expectations
-The runtime SHALL treat image escape sequences as render output and preserve existing synchronization/sanitization protections for all lines.
+The runtime SHALL keep typed image controls separate from ordinary rendered lines, sanitize ordinary lines through the established ANSI and width policy, and encode validated typed controls only within the final synchronized output boundary. Shutdown SHALL restore terminal cursor and state without requiring an image-library runtime hook.
 
-#### Scenario: Image escapes do not bypass width/sanitization flow
-- **WHEN** a frame contains image-related output
-- **THEN** the runtime applies synchronized output wrapping and over-wide sanitization semantics according to the established render safety rules
+#### Scenario: Typed image control remains outside ordinary lines
+- **WHEN** a frame contains a validated typed image control
+- **THEN** the runtime validates its geometry and encodes it through the semantic control channel without converting its protocol bytes to an ordinary line or applying ordinary-line sanitization to those bytes
+
+#### Scenario: Image-like ordinary string gains no authority
+- **WHEN** an ordinary rendered line contains bytes resembling a Kitty or iTerm2 image protocol
+- **THEN** those bytes remain ordinary text and receive only ordinary-line sanitization without typed image behavior
 
 #### Scenario: Output remains restorable on stop
-- **WHEN** interactive runtime stops while protocol-specific output may have altered cursor state
-- **THEN** existing shutdown behavior restores terminal cursor/state safely without assuming any image-library runtime hook
-
-### Requirement: Marker-driven hardware cursor positioning
-The TUI runtime SHALL provide an opt-in mode that positions the terminal hardware cursor at the focused editing cursor by scanning final rendered output for a zero-width cursor marker.
-
-#### Scenario: Hardware cursor moves to marker position
-- **WHEN** hardware cursor positioning is enabled and the final frame contains a cursor marker
-- **THEN** the runtime strips the marker from terminal output and moves the hardware cursor to the marker's row and display column after writing the frame
-
-#### Scenario: No marker preserves existing render behavior
-- **WHEN** hardware cursor positioning is enabled but the final frame contains no cursor marker
-- **THEN** the runtime writes the frame without marker-derived cursor movement and preserves existing stop-positioning behavior
-
-#### Scenario: Disabled mode strips marker without cursor movement
-- **WHEN** hardware cursor positioning is disabled and a focused component emits a cursor marker
-- **THEN** the runtime strips the marker before writing output and does not move the hardware cursor to the marker position
-
-#### Scenario: Stop still leaves terminal readable
-- **WHEN** an interactive TUI using hardware cursor positioning stops
-- **THEN** existing shutdown behavior shows the cursor, disables terminal protocols, restores terminal state, and positions the shell below the rendered TUI content
-
-### Requirement: Cursor marker scanning is ANSI and Unicode aware
-The TUI runtime SHALL locate cursor markers using display-cell coordinates while treating ANSI/control sequences and the marker itself as zero-width non-printing output.
-
-#### Scenario: ANSI styling before marker is ignored for column
-- **WHEN** a line contains ANSI styling or OSC hyperlink sequences before the cursor marker
-- **THEN** the computed hardware cursor column is based on visible display width, not raw string length
-
-#### Scenario: Wide Unicode before marker uses display width
-- **WHEN** a line contains CJK, emoji, or combining-mark grapheme clusters before the cursor marker
-- **THEN** the computed hardware cursor column matches the rendered terminal display-cell position
-
-#### Scenario: Multiple markers are stripped deterministically
-- **WHEN** multiple cursor markers are present in the final frame due to invalid component output
-- **THEN** the runtime selects the first marker in row-major order for cursor placement and strips all marker sequences from output
+- **WHEN** interactive runtime stops after typed protocol output may have altered cursor state
+- **THEN** existing shutdown behavior restores terminal cursor and state safely without assuming any image-library runtime hook
 
 ### Requirement: Typed input coverage for keybinding parity
 The terminal input model and parser SHALL support the typed key events needed by the default editor, input, and selection keybindings where those events can be recognized portably.
@@ -864,3 +838,48 @@ SttyTerminal SHALL report an actionable initial missing `/dev/tty` error, preser
 #### Scenario: Initial `/dev/tty` open fails
 - **WHEN** SttyTerminal cannot open `/dev/tty` during initial startup
 - **THEN** startup fails with an actionable diagnostic whose cause is the original error and no fallback is attempted
+
+### Requirement: Runtime separates ordinary lines from semantic controls
+The TUI runtime SHALL prepare, compare, and write ordinary rendered lines separately from typed semantic terminal controls. It SHALL NOT infer trusted controls from string prefixes or parse ordinary text into control authority.
+
+#### Scenario: Ordinary line follows text policy
+- **WHEN** a rendered ordinary line contains escape-looking image bytes
+- **THEN** it remains ordinary text and is processed only by the active ordinary-line ANSI and width policy
+
+#### Scenario: Typed control follows control policy
+- **WHEN** a prepared frame contains a valid known `TerminalRenderControl`
+- **THEN** the runtime validates its placement and encodes it through the exhaustive shared encoder during final buffer assembly
+
+### Requirement: Typed control output preserves runtime ownership
+Typed control encoding and output SHALL remain inside the existing serialized render owner, synchronized-output boundary, resize-generation check, terminal-write lock, and cleanup path.
+
+#### Scenario: Resize invalidates control frame
+- **WHEN** dimensions or resize generation change before a frame containing typed controls commits
+- **THEN** no control from the stale frame is written and a forced redraw uses current dimensions
+
+#### Scenario: Control write failure cleans up
+- **WHEN** terminal output fails while writing a frame containing typed controls
+- **THEN** the runtime records the failure and restores terminal state through the existing single-owner cleanup path
+#### Scenario: Pure control reorder triggers output
+- **WHEN** ordinary lines and control values are unchanged but the prepared control vector order changes
+- **THEN** differential rendering selects the earliest row affected by the first ordered difference and rewrites controls in the new order
+
+#### Scenario: Existing Kitty ID is cleaned before retransmission
+- **WHEN** a Kitty `a=T` control in the rewritten range uses an ID present in the previous prepared frame
+- **THEN** the runtime emits exactly one typed `a=d,d=I,i=<id>` cleanup before any replacement transmission
+
+#### Scenario: Removed Kitty ID is cleaned without replacement
+- **WHEN** an old Kitty ID is absent from the new prepared frame
+- **THEN** the runtime emits exactly one typed `a=d,d=I,i=<id>` cleanup without retransmitting the old image
+
+#### Scenario: New and out-of-range Kitty IDs are not cleaned
+- **WHEN** a transmitted Kitty ID is new or an unchanged old ID is outside the rewritten row range
+- **THEN** the runtime emits no lifecycle cleanup for that ID
+
+#### Scenario: Kitty cleanup order is deterministic
+- **WHEN** a partial, reorder, forced, resize, move, or replacement redraw retransmits multiple old Kitty IDs
+- **THEN** the runtime emits one cleanup per ID in previous-frame control order before all replacement transmissions
+
+#### Scenario: Direct terminal write remains explicit
+- **WHEN** application code bypasses TUI and calls a terminal backend write method directly
+- **THEN** that direct output is outside the component trust boundary and receives no component-render sanitization promise

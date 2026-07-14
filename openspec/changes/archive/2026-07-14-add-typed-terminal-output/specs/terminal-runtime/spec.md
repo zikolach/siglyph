@@ -1,3 +1,39 @@
+## MODIFIED Requirements
+
+### Requirement: Terminal protocol support
+The terminal runtime SHALL support bounded bracketed-paste input, synchronized output, xterm-compatible modified keys, Kitty keyboard protocol negotiation where available, OSC hyperlinks, and typed Kitty/iTerm2 image controls behind shared terminal abstractions.
+
+#### Scenario: Bracketed paste event is preserved
+- **WHEN** a terminal sends bracketed paste start and end markers around pasted content
+- **THEN** the runtime emits `PasteStart`, zero or more bounded `PasteChunk` events that preserve the content exactly once, and `PasteEnd` without retaining the complete paste in transport
+
+#### Scenario: Synchronized output wraps frame writes
+- **WHEN** the renderer flushes a frame
+- **THEN** it wraps the write with terminal synchronized output enable and disable sequences when supported
+
+#### Scenario: Kitty keyboard sequence is normalized
+- **WHEN** the terminal sends a Kitty CSI-u key sequence with modifiers
+- **THEN** the runtime normalizes it to the library key event model
+
+#### Scenario: Typed image controls use the semantic output path
+- **WHEN** a validated Kitty or iTerm2 image control is present in a component frame
+- **THEN** the runtime preserves it as typed semantic data and encodes it only at the final synchronized output boundary
+
+### Requirement: Output for protocol escapes is bounded by runtime safety expectations
+The runtime SHALL keep typed image controls separate from ordinary rendered lines, sanitize ordinary lines through the established ANSI and width policy, and encode validated typed controls only within the final synchronized output boundary. Shutdown SHALL restore terminal cursor and state without requiring an image-library runtime hook.
+
+#### Scenario: Typed image control remains outside ordinary lines
+- **WHEN** a frame contains a validated typed image control
+- **THEN** the runtime validates its geometry and encodes it through the semantic control channel without converting its protocol bytes to an ordinary line or applying ordinary-line sanitization to those bytes
+
+#### Scenario: Image-like ordinary string gains no authority
+- **WHEN** an ordinary rendered line contains bytes resembling a Kitty or iTerm2 image protocol
+- **THEN** those bytes remain ordinary text and receive only ordinary-line sanitization without typed image behavior
+
+#### Scenario: Output remains restorable on stop
+- **WHEN** interactive runtime stops after typed protocol output may have altered cursor state
+- **THEN** existing shutdown behavior restores terminal cursor and state safely without assuming any image-library runtime hook
+
 ## ADDED Requirements
 
 ### Requirement: Runtime separates ordinary lines from semantic controls

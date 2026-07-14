@@ -368,25 +368,6 @@ The `Input` and `Editor` components SHALL map advanced editing commands to the c
 - **WHEN** a terminal or parser cannot distinguish an upstream key combination reliably
 - **THEN** the Scala implementation documents the deviation and preserves the closest typed-input behavior without changing logical editing semantics
 
-### Requirement: Hardware cursor marker support
-When IME and terminal marker workflows are enabled, focused editing components SHALL emit a zero-width cursor marker in front of the visual cursor position while preserving fake-cursor rendering, and the marker SHALL be suitable for runtime hardware cursor positioning.
-
-#### Scenario: Cursor marker is emitted on focused input
-- **WHEN** an `Input` or `Editor` is focused and renders a fake cursor
-- **THEN** it includes a terminal cursor marker sequence (or equivalent marker abstraction) immediately before the fake cursor token
-
-#### Scenario: Marker does not alter semantic text
-- **WHEN** callbacks observe the submitted editor value
-- **THEN** no marker sequence appears in logical text values returned by `onSubmit` or `text` getters
-
-#### Scenario: Unfocused editors do not claim hardware cursor
-- **WHEN** an `Input` or `Editor` is not focused
-- **THEN** it does not emit a cursor marker for hardware cursor positioning
-
-#### Scenario: Autocomplete ownership suppresses editor marker when appropriate
-- **WHEN** editor autocomplete has a focus-capturing suggestion overlay that owns keyboard input
-- **THEN** the editor does not emit a stale hardware cursor marker that would compete with the active overlay focus target
-
 ### Requirement: Editor prompt history navigation parity
 The editor SHALL support upstream-compatible prompt history navigation for submitted prompts using Up and Down when the editor is empty or already browsing history at visual boundaries.
 
@@ -525,11 +506,27 @@ The multiline Editor SHALL treat one `PasteStart` through `PasteEnd` stream as o
 - **THEN** one marker stores the complete normalized content and submit or expansion recovers it exactly
 
 ### Requirement: Paste cursor accounting spans chunk boundaries
-Input paste handling SHALL carry Unicode grapheme-break state across `PasteChunk` boundaries and place the cursor after the complete grapheme sequence.
+Input paste handling SHALL carry bounded Unicode 17.0.0 UAX #29 default extended grapheme cluster state across `PasteChunk` and fragmented UTF-8 boundaries and place the cursor after the complete grapheme sequence.
 
 #### Scenario: Grapheme spans paste chunks
-- **WHEN** the code points of one grapheme cluster arrive in different paste chunks
+- **WHEN** the code points of one Unicode 17.0.0 default extended grapheme cluster arrive in different paste chunks
 - **THEN** cursor accounting counts that cluster once and places the cursor after it
+
+#### Scenario: UTF-8 spans paste chunks
+- **WHEN** the UTF-8 bytes of code points in one Unicode 17.0.0 default extended grapheme cluster arrive in different transport chunks
+- **THEN** decoding and cursor accounting preserve the complete cluster and place the cursor after it
+
+#### Scenario: Required rule interactions span chunks
+- **WHEN** Hangul, Indic conjunct, combining, GB11 extended pictographic, or regional-indicator sequences cross paste chunk boundaries
+- **THEN** Input cursor accounting produces the same cluster count and final cursor as whole-string segmentation
+
+#### Scenario: Chunking does not change accounting
+- **WHEN** the same paste is delivered whole, at every single code-point split, one code point per chunk, or with fragmented UTF-8
+- **THEN** Input and Editor place the cursor at the same final Unicode grapheme position
+
+#### Scenario: Paste accounting state remains bounded
+- **WHEN** streamed paste content grows without a core content-size limit
+- **THEN** grapheme accounting state remains bounded independently of the application-owned pasted content
 
 ### Requirement: Input paste appends incrementally
 Input SHALL use one mutable paste session containing a prefix builder, appended decoded and newline-normalized paste text, and one retained suffix. It SHALL finalize that session once at `PasteEnd` or before handling a non-paste interruption.
@@ -586,3 +583,62 @@ Input SHALL use one mutable paste session containing a prefix builder, appended 
 #### Scenario: Filter paste framing is irregular
 - **WHEN** paste is empty, a chunk or end is orphaned, or start repeats
 - **THEN** empty and orphan events are no-ops and repeated start commits prior accepted content before opening a new session
+
+### Requirement: Insertion cursor follows final grapheme segmentation
+Input, EditorBuffer, and Editor SHALL place the cursor at the first final grapheme boundary at or after the insertion end after resegmenting the resulting value.
+
+#### Scenario: Inserted text joins neighboring graphemes
+- **WHEN** typed, programmatic, or streamed inserted code points join the left neighbor, right neighbor, or both through combining, prepend, Hangul, Indic, GB11, or regional-indicator rules
+- **THEN** the cursor is a valid boundary in the final segmentation immediately after the resulting joined cluster
+- **AND** immediate backward deletion removes the cluster before that cursor
+
+### Requirement: Input yank-pop restores the pre-yank state
+Input SHALL retain the exact pre-yank `Input.State` after a successful yank. Yank-pop SHALL restore
+that state before inserting the rotated kill-ring candidate. Another completed editing action SHALL
+clear the retained yank base.
+
+#### Scenario: Yanked text joins neighboring graphemes
+- **WHEN** yanked text joins a left or right neighbor through combining, prepend, Hangul, Indic, GB11, or regional-indicator rules
+- **THEN** yank-pop restores the original value and cursor before inserting the rotated candidate
+- **AND** original neighboring content survives replacement
+
+#### Scenario: Repeated yank-pop uses one base state
+- **WHEN** yank-pop runs repeatedly after one successful yank
+- **THEN** each rotated candidate replaces the prior yank from the same exact pre-yank state
+
+#### Scenario: Another edit ends the yank chain
+- **WHEN** another editing action completes after yank
+- **THEN** the retained pre-yank state is cleared and yank-pop does not replace text
+
+### Requirement: Editing cursor metadata follows visible fake cursor ownership
+Focused Input and Editor SHALL attach structured frame-relative cursor metadata only when they own
+input. Normal rows SHALL attach a candidate only when the complete fake cursor token survives width
+truncation. A focused Editor positive impossible-width owner row SHALL attach column-zero metadata
+without printable fake-cursor content. Editor width zero or below, unfocused rendering, and
+autocomplete-owned rendering SHALL attach no cursor metadata.
+
+#### Scenario: Focused normal-width cursor survives
+- **WHEN** a focused Input or Editor fake cursor fits within the requested width
+- **THEN** rendering attaches its zero-based display-cell coordinate
+
+#### Scenario: Normal cursor token is truncated
+- **WHEN** width truncation omits the complete fake cursor token
+- **THEN** the normal row contains no cursor metadata
+
+#### Scenario: Editor impossible-width row owns the cursor
+- **WHEN** a focused Editor cursor owns a blank row for an over-wide cluster and autocomplete does not own input
+- **THEN** rendering attaches cursor metadata at column zero without printable fake-cursor content
+
+#### Scenario: Editing component does not own input
+- **WHEN** Input or Editor is unfocused, or Editor autocomplete owns input
+- **THEN** rendering attaches no cursor metadata
+
+### Requirement: EditorBuffer source remains exact through display projection
+EditorBuffer SHALL retain exact unlimited source text and Unicode 17.0.0 source-grapheme cursor
+positions. ANSI sanitization and Editor display projection SHALL NOT mutate, truncate, replace, or
+cap retained source.
+
+#### Scenario: Rejected source expands to several display units
+- **WHEN** one retained source range sanitizes to several visible graphemes or wrapped rows
+- **THEN** EditorBuffer text and cursor positions remain exact
+- **AND** display projection owns every output unit with the original half-open source range
