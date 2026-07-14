@@ -127,6 +127,25 @@ The editor SHALL scan each complete joined logical line once through the existin
 - **THEN** layout flushes the zero-width content before the over-wide blank owner row
 - **AND** logical ownership, visual order, and cursor mapping follow source order
 
+### Requirement: Editor visual layout micro-parity audit
+The project SHALL audit upstream editor visual layout behaviors against local component rendering tests and classify each reviewed behavior as exactly one of: already covered, missing test only, behavior gap, or intentional deviation.
+
+#### Scenario: Visual layout behavior is already covered
+- **WHEN** upstream editor wrapping, cursor placement, or Unicode layout behavior has an equivalent local test and matching behavior
+- **THEN** the audit records the behavior as already covered with source references
+
+#### Scenario: Visual layout lacks only a test
+- **WHEN** local editor rendering behavior matches upstream but no focused local test exists
+- **THEN** the audit records missing test only and adds or schedules the focused test
+
+#### Scenario: Visual layout behavior gap is found
+- **WHEN** local editor rendering differs from upstream without an intentional deviation
+- **THEN** the audit records behavior gap and creates follow-up OpenSpec work instead of changing behavior in the audit
+
+#### Scenario: Visual layout intentional deviation is found
+- **WHEN** local rendering intentionally differs from upstream because of fake cursor, structured hardware cursor metadata, or typed component contracts
+- **THEN** the audit records intentional deviation and updates porting notes
+
 ### Requirement: Editor fake cursor rendering
 The editor SHALL render a visible fake cursor using inverse-video styling within the component output. When the cursor-owned complete grapheme cluster fits the requested width, existing fake-cursor behavior SHALL remain unchanged. When that cluster cannot fit atomically on an empty requested row, the editor SHALL omit its printable output while preserving logical ownership, deterministic zero-width cursor placement, and unchanged buffer text. It SHALL NOT emit a partial cluster, replacement glyph, fallback glyph, or over-wide line.
 
@@ -158,6 +177,8 @@ The editor SHALL render a visible fake cursor using inverse-video styling within
 #### Scenario: Width-zero child remains valid in Box
 - **WHEN** a default-padded width-one Box renders a focused Editor with an over-wide source cluster
 - **THEN** the translated outer frame remains valid without filtering candidates or weakening validation
+
+## ADDED Requirements
 
 ### Requirement: Strict ordinary-line terminal metadata allowlist
 In ordinary `ComponentRender.lines`, only bounded validated atomic ESC-form SGR and OSC 8 open/close metadata SHALL remain executable. Rejected ESC-form and C1-introduced string controls SHALL remain one inert candidate through their defined terminator or the remaining unterminated input. Former cursor APC bytes SHALL remain visible inert text and SHALL NOT influence cursor metadata. Closed typed `TerminalRenderControl` values SHALL remain separate from ordinary strings and SHALL be encoded through the trusted semantic channel at the final TUI output boundary. Structured cursor metadata SHALL encode no protocol bytes and SHALL NOT use `TerminalRenderControl`.
@@ -298,3 +319,9 @@ TUI frame preparation SHALL sanitize lines independently and select the first su
 - **WHEN** a frame contains typed controls and a structured cursor
 - **THEN** typed controls retain semantic output order
 - **AND** final hardware cursor positioning occurs after frame content
+
+## REMOVED Requirements
+
+### Requirement: Final frame cursor marker handling
+**Reason**: String cursor markers and final-frame marker scanning were removed and are fully superseded by structured frame-relative cursor metadata.
+**Migration**: Emit `CursorPlacement` candidates in `ComponentRender.cursorPlacements`; use `Overlay cursor occlusion` to remove covered candidates and `Prepared and differential cursor rendering` for final selection and opt-in hardware cursor movement.

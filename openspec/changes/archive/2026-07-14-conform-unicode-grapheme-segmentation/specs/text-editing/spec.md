@@ -23,6 +23,8 @@ Input paste handling SHALL carry bounded Unicode 17.0.0 UAX #29 default extended
 - **WHEN** streamed paste content grows without a core content-size limit
 - **THEN** grapheme accounting state remains bounded independently of the application-owned pasted content
 
+## ADDED Requirements
+
 ### Requirement: Insertion cursor follows final grapheme segmentation
 Input, EditorBuffer, and Editor SHALL place the cursor at the first final grapheme boundary at or after the insertion end after resegmenting the resulting value.
 
@@ -81,3 +83,9 @@ cap retained source.
 - **WHEN** one retained source range sanitizes to several visible graphemes or wrapped rows
 - **THEN** EditorBuffer text and cursor positions remain exact
 - **AND** display projection owns every output unit with the original half-open source range
+
+## REMOVED Requirements
+
+### Requirement: Hardware cursor marker support
+**Reason**: Focused editing components no longer emit a string cursor sentinel. The public `CursorMarker` object and its sentinel APIs were removed with no compatibility path.
+**Migration**: Focused Input and Editor rendering SHALL attach structured `CursorPlacement` values according to `Editing cursor metadata follows visible fake cursor ownership`. Ordinary former cursor bytes remain inert text.

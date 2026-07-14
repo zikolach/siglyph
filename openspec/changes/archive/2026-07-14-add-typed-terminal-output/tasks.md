@@ -76,3 +76,8 @@
 - [x] 10.4 Add shared JVM/Native protocol, lifecycle, validation-confidentiality, overlay, and control-string tests.
 - [x] 10.5 Update public documentation and OpenSpec lifecycle and bounded-diagnostic contracts.
 - [x] 10.6 Run focused JVM/Native tests, full compile and PTY tests, formatting, Scalafix, strict OpenSpec validation, dependency inspection, and diff checks before marking these tasks complete.
+
+## 11. Repair Archive Spec Semantics
+
+- [x] 11.1 Correct the promoted width-only component signature, bounded bracketed-paste protocol wording, and ordinary-versus-typed image output boundary in source deltas without changing implementation behavior.
+- [x] 11.2 Run strict change and repository OpenSpec validation plus scoped diff and whitespace checks before archive.
