@@ -415,12 +415,13 @@ class AnsiSuite extends munit.FunSuite:
     assertEquals(Ansi.sliceByColumns(source, start, 1), Ansi.Slice(red + "b" + Ansi.Reset, 1))
 
   test("long equivalent SGR histories have fixed normalized replay"):
-    val history = Vector.fill(1000000)("\u001b[31m\u001b[1m").mkString
-    val lines   = Ansi.wrapTextWithAnsi(history + "ab", 1)
+    val history       = "\u001b[31m\u001b[1m".repeat(1000000)
+    val lines         = Ansi.wrapTextWithAnsi(history + "ab", 1)
+    val retainedState = Ansi.retainedStateAfter(history)
     assertEquals(lines(1), "\u001b[31m\u001b[1mb" + Ansi.Reset)
     assert(lines(1).length < 32, lines(1).length.toString)
-    assertEquals(Ansi.retainedStateAfter(history).sgrSlots, 2)
-    assert(Ansi.retainedStateAfter(history).sgrSlots <= 17)
+    assertEquals(retainedState.sgrSlots, 2)
+    assert(retainedState.sgrSlots <= 17)
 
   test("large OSC is inert and unterminated OSC and APC are visible once"):
     val oversized = "\u001b]8;;" + "x".repeat(5000) + "\u001b\\"
