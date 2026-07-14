@@ -97,6 +97,13 @@ final class VirtualTerminal(initialColumns: Int = 80, initialRows: Int = 24)
           index += TerminalCursorProtocol.CursorPositionQuery.length
         case '\u001b' if index + 1 < data.length && data.charAt(index + 1) === '['          =>
           index = processCsi(data, index)
+        case '\u001b' if index + 1 < data.length && data.charAt(index + 1) === ']'          =>
+          index = processStringControl(data, index, allowsBel = true)
+        case '\u001b'
+            if index + 1 < data.length && isStringControlIntroducer(data.charAt(index + 1)) =>
+          index = processStringControl(data, index, allowsBel = false)
+        case '\u001b' if index + 1 < data.length                                            =>
+          index += 2
         case '\r'                                                                           =>
           cursorCol = 0
           index += 1
@@ -123,6 +130,25 @@ final class VirtualTerminal(initialColumns: Int = 80, initialRows: Int = 24)
         case 'H' => setCursorPosition(0, 0)
         case _   => ()
       index + 1
+
+  private def processStringControl(data: String, start: Int, allowsBel: Boolean): Int =
+    var index    = start + 2
+    var endIndex = data.length
+    var complete = false
+    while index < data.length && !complete do
+      if allowsBel && data.charAt(index) === '\u0007' then
+        endIndex = index + 1
+        complete = true
+      else if data.charAt(index) === '\u001b' && index + 1 < data.length &&
+        data.charAt(index + 1) === '\\'
+      then
+        endIndex = index + 2
+        complete = true
+      else index += 1
+    endIndex
+
+  private def isStringControlIntroducer(ch: Char): Boolean =
+    ch === 'P' || ch === '_' || ch === '^' || ch === 'X'
 
   private def csiAmount(body: String): Int =
     val digits = body.takeWhile(_.isDigit)

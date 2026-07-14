@@ -59,3 +59,4 @@
 - [x] 8.1 Clarify that unknown mouse button values exclude SGR modifier and action flags, and add focused parser regression coverage.
 - [x] 8.2 Clarify that terminal mouse reporting configuration records start/stop lifecycle intent rather than immediately toggling a running backend.
 - [x] 8.3 Integrate retained mouse layout with typed component output and migrate the mouse demo after rebasing onto the typed-rendering API.
+- [x] 8.4 Keep VirtualTerminal cursor reports stable across OSC and string-control output used by rendered frames.

@@ -47,6 +47,24 @@ class VirtualTerminalSuite extends munit.FunSuite:
 
     assertEquals(terminal.output, "\u001b]0;safetitle\u0007")
 
+  test("OSC and string-control output does not advance the emulated cursor"):
+    val terminal = VirtualTerminal(80, 24)
+    var inputs   = Vector.empty[TerminalInput]
+    terminal.start(input => inputs :+= input, () => ())
+
+    terminal.write("abc")
+    terminal.setTitle("title")
+    terminal.setProgress(active = true)
+    terminal.write("\u001b_ignored-apc\u001b\\")
+    terminal.write(TerminalCursorProtocol.CursorPositionQuery)
+
+    val report = inputs.collect { case TerminalInput.RawChunk(chunk) => chunk.toArray }.flatten
+    assertEquals(
+      String(report.toArray, java.nio.charset.StandardCharsets.UTF_8),
+      "\u001b[1;4R"
+    )
+    terminal.stop()
+
   test("start and output-side operations do not synchronously deliver registered callbacks"):
     val terminal        = VirtualTerminal(80, 24)
     val caller          = Thread.currentThread()
