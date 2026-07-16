@@ -5,6 +5,7 @@ import scalatui.syntax.Equality.*
 
 import java.io.{IOException, OutputStream, PrintStream}
 import java.util.concurrent.{CountDownLatch, TimeUnit}
+import java.util.concurrent.atomic.AtomicReference
 
 class PosixTerminalSuite extends munit.FunSuite:
   test("output-side capabilities do not require or invoke callback delivery"):
@@ -95,11 +96,12 @@ class PosixTerminalSuite extends munit.FunSuite:
     finally terminal.stop()
 
   test("restart rejects a live old Native flush worker"):
-    val terminal = PosixTerminal(initialColumns = 80, initialRows = 24)
-    val started  = CountDownLatch(1)
-    val release  = CountDownLatch(1)
-    val stopped  = CountDownLatch(1)
-    val worker   = Thread(
+    val terminal      = PosixTerminal(initialColumns = 80, initialRows = 24)
+    val started       = CountDownLatch(1)
+    val release       = CountDownLatch(1)
+    val stopped       = CountDownLatch(1)
+    val workerFailure = AtomicReference[Option[Throwable]](None)
+    val worker        = Thread(
       () =>
         try
           started.countDown()
@@ -109,6 +111,7 @@ class PosixTerminalSuite extends munit.FunSuite:
             release.getCount <= 0L,
             "synthetic old Native flush worker was not released"
           )
+        catch case failure: Throwable => workerFailure.set(Some(failure))
         finally stopped.countDown(),
       "old-posix-flush-worker"
     )
@@ -130,6 +133,7 @@ class PosixTerminalSuite extends munit.FunSuite:
       )
       worker.join(5000)
       assert(!worker.isAlive, "synthetic old Native flush worker did not terminate")
+      workerFailure.get().foreach(throw _)
 
   test("cleanup retries only the failed Native obligation and rejects restart until it succeeds"):
     Vector("input", "kitty", "paste", "termios").foreach { failedObligation =>

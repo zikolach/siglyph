@@ -74,7 +74,7 @@ private def runScalafix(): Unit =
       exec scalafix "$@"
     fi
     if command -v cs >/dev/null 2>&1; then
-      exec cs launch ch.epfl.scala:scalafix-cli_2.13:0.14.6 -- "$@"
+      exec cs launch scalafix:0.14.6 -- "$@"
     fi
     echo "scalafix or coursier (cs) is required" >&2
     exit 1
