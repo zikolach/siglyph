@@ -3,13 +3,16 @@ package scalatui.components
 import scalatui.TestInputStreams
 
 import scalatui.ansi.Ansi
-import scalatui.core.CursorPlacement
+import scalatui.core.{CursorPlacement, InputResult}
 import scalatui.terminal.{
   KeyDescriptor,
+  KeyEventType,
+  KeybindingCommand,
   KeybindingManager,
   KeyModifiers,
   TerminalInput,
-  TerminalKey
+  TerminalKey,
+  TerminalRawKind
 }
 
 class ComponentsSuite extends munit.FunSuite:
@@ -132,6 +135,249 @@ class ComponentsSuite extends munit.FunSuite:
 
     assertEquals(input.value, "\nb")
     assertEquals(submitted, "\nb")
+
+  test("input supported command table returns Render for mutations and submit"):
+    val trigger = KeyDescriptor(TerminalKey.Function(99))
+    final case class CommandCase(
+        name: String,
+        command: KeybindingCommand,
+        prepare: KeybindingManager => Input
+    )
+
+    val cases = Vector(
+      CommandCase(
+        "undo",
+        KeybindingCommand.EditorUndo,
+        manager =>
+          val input = Input(keybindings = manager)
+          input.handleInput(TerminalInput.Key(TerminalKey.Character("x")))
+          input
+      ),
+      CommandCase(
+        "delete word backward",
+        KeybindingCommand.EditorDeleteWordBackward,
+        Input(
+          "one two",
+          _
+        )
+      ),
+      CommandCase("delete to line start", KeybindingCommand.EditorDeleteToLineStart, Input("x", _)),
+      CommandCase(
+        "delete to line end",
+        KeybindingCommand.EditorDeleteToLineEnd,
+        manager =>
+          val input = Input("x", manager)
+          input.handleInput(TerminalInput.Key(TerminalKey.Home))
+          input
+      ),
+      CommandCase(
+        "delete char forward",
+        KeybindingCommand.EditorDeleteCharForward,
+        manager =>
+          val input = Input("x", manager)
+          input.handleInput(TerminalInput.Key(TerminalKey.Home))
+          input
+      ),
+      CommandCase(
+        "delete word forward",
+        KeybindingCommand.EditorDeleteWordForward,
+        manager =>
+          val input = Input("one two", manager)
+          input.handleInput(TerminalInput.Key(TerminalKey.Home))
+          input
+      ),
+      CommandCase(
+        "delete char backward",
+        KeybindingCommand.EditorDeleteCharBackward,
+        Input("x", _)
+      ),
+      CommandCase(
+        "yank",
+        KeybindingCommand.EditorYank,
+        manager =>
+          val input = Input("kill", manager)
+          input.handleInput(
+            TerminalInput.Key(TerminalKey.Character("u"), KeyModifiers(ctrl = true))
+          )
+          input.setValue("base")
+          input
+      ),
+      CommandCase(
+        "yank pop",
+        KeybindingCommand.EditorYankPop,
+        manager =>
+          val input = Input("first", manager)
+          input.handleInput(
+            TerminalInput.Key(TerminalKey.Character("u"), KeyModifiers(ctrl = true))
+          )
+          input.setValue("second")
+          input.handleInput(
+            TerminalInput.Key(TerminalKey.Character("u"), KeyModifiers(ctrl = true))
+          )
+          input.setValue("base")
+          input.handleInput(
+            TerminalInput.Key(TerminalKey.Character("y"), KeyModifiers(ctrl = true))
+          )
+          input
+      ),
+      CommandCase("word left", KeybindingCommand.EditorCursorWordLeft, Input("one two", _)),
+      CommandCase(
+        "word right",
+        KeybindingCommand.EditorCursorWordRight,
+        manager =>
+          val input = Input("one two", manager)
+          input.handleInput(TerminalInput.Key(TerminalKey.Home))
+          input
+      ),
+      CommandCase("left", KeybindingCommand.EditorCursorLeft, Input("x", _)),
+      CommandCase(
+        "right",
+        KeybindingCommand.EditorCursorRight,
+        manager =>
+          val input = Input("x", manager)
+          input.handleInput(TerminalInput.Key(TerminalKey.Home))
+          input
+      ),
+      CommandCase("line start", KeybindingCommand.EditorCursorLineStart, Input("x", _)),
+      CommandCase(
+        "line end",
+        KeybindingCommand.EditorCursorLineEnd,
+        manager =>
+          val input = Input("x", manager)
+          input.handleInput(TerminalInput.Key(TerminalKey.Home))
+          input
+      ),
+      CommandCase("submit", KeybindingCommand.InputSubmit, Input("value", _)),
+      CommandCase("newline", KeybindingCommand.InputNewLine, Input("value", _))
+    )
+
+    cases.foreach { commandCase =>
+      val manager = KeybindingManager(Map(commandCase.command -> Vector(trigger)))
+      val input   = commandCase.prepare(manager)
+      var submits = 0
+      input.onSubmit = _ => submits += 1
+
+      assertEquals(
+        input.handleInputResult(TerminalInput.Key(trigger.key, trigger.modifiers)),
+        InputResult.Render,
+        commandCase.name
+      )
+      val expectedSubmits = commandCase.command match
+        case KeybindingCommand.InputSubmit => 1
+        case _                             => 0
+      assertEquals(submits, expectedSubmits, commandCase.name)
+    }
+
+  test("input mutation commands return NoRender when exposed state cannot change"):
+    val trigger  = KeyDescriptor(TerminalKey.Function(99))
+    val commands = Vector(
+      KeybindingCommand.EditorUndo,
+      KeybindingCommand.EditorDeleteWordBackward,
+      KeybindingCommand.EditorDeleteToLineStart,
+      KeybindingCommand.EditorDeleteToLineEnd,
+      KeybindingCommand.EditorDeleteCharForward,
+      KeybindingCommand.EditorDeleteWordForward,
+      KeybindingCommand.EditorDeleteCharBackward,
+      KeybindingCommand.EditorYank,
+      KeybindingCommand.EditorYankPop,
+      KeybindingCommand.EditorCursorWordLeft,
+      KeybindingCommand.EditorCursorWordRight,
+      KeybindingCommand.EditorCursorLeft,
+      KeybindingCommand.EditorCursorRight,
+      KeybindingCommand.EditorCursorLineStart,
+      KeybindingCommand.EditorCursorLineEnd
+    )
+
+    commands.foreach { command =>
+      val input   = Input(keybindings = KeybindingManager(Map(command -> Vector(trigger))))
+      var submits = 0
+      input.onSubmit = _ => submits += 1
+
+      assertEquals(
+        input.handleInputResult(TerminalInput.Key(trigger.key, trigger.modifiers)),
+        InputResult.NoRender,
+        command.id
+      )
+      assertEquals(submits, 0, command.id)
+    }
+
+  test("input preserves command dispatch precedence for conflicting custom bindings"):
+    val trigger  = KeyDescriptor(TerminalKey.Function(99))
+    val commands = Vector(
+      KeybindingCommand.EditorUndo,
+      KeybindingCommand.EditorDeleteWordBackward,
+      KeybindingCommand.EditorDeleteToLineStart,
+      KeybindingCommand.EditorDeleteToLineEnd,
+      KeybindingCommand.EditorDeleteCharForward,
+      KeybindingCommand.EditorDeleteWordForward,
+      KeybindingCommand.EditorDeleteCharBackward,
+      KeybindingCommand.EditorYank,
+      KeybindingCommand.EditorYankPop,
+      KeybindingCommand.EditorCursorWordLeft,
+      KeybindingCommand.EditorCursorWordRight,
+      KeybindingCommand.EditorCursorLeft,
+      KeybindingCommand.EditorCursorRight,
+      KeybindingCommand.EditorCursorLineStart,
+      KeybindingCommand.EditorCursorLineEnd,
+      KeybindingCommand.InputSubmit,
+      KeybindingCommand.InputNewLine
+    )
+    val manager  = KeybindingManager(commands.map(_ -> Vector(trigger)).toMap)
+    val input    = Input(keybindings = manager)
+    input.handleInput(TerminalInput.Key(TerminalKey.Character("x")))
+    var submits  = 0
+    input.onSubmit = _ => submits += 1
+
+    assertEquals(
+      input.handleInputResult(TerminalInput.Key(trigger.key, trigger.modifiers)),
+      InputResult.Render
+    )
+    assertEquals(input.value, "")
+    assertEquals(submits, 0)
+
+  test("input classifies printable fallback and unsupported input precisely"):
+    val input   = Input()
+    var submits = 0
+    input.onSubmit = _ => submits += 1
+
+    assertEquals(
+      input.handleInputResult(TerminalInput.Key(TerminalKey.Character("x"))),
+      InputResult.Render
+    )
+    assertEquals(
+      input.handleInputResult(TerminalInput.Key(TerminalKey.Character(""))),
+      InputResult.NoRender
+    )
+    assertEquals(
+      input.handleInputResult(TerminalInput.Key(TerminalKey.Tab)),
+      InputResult.Ignored
+    )
+    assertEquals(
+      input.handleInputResult(TerminalInput.RawStart(TerminalRawKind.Csi)),
+      InputResult.Ignored
+    )
+    assertEquals(
+      input.handleInputResult(TerminalInput.KeyEvent(
+        TerminalKey.Character("r"),
+        eventType = KeyEventType.Release
+      )),
+      InputResult.Render
+    )
+    assertEquals(input.value, "xr")
+    assertEquals(submits, 0)
+
+  test("input submit returns Render once and propagates callback failures"):
+    val input   = Input("value")
+    var submits = 0
+    input.onSubmit = _ =>
+      submits += 1
+      throw IllegalStateException("submit failed")
+
+    val failure = intercept[IllegalStateException] {
+      input.handleInputResult(TerminalInput.Key(TerminalKey.Enter))
+    }
+    assertEquals(failure.getMessage, "submit failed")
+    assertEquals(submits, 1)
 
   test("focused input emits structural cursor metadata without changing semantic value"):
     val input    = Input("ab")

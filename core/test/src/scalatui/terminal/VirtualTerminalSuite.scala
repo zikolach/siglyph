@@ -9,6 +9,12 @@ class VirtualTerminalSuite extends munit.FunSuite:
     assertEquals(terminal.output.contains("\u001b[31m"), true)
     assertEquals(terminal.viewportLines, Vector("second", "third"))
 
+  test("virtual terminal viewport strips only CSI controls with the Native-compatible regex"):
+    val terminal = VirtualTerminal(initialColumns = 80, initialRows = 1)
+    terminal.write("plain\u001b[31mred\u001b[0m:\u001b[?25lhidden\u001b[2;3Hdone")
+
+    assertEquals(terminal.viewportLines, Vector("plainred:hiddendone"))
+
   test("virtual terminal delivers input and resize callbacks"):
     val terminal = VirtualTerminal(80, 24)
     var inputs   = Vector.empty[TerminalInput]

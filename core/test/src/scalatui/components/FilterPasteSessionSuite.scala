@@ -258,6 +258,36 @@ class FilterPasteSessionSuite extends munit.FunSuite:
     assertEquals(select.query, "ab")
     assertEquals(settings.query, "ab")
 
+  test("select list unsupported interruption reflects only paste finalization mutation"):
+    val empty        = SelectList(
+      Vector(SelectItem("alpha", "Alpha")),
+      SelectListOptions(filtering = SelectListFiltering.Containment)
+    )
+    var emptyChanges = 0
+    empty.onSelectionChange = _ => emptyChanges += 1
+    empty.handleInputResult(TerminalInput.PasteStart)
+    assertEquals(
+      empty.handleInputResult(TerminalInput.Key(TerminalKey.Tab)),
+      InputResult.NoRender
+    )
+    assertEquals(empty.query, "")
+    assertEquals(emptyChanges, 0)
+
+    val changed = SelectList(
+      Vector(SelectItem("alpha", "Alpha"), SelectItem("beta", "Beta")),
+      SelectListOptions(filtering = SelectListFiltering.Containment)
+    )
+    var changes = Vector.empty[Option[SelectItem]]
+    changed.onSelectionChange = item => changes :+= item
+    changed.handleInputResult(TerminalInput.PasteStart)
+    assertEquals(changed.handleInputResult(pasteChunk("z")), InputResult.NoRender)
+    assertEquals(
+      changed.handleInputResult(TerminalInput.Key(TerminalKey.Tab)),
+      InputResult.Render
+    )
+    assertEquals(changed.query, "z")
+    assertEquals(changes, Vector(None))
+
   test("settings public filter mutations clear or commit active paste state"):
     val list = SettingsList(
       Vector(SettingItem("alpha", "Alpha", "on")),

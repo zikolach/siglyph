@@ -8,7 +8,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 @main def keyTester(): Unit =
   val running  = AtomicBoolean(true)
   val terminal = SttyTerminal()
-  println("scala-tui key tester — press Escape to exit")
+  println("siglyph key tester — press Escape to exit")
   terminal.start(
     input =>
       println(describe(input))

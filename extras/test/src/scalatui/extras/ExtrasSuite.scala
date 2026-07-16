@@ -1,6 +1,7 @@
 package scalatui.extras
 
 import scalatui.ansi.Ansi
+import scalatui.syntax.Equality.*
 
 class ExtrasSuite extends munit.FunSuite:
   test("expandable text renders collapsed and expanded states within width"):
@@ -20,6 +21,71 @@ class ExtrasSuite extends munit.FunSuite:
 
     val narrow = text.render(8).lines
     assert(narrow.forall(Ansi.visibleWidth(_) <= 8), narrow.toString)
+
+  test("expandable text constrains final plain and ANSI-themed lines at all widths"):
+    val red  = "\u001b[31m"
+    val text = ExpandableText(
+      "collapsed",
+      "expanded",
+      initiallyExpanded = false,
+      paddingY = 1,
+      theme = ExpandableTextTheme(
+        collapsed = line => s">$line<",
+        expanded = line => s"$red+$line-$red${Ansi.Reset}"
+      )
+    )
+
+    val normal = text.render(12).lines
+    assert(normal.exists(line => Ansi.strip(line).startsWith(">")), normal.toString)
+    assert(normal.forall(Ansi.visibleWidth(_) <= 12), normal.toString)
+
+    val narrow = text.render(1).lines
+    assert(narrow.forall(Ansi.visibleWidth(_) <= 1), narrow.toString)
+
+    val zero = text.render(0).lines
+    assert(zero.forall(Ansi.visibleWidth(_) === 0), zero.toString)
+
+    text.setExpanded(true)
+    val styled = text.render(12).lines
+    assert(styled.exists(_.startsWith(red)), styled.toString)
+    assert(styled.filter(_.startsWith(red)).forall(_.endsWith(Ansi.Reset)), styled.toString)
+    assert(styled.forall(Ansi.visibleWidth(_) <= 12), styled.toString)
+
+    val styledNarrow = text.render(1).lines
+    assert(styledNarrow.forall(Ansi.visibleWidth(_) <= 1), styledNarrow.toString)
+
+    val styledZero = text.render(0).lines
+    assert(styledZero.forall(Ansi.visibleWidth(_) === 0), styledZero.toString)
+
+  test("expandable text keeps theme callback invocation count and order"):
+    var callbacks = Vector.empty[String]
+    val text      = ExpandableText(
+      "collapsed",
+      "expanded",
+      paddingY = 1,
+      theme = ExpandableTextTheme(
+        collapsed = line =>
+          callbacks :+= s"collapsed:$line"
+          line
+        ,
+        expanded = line =>
+          callbacks :+= s"expanded:$line"
+          line
+      )
+    )
+
+    text.render(12)
+    assertEquals(callbacks.map(_.takeWhile(_ !== ':')), Vector("collapsed", "collapsed"))
+
+    text.render(12)
+    assertEquals(callbacks.map(_.takeWhile(_ !== ':')), Vector("collapsed", "collapsed"))
+
+    text.setExpanded(true)
+    text.render(12)
+    assertEquals(
+      callbacks.map(_.takeWhile(_ !== ':')),
+      Vector("collapsed", "collapsed", "expanded", "expanded")
+    )
 
   test("expandable text updates cached output when state or provider output changes"):
     var collapsedValue = "one"
@@ -69,6 +135,86 @@ class ExtrasSuite extends munit.FunSuite:
     val narrow = section.render(1).lines
     assert(narrow.nonEmpty)
     assert(narrow.forall(Ansi.visibleWidth(_) <= 1), narrow.toString)
+
+  test("expandable section constrains every final themed block at all widths"):
+    val cyan    = "\u001b[36m"
+    val section = ExpandableSection(
+      "Title",
+      "collapsed",
+      "expanded",
+      hintText = Some("hint"),
+      hintVisibility = ExpansionHintVisibility.Always,
+      theme = ExpandableSectionTheme(
+        title = line => s">$line",
+        collapsedBody = line => s"$line<",
+        expandedBody = line => s"$cyan+$line-${Ansi.Reset}",
+        hint = line => s"$cyan!$line?${Ansi.Reset}"
+      )
+    )
+
+    val normal = section.render(10).lines
+    assert(normal.exists(line => Ansi.strip(line).startsWith(">")), normal.toString)
+    assert(normal.exists(_.startsWith(cyan)), normal.toString)
+    assert(normal.filter(_.startsWith(cyan)).forall(_.endsWith(Ansi.Reset)), normal.toString)
+    assert(normal.forall(Ansi.visibleWidth(_) <= 10), normal.toString)
+
+    val narrow = section.render(1).lines
+    assert(narrow.forall(Ansi.visibleWidth(_) <= 1), narrow.toString)
+
+    val zero = section.render(0).lines
+    assert(zero.forall(Ansi.visibleWidth(_) === 0), zero.toString)
+
+    section.setExpanded(true)
+    val expanded = section.render(10).lines
+    assert(expanded.count(_.startsWith(cyan)) >= 2, expanded.toString)
+    assert(expanded.filter(_.startsWith(cyan)).forall(_.endsWith(Ansi.Reset)), expanded.toString)
+    assert(expanded.forall(Ansi.visibleWidth(_) <= 10), expanded.toString)
+
+    val expandedNarrow = section.render(1).lines
+    assert(expandedNarrow.forall(Ansi.visibleWidth(_) <= 1), expandedNarrow.toString)
+
+    val expandedZero = section.render(0).lines
+    assert(expandedZero.forall(Ansi.visibleWidth(_) === 0), expandedZero.toString)
+
+  test("expandable section keeps theme callback invocation order"):
+    var callbacks = Vector.empty[String]
+    val section   = ExpandableSection(
+      "Title",
+      "collapsed",
+      "expanded",
+      hintText = Some("hint"),
+      hintVisibility = ExpansionHintVisibility.Always,
+      theme = ExpandableSectionTheme(
+        title = line =>
+          callbacks :+= "title"
+          line
+        ,
+        collapsedBody = line =>
+          callbacks :+= "collapsedBody"
+          line
+        ,
+        expandedBody = line =>
+          callbacks :+= "expandedBody"
+          line
+        ,
+        hint = line =>
+          callbacks :+= "hint"
+          line
+      )
+    )
+
+    section.render(20)
+    assertEquals(callbacks, Vector("title", "collapsedBody", "hint"))
+
+    section.render(20)
+    assertEquals(callbacks, Vector("title", "collapsedBody", "hint"))
+
+    section.setExpanded(true)
+    section.render(20)
+    assertEquals(
+      callbacks,
+      Vector("title", "collapsedBody", "hint", "title", "expandedBody", "hint")
+    )
 
   test("expandable section supports configured hint visibility"):
     val section = ExpandableSection(

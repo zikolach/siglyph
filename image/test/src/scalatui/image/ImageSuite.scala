@@ -135,6 +135,137 @@ class ImageSuite extends munit.FunSuite:
     )
     assertEquals(TerminalRenderControlEncoder.encode(cleanup), "\u001b_Ga=d,d=I,i=42\u001b\\")
 
+  test("supported image protocols retain control output through the 10000-row boundary"):
+    val dimensions = ImageDimensions(widthPx = 1, heightPx = Image.MaxRenderedFrameRows)
+    val options    = ImageRenderOptions(
+      maxWidthCells = Some(1),
+      cellDimensions = ImageCellDimensions(widthPx = 1, heightPx = 1)
+    )
+
+    Vector(ImageProtocol.Kitty, ImageProtocol.ITerm2).foreach { protocol =>
+      val image = Image(
+        payload("AAAA"),
+        dimensions,
+        TerminalCapabilities(trueColor = true, hyperlinks = true, images = Some(protocol)),
+        options
+      )
+
+      val frame = image.render(1)
+      assertEquals(frame.lines.length, Image.MaxRenderedFrameRows)
+      assertEquals(frame.lines.forall(_.isEmpty), true)
+      assertEquals(frame.controls.length, 1)
+    }
+
+  test("10001-row image geometry uses one themed width-safe fallback without controls"):
+    var callbackCount = 0
+    val image         = Image(
+      payload("AAAA"),
+      ImageDimensions(widthPx = 1, heightPx = Image.MaxRenderedFrameRows + 1),
+      TerminalCapabilities(
+        trueColor = true,
+        hyperlinks = true,
+        images = Some(ImageProtocol.Kitty)
+      ),
+      ImageRenderOptions(
+        mimeType = "image/png",
+        filename = Some("portrait.png"),
+        maxWidthCells = Some(1),
+        cellDimensions = ImageCellDimensions(widthPx = 1, heightPx = 1)
+      ),
+      ImageTheme(line =>
+        callbackCount += 1
+        s">$line<"
+      )
+    )
+
+    val frame = image.render(8)
+    assertEquals(callbackCount, 1)
+    assertEquals(frame.lines.length, 1)
+    assert(frame.lines.head.startsWith(">"), frame.lines.head)
+    assert(Ansi.visibleWidth(frame.lines.head) <= 8, frame.lines.head)
+    assertEquals(frame.controls, Vector.empty)
+    assertEquals(image.currentImageId, None)
+
+  test("oversized supported geometry at width zero uses one bounded fallback"):
+    var callbackCount = 0
+    val idBefore      = TerminalImageProtocol.allocateImageId()
+    val image         = Image(
+      payload("AAAA"),
+      ImageDimensions(widthPx = 1, heightPx = Int.MaxValue),
+      TerminalCapabilities(
+        trueColor = true,
+        hyperlinks = true,
+        images = Some(ImageProtocol.Kitty)
+      ),
+      ImageRenderOptions(
+        maxWidthCells = Some(1),
+        cellDimensions = ImageCellDimensions(widthPx = 1, heightPx = 1)
+      ),
+      ImageTheme(line =>
+        callbackCount += 1
+        s">$line<"
+      )
+    )
+
+    val frame   = image.render(0)
+    val idAfter = TerminalImageProtocol.allocateImageId()
+    assertEquals(callbackCount, 1)
+    assertEquals(frame.lines.length, 1)
+    assertEquals(frame.lines.map(Ansi.visibleWidth), Vector(0))
+    assertEquals(frame.controls, Vector.empty)
+    assertEquals(image.currentImageId, None)
+    assertEquals(idAfter, idBefore + 1)
+
+  test("oversized Kitty geometry does not consume or update an image id"):
+    val idBefore = TerminalImageProtocol.allocateImageId()
+    val image    = Image(
+      payload("AAAA"),
+      ImageDimensions(widthPx = 1, heightPx = Image.MaxRenderedFrameRows + 1),
+      TerminalCapabilities(
+        trueColor = true,
+        hyperlinks = true,
+        images = Some(ImageProtocol.Kitty)
+      ),
+      ImageRenderOptions(
+        maxWidthCells = Some(1),
+        cellDimensions = ImageCellDimensions(widthPx = 1, heightPx = 1)
+      )
+    )
+
+    val frame   = image.render(1)
+    val idAfter = TerminalImageProtocol.allocateImageId()
+    assertEquals(idAfter, idBefore + 1)
+    assertEquals(frame.controls, Vector.empty)
+    assertEquals(image.currentImageId, None)
+
+  test("Int.MaxValue portrait metadata renders through the bounded fallback"):
+    var callbackCount = 0
+    val image         = Image(
+      payload("AAAA"),
+      ImageDimensions(widthPx = 1, heightPx = Int.MaxValue),
+      TerminalCapabilities(
+        trueColor = true,
+        hyperlinks = true,
+        images = Some(ImageProtocol.Kitty)
+      ),
+      ImageRenderOptions(
+        mimeType = "image/png",
+        filename = Some("maximum.png"),
+        cellDimensions = ImageCellDimensions(widthPx = 1, heightPx = 1)
+      ),
+      ImageTheme(line =>
+        callbackCount += 1
+        line
+      )
+    )
+
+    val frame = image.render(12)
+    assertEquals(callbackCount, 1)
+    assertEquals(frame.lines.length, 1)
+    assert(Ansi.visibleWidth(frame.lines.head) <= 12, frame.lines.head)
+    assertEquals(frame.controls, Vector.empty)
+    assertEquals(image.currentImageId, None)
+
   test("image component renders fallback on unsupported terminals"):
     val image = Image(
       payload("AAAA"),
@@ -148,6 +279,56 @@ class ImageSuite extends munit.FunSuite:
     assert(lines.head.contains("image"), lines.head)
     assert(Ansi.visibleWidth(lines.head) <= 18, lines.head)
     assertEquals(image.cleanupSequence, None)
+
+  test("image fallback applies plain theme before final visible-width truncation"):
+    var callbackInputs = Vector.empty[String]
+    val image          = Image(
+      payload("AAAA"),
+      ImageDimensions(800, 600),
+      TerminalCapabilities(trueColor = false, hyperlinks = false, images = None),
+      ImageRenderOptions(mimeType = "image/png", filename = Some("diagram.png")),
+      ImageTheme(line =>
+        callbackInputs = callbackInputs :+ line
+        s">$line<"
+      )
+    )
+    val widths         = Vector(80, 8, 0)
+    val lines          = widths.map(width => image.render(width).lines.head)
+
+    assertEquals(callbackInputs.length, widths.length)
+    assertEquals(lines.head, s">${callbackInputs.head}<")
+    assert(lines(1).startsWith(">"), lines(1))
+    assertEquals(callbackInputs.last, "")
+    assertEquals(lines.last, "")
+    lines.zip(widths).foreach { case (line, width) =>
+      assert(Ansi.visibleWidth(line) <= width, line)
+    }
+
+  test("image fallback applies ANSI theme before final visible-width truncation"):
+    val red            = "\u001b[31m"
+    var callbackInputs = Vector.empty[String]
+    val image          = Image(
+      payload("AAAA"),
+      ImageDimensions(800, 600),
+      TerminalCapabilities(trueColor = false, hyperlinks = false, images = None),
+      ImageRenderOptions(mimeType = "image/png", filename = Some("diagram.png")),
+      ImageTheme(line =>
+        callbackInputs = callbackInputs :+ line
+        s"$red+$line-${Ansi.Reset}"
+      )
+    )
+    val widths         = Vector(80, 8, 0)
+    val lines          = widths.map(width => image.render(width).lines.head)
+
+    assertEquals(callbackInputs.length, widths.length)
+    assert(lines.head.startsWith(red), lines.head)
+    assert(lines(1).startsWith(red), lines(1))
+    assert(lines.take(2).forall(_.endsWith(Ansi.Reset)), lines.toString)
+    assertEquals(callbackInputs.last, "")
+    assertEquals(lines.last, "")
+    lines.zip(widths).foreach { case (line, width) =>
+      assert(Ansi.visibleWidth(line) <= width, line)
+    }
 
   test("image fallback escapes controls before width truncation"):
     val image = Image(
@@ -204,6 +385,102 @@ class ImageSuite extends munit.FunSuite:
       ImageDimensionsSniffer.sniff(webpVp8xBytes(width = 19, height = 35)),
       Right(ImageMetadata("image/webp", ImageDimensions(19, 35)))
     )
+
+  test("PNG dimensions preserve unsigned boundaries without narrowing"):
+    val validCases = Vector(
+      (1L, 1L),
+      (Int.MaxValue.toLong, 1L),
+      (1L, Int.MaxValue.toLong)
+    )
+    validCases.foreach { case (width, height) =>
+      assertEquals(
+        ImageDimensionsSniffer.sniff(pngBytes(width, height)),
+        Right(ImageMetadata("image/png", ImageDimensions(width.toInt, height.toInt)))
+      )
+    }
+
+    val invalidCases = Vector(
+      (0L, 1L),
+      (1L, 0L),
+      (Int.MaxValue.toLong + 1L, 1L),
+      (1L, Int.MaxValue.toLong + 1L),
+      (0xffffffffL, 1L)
+    )
+    invalidCases.foreach { case (width, height) =>
+      assertInvalidDimensions(pngBytes(width, height))
+    }
+
+  test("GIF and JPEG dimensions reject zero at their unsigned 16-bit boundaries"):
+    val formats = Vector(
+      ("image/gif", gifBytes),
+      ("image/jpeg", jpegBytes)
+    )
+    formats.foreach { case (mimeType, bytesFor) =>
+      Vector((1, 1), (0xffff, 1), (1, 0xffff)).foreach { case (width, height) =>
+        assertEquals(
+          ImageDimensionsSniffer.sniff(bytesFor(width, height)),
+          Right(ImageMetadata(mimeType, ImageDimensions(width, height)))
+        )
+      }
+      Vector((0, 1), (1, 0)).foreach { case (width, height) =>
+        assertInvalidDimensions(bytesFor(width, height))
+      }
+    }
+
+  test("WebP variants enforce their encoded dimension semantics"):
+    val validCases = Vector(
+      webpVp8xBytes(1, 1)         -> ImageDimensions(1, 1),
+      webpVp8xBytes(0x1000000, 1) -> ImageDimensions(0x1000000, 1),
+      webpVp8xBytes(1, 0x1000000) -> ImageDimensions(1, 0x1000000),
+      webpVp8lBytes(1, 1)         -> ImageDimensions(1, 1),
+      webpVp8lBytes(0x4000, 1)    -> ImageDimensions(0x4000, 1),
+      webpVp8lBytes(1, 0x4000)    -> ImageDimensions(1, 0x4000),
+      webpVp8Bytes(1, 1)          -> ImageDimensions(1, 1),
+      webpVp8Bytes(0x3fff, 1)     -> ImageDimensions(0x3fff, 1),
+      webpVp8Bytes(1, 0x3fff)     -> ImageDimensions(1, 0x3fff)
+    )
+    validCases.foreach { case (bytes, dimensions) =>
+      assertEquals(
+        ImageDimensionsSniffer.sniff(bytes),
+        Right(ImageMetadata("image/webp", dimensions))
+      )
+    }
+
+    assertInvalidDimensions(webpVp8Bytes(0, 1))
+    assertInvalidDimensions(webpVp8Bytes(1, 0))
+
+  test("JPEG dimension sniffing preserves marker scanning, errors, and precedence"):
+    val invalidCases = Vector(
+      Array[Byte](0xff.toByte, 0xd8.toByte, 0xff.toByte, 0xff.toByte, 0xff.toByte, 0xff.toByte) ->
+        "JPEG marker is incomplete",
+      Array[Byte](0xff.toByte, 0xd8.toByte, 0xff.toByte, 0xd9.toByte, 0, 0)                     ->
+        "JPEG dimensions were not found",
+      Array[Byte](0xff.toByte, 0xd8.toByte, 0, 0xff.toByte, 0xe0.toByte, 0)                     ->
+        "JPEG segment length is incomplete",
+      Array[Byte](0xff.toByte, 0xd8.toByte, 0xff.toByte, 0xc0.toByte, 0, 1)                     ->
+        "JPEG segment exceeds available data",
+      Array[Byte](0xff.toByte, 0xd8.toByte, 0xff.toByte, 0xc0.toByte, 0, 2)                     ->
+        "JPEG SOF is incomplete"
+    )
+    invalidCases.foreach { case (bytes, message) =>
+      assertEquals(
+        ImageDimensionsSniffer.sniff(bytes),
+        Left(ImageHelperError.InvalidImage(message))
+      )
+    }
+
+    assertEquals(
+      ImageDimensionsSniffer.sniff(jpegWithMarkerFillBytes(width = 18, height = 34)),
+      Right(ImageMetadata("image/jpeg", ImageDimensions(18, 34)))
+    )
+
+  test("JPEG bounds remain safe near Int.MaxValue without large arrays"):
+    assertEquals(ImageDimensionsSniffer.hasBytes(Int.MaxValue, Int.MaxValue - 4, 4), true)
+    assertEquals(ImageDimensionsSniffer.hasBytes(Int.MaxValue, Int.MaxValue - 3, 4), false)
+    assertEquals(ImageDimensionsSniffer.hasBytes(Int.MaxValue, Int.MaxValue - 2, 2), true)
+    assertEquals(ImageDimensionsSniffer.hasBytes(Int.MaxValue, Int.MaxValue, 1), false)
+    assertEquals(ImageDimensionsSniffer.hasBytes(Int.MaxValue, Int.MaxValue, 0), true)
+    assertEquals(ImageDimensionsSniffer.hasBytes(Int.MaxValue, -1, 1), false)
 
   test("dimension sniffer validates PNG IHDR chunk before reading dimensions"):
     val bytes = pngBytes(width = 16, height = 32)
@@ -373,7 +650,12 @@ class ImageSuite extends munit.FunSuite:
     assert(textStart >= 0)
     output.substring(renderStart, textStart).sliding(2).count(_ === "\r\n")
 
-  private def pngBytes(width: Int, height: Int): Array[Byte] =
+  private def assertInvalidDimensions(bytes: Array[Byte]): Unit =
+    assert(ImageDimensionsSniffer.sniff(bytes).left.exists(
+      _.isInstanceOf[ImageHelperError.InvalidImage]
+    ))
+
+  private def pngBytes(width: Long, height: Long): Array[Byte] =
     Array[Byte](
       0x89.toByte,
       'P'.toByte,
@@ -391,7 +673,7 @@ class ImageSuite extends munit.FunSuite:
       'H'.toByte,
       'D'.toByte,
       'R'.toByte
-    ) ++ int32BE(width) ++ int32BE(height)
+    ) ++ uint32BE(width) ++ uint32BE(height)
 
   private def gifBytes(width: Int, height: Int): Array[Byte] =
     "GIF89a".getBytes ++ int16LE(width) ++ int16LE(height)
@@ -411,16 +693,54 @@ class ImageSuite extends munit.FunSuite:
       8
     ) ++ int16BE(height) ++ int16BE(width) ++ Array.fill[Byte](10)(0)
 
+  private def jpegWithMarkerFillBytes(width: Int, height: Int): Array[Byte] =
+    Array[Byte](
+      0xff.toByte,
+      0xd8.toByte,
+      0,
+      0xff.toByte,
+      0xff.toByte,
+      0xe0.toByte,
+      0,
+      2,
+      0xff.toByte,
+      0xff.toByte,
+      0xc0.toByte,
+      0,
+      17,
+      8
+    ) ++ int16BE(height) ++ int16BE(width) ++ Array.fill[Byte](10)(0)
+
   private def webpVp8xBytes(width: Int, height: Int): Array[Byte] =
     "RIFF".getBytes ++ Array[Byte](0, 0, 0, 0) ++ "WEBP".getBytes ++
       "VP8X".getBytes ++ Array[Byte](10, 0, 0, 0, 0, 0, 0, 0) ++
       uint24LE(width - 1) ++ uint24LE(height - 1)
 
-  private def int32BE(value: Int): Array[Byte] =
+  private def webpVp8lBytes(width: Int, height: Int): Array[Byte] =
+    val storedWidth  = width - 1
+    val storedHeight = height - 1
+    val b1           = storedWidth & 0xff
+    val b2           = ((storedWidth >> 8) & 0x3f) | ((storedHeight & 0x03) << 6)
+    val b3           = (storedHeight >> 2) & 0xff
+    val b4           = (storedHeight >> 10) & 0x0f
+    "RIFF".getBytes ++ Array[Byte](0, 0, 0, 0) ++ "WEBP".getBytes ++
+      "VP8L".getBytes ++ Array[Byte](5, 0, 0, 0, 0x2f) ++ Array[Byte](
+        b1.toByte,
+        b2.toByte,
+        b3.toByte,
+        b4.toByte
+      )
+
+  private def webpVp8Bytes(width: Int, height: Int): Array[Byte] =
+    "RIFF".getBytes ++ Array[Byte](0, 0, 0, 0) ++ "WEBP".getBytes ++
+      "VP8 ".getBytes ++ Array[Byte](10, 0, 0, 0, 0, 0, 0, 0x9d.toByte, 0x01, 0x2a) ++
+      int16LE(width) ++ int16LE(height)
+
+  private def uint32BE(value: Long): Array[Byte] =
     Array(
-      ((value >> 24) & 0xff).toByte,
-      ((value >> 16) & 0xff).toByte,
-      ((value >> 8) & 0xff).toByte,
+      ((value >> 24) & 0xffL).toByte,
+      ((value >> 16) & 0xffL).toByte,
+      ((value >> 8) & 0xffL).toByte,
       (value & 0xff).toByte
     )
 

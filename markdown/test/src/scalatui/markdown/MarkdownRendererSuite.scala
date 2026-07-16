@@ -2,6 +2,7 @@ package scalatui.markdown
 
 import scalatui.ansi.Ansi
 import scalatui.terminal.TerminalCapabilities
+import scala.util.control.ControlThrowable
 
 class MarkdownRendererSuite extends munit.FunSuite:
   test("basic renderer supports documented markdown subset width-safely"):
@@ -41,6 +42,27 @@ class MarkdownRendererSuite extends munit.FunSuite:
     val lines = BasicMarkdownRenderer.default.render("## A very long heading", 8)
     assert(lines.nonEmpty)
     assert(lines.forall(line => Ansi.visibleWidth(line) <= 8), lines.mkString("\n"))
+
+  test("basic parser recovery converts non-fatal failures to readable errors"):
+    val withMessage    = BasicMarkdownParser.recoverParse(
+      throw new RuntimeException("parse failed")
+    )
+    val withoutMessage = BasicMarkdownParser.recoverParse(
+      throw new RuntimeException(null: String)
+    )
+
+    assertEquals(withMessage, Left("parse failed"))
+    assertEquals(withoutMessage, Left("RuntimeException"))
+
+  test("basic parser recovery propagates the identical fatal failure"):
+    val fatal  = new ControlThrowable {}
+    val thrown =
+      try
+        BasicMarkdownParser.recoverParse(throw fatal)
+        throw new AssertionError("expected fatal failure to propagate")
+      catch case error: ControlThrowable => error
+
+    assert(thrown eq fatal)
 
   test("parser preserves list marker task marker and loose-list metadata"):
     val parsed = BasicMarkdownParser.parse("+ [ ] todo\n\n7. done")
@@ -107,6 +129,107 @@ class MarkdownRendererSuite extends munit.FunSuite:
     assert(unordered.exists(_.startsWith("  ")), unordered.mkString("\n"))
     assert(ordered.exists(_.startsWith("    ")), ordered.mkString("\n"))
     assert((unordered ++ ordered).forall(line => Ansi.visibleWidth(line) <= 12))
+
+  test("direct rendering at non-positive width bypasses all rendering callbacks"):
+    var parserCalls                   = 0
+    var themeCalls                    = 0
+    var highlighterCalls              = 0
+    val parser                        = new MarkdownParser:
+      override def parse(markdown: String): Either[String, Vector[MarkdownBlock]] =
+        parserCalls += 1
+        Right(Vector(MarkdownBlock.CodeBlock(Some("scala"), markdown)))
+    def themed(value: String): String =
+      themeCalls += 1
+      value
+    val renderer                      = BasicMarkdownRenderer(
+      parser,
+      MarkdownRenderOptions(
+        theme = MarkdownTheme(
+          heading = (_, value) => themed(value),
+          paragraph = themed,
+          codeSpan = themed,
+          codeBlockFence = themed,
+          codeBlockLine = themed,
+          blockQuotePrefix = themed,
+          blockQuoteText = themed,
+          horizontalRule = themed,
+          listMarker = themed,
+          tableRow = themed,
+          emphasis = themed,
+          strong = themed,
+          link = (label, _) => themed(label),
+          linkFallback = (label, _) => themed(label)
+        ),
+        highlighter = Some(new MarkdownCodeHighlighter:
+          override def highlight(language: Option[String], code: String): Option[Vector[String]] =
+            highlighterCalls += 1
+            Some(Vector(code)))
+      )
+    )
+
+    assertEquals(renderer.render("code", 0), Vector.empty)
+    assertEquals(renderer.render("code", -1), Vector.empty)
+    assertEquals(parserCalls, 0)
+    assertEquals(themeCalls, 0)
+    assertEquals(highlighterCalls, 0)
+
+  test("direct width-zero rendering is safe for every supported block category"):
+    val markdownByCategory = Vector(
+      "heading"            -> "# Heading",
+      "unordered list"     -> "- item",
+      "ordered list"       -> "1. item",
+      "block quote"        -> "> quote",
+      "fenced code"        -> "```scala\nval x = 1\n```",
+      "inline styled text" -> "**bold** _italic_ `code`",
+      "ordinary text"      -> "ordinary text",
+      "horizontal rule"    -> "---",
+      "table"              -> "| Name | Value |\n| ---- | ----- |\n| a | b |"
+    )
+
+    markdownByCategory.foreach { (category, markdown) =>
+      val lines = BasicMarkdownRenderer.default.render(markdown, 0)
+      assert(
+        lines.forall(line => Ansi.visibleWidth(line) <= 0),
+        s"$category produced positive-width output: ${lines.mkString("|")}"
+      )
+    }
+
+  test("positive-width rendering preserves output and callback behavior"):
+    var parserCalls      = 0
+    var fenceCalls       = 0
+    var lineCalls        = 0
+    var highlighterCalls = 0
+    val renderer         = BasicMarkdownRenderer(
+      new MarkdownParser:
+        override def parse(markdown: String): Either[String, Vector[MarkdownBlock]] =
+          parserCalls += 1
+          Right(Vector(MarkdownBlock.CodeBlock(Some("scala"), markdown)))
+      ,
+      MarkdownRenderOptions(
+        theme = MarkdownTheme(
+          codeBlockFence = value =>
+            fenceCalls += 1
+            value
+          ,
+          codeBlockLine = value =>
+            lineCalls += 1
+            value
+        ),
+        highlighter = Some(new MarkdownCodeHighlighter:
+          override def highlight(language: Option[String], code: String): Option[Vector[String]] =
+            highlighterCalls += 1
+            Some(Vector(s"highlighted: $code")))
+      )
+    )
+
+    val lines = renderer.render("val x = 1", 40)
+
+    assertEquals(lines, Vector("```scala", "highlighted: val x = 1", "```"))
+    assert(lines.forall(line => Ansi.visibleWidth(line) <= 40), lines.mkString("\n"))
+    assertEquals(parserCalls, 1)
+    assertEquals(fenceCalls, 2)
+    assertEquals(lineCalls, 1)
+    assertEquals(highlighterCalls, 1)
 
   test("parser failures fall back to readable plain text"):
     val renderer = BasicMarkdownRenderer(new MarkdownParser:

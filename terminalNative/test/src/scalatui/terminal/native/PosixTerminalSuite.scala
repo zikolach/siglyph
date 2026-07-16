@@ -1,8 +1,10 @@
 package scalatui.terminal.native
 
 import scalatui.terminal.{KittyKeyboardProtocol, Terminal}
+import scalatui.syntax.Equality.*
 
 import java.io.{IOException, OutputStream, PrintStream}
+import java.util.concurrent.{CountDownLatch, TimeUnit}
 
 class PosixTerminalSuite extends munit.FunSuite:
   test("output-side capabilities do not require or invoke callback delivery"):
@@ -34,10 +36,10 @@ class PosixTerminalSuite extends munit.FunSuite:
     var failDisable = true
     terminal.writeFailureForTesting = data =>
       writes += data
-      if data == KittyKeyboardProtocol.EnableSequence && failEnable then
+      if (data === KittyKeyboardProtocol.EnableSequence) && failEnable then
         failEnable = false
         Some(RuntimeException("injected Kitty enable failure"))
-      else if data == KittyKeyboardProtocol.DisableSequence && failDisable then
+      else if (data === KittyKeyboardProtocol.DisableSequence) && failDisable then
         failDisable = false
         Some(RuntimeException("injected Kitty disable failure"))
       else None
@@ -93,18 +95,41 @@ class PosixTerminalSuite extends munit.FunSuite:
     finally terminal.stop()
 
   test("restart rejects a live old Native flush worker"):
-    val terminal          = PosixTerminal(initialColumns = 80, initialRows = 24)
-    @volatile var release = false
-    val worker            = Thread(() => while !release do Thread.sleep(1), "old-posix-flush-worker")
+    val terminal = PosixTerminal(initialColumns = 80, initialRows = 24)
+    val started  = CountDownLatch(1)
+    val release  = CountDownLatch(1)
+    val stopped  = CountDownLatch(1)
+    val worker   = Thread(
+      () =>
+        try
+          started.countDown()
+          val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+          while release.getCount > 0L && System.nanoTime() < deadline do Thread.onSpinWait()
+          scala.Predef.assert(
+            release.getCount <= 0L,
+            "synthetic old Native flush worker was not released"
+          )
+        finally stopped.countDown(),
+      "old-posix-flush-worker"
+    )
     worker.start()
+    assert(
+      started.await(5, TimeUnit.SECONDS),
+      "synthetic old Native flush worker did not start"
+    )
     terminal.retainFlushThreadForTesting(worker)
 
     try
       val failure = intercept[IllegalStateException](terminal.start(_ => (), () => ()))
       assert(failure.getMessage.contains("previous flush worker"), failure.getMessage)
     finally
-      release = true
-      worker.join()
+      release.countDown()
+      assert(
+        stopped.await(5, TimeUnit.SECONDS),
+        "synthetic old Native flush worker did not stop"
+      )
+      worker.join(5000)
+      assert(!worker.isAlive, "synthetic old Native flush worker did not terminate")
 
   test("cleanup retries only the failed Native obligation and rejects restart until it succeeds"):
     Vector("input", "kitty", "paste", "termios").foreach { failedObligation =>
@@ -122,7 +147,7 @@ class PosixTerminalSuite extends munit.FunSuite:
       var failed   = false
       terminal.cleanupFailureForTesting = name =>
         attempts += name
-        Option.when(name == failedObligation && !failed) {
+        Option.when((name === failedObligation) && !failed) {
           failed = true
           RuntimeException(s"injected $name cleanup failure")
         }
@@ -143,7 +168,7 @@ class PosixTerminalSuite extends munit.FunSuite:
     var failed   = false
     terminal.writeFailureForTesting = data =>
       writes += data
-      Option.when(data == "\u001b[?2004h" && !failed) {
+      Option.when((data === "\u001b[?2004h") && !failed) {
         failed = true
         RuntimeException("injected paste enable failure")
       }
@@ -158,9 +183,9 @@ class PosixTerminalSuite extends munit.FunSuite:
   test("failed paste enable retains Native cleanup obligation when disable fails"):
     val terminal = PosixTerminal(initialColumns = 80, initialRows = 24)
     terminal.writeFailureForTesting = data =>
-      Option.when(data == "\u001b[?2004h")(RuntimeException("injected paste enable failure"))
+      Option.when(data === "\u001b[?2004h")(RuntimeException("injected paste enable failure"))
     terminal.cleanupFailureForTesting = name =>
-      Option.when(name == "paste")(RuntimeException("injected paste disable failure"))
+      Option.when(name === "paste")(RuntimeException("injected paste disable failure"))
 
     val failure = intercept[RuntimeException](terminal.start(_ => (), () => ()))
     assertEquals(failure.getMessage, "injected paste enable failure")

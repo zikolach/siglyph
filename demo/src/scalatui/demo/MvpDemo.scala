@@ -8,7 +8,7 @@ import scalatui.terminal.StreamTerminal
   val tui = TUI(StreamTerminal(output = System.out, initialColumns = 80, initialRows = 24))
 
   tui.addChild(TruncatedText(
-    "scala-tui component showcase — this deliberately long title is truncated to fit",
+    "siglyph component showcase — this deliberately long title is truncated to fit",
     paddingX = 1,
     paddingY = 1
   ))

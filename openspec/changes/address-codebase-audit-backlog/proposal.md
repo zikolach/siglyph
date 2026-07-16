@@ -4,15 +4,15 @@ Nine retained audit findings identify concrete correctness, portability, identit
 
 ## What Changes
 
-- Constrain extras and image fallback output after theme callbacks using ANSI-aware visible-width truncation.
-- Make CI run Scalafmt, Scalafix, and strict OpenSpec validation, with Scalafix covering every canonical current Scala source and test root.
+- Constrain extras and image fallback output after theme callbacks using ANSI-aware visible-width truncation, and make image rendering fall back before geometry above 10,000 frame rows can allocate rows or an image id.
+- Make CI run Scalafmt and Scalafix as mandatory gates, with Scalafix covering every canonical current Scala source and test root.
 - Expand portable Scala Native test coverage for core, extras, and the interactive demo by reusing classified canonical suites.
 - Normalize current product identity from `scala-tui` to `siglyph` while retaining the `scalatui` package namespace and excluding archives, historical material, and agent-rule files unless their modification is separately and explicitly approved. Normal archive synchronization also updates the promoted `developer-api` Purpose metadata to identify the product as `siglyph`.
 - Restrict basic Markdown parser recovery to `scala.util.control.NonFatal` and make direct Markdown rendering safe at width zero.
 - Reject zero, negative, and non-representable sniffed image dimensions through the existing typed `InvalidImage` failure.
 - Return precise `InputResult` values from `Input` and `SelectList` without changing callback conditions or callback cardinality.
 - Replace fixed readiness sleeps in concurrency tests with deterministic bounded gates or latches while retaining sleeps that test actual timeout or polling behavior.
-- Add focused validation and a final integration pass without new dependencies, compatibility layers, fallback behavior, or unrelated refactoring.
+- Add focused validation and a final integration pass without new dependencies, compatibility layers, fallback behavior beyond the approved image render-geometry safety fallback, or unrelated refactoring.
 
 ## Capabilities
 
@@ -23,8 +23,8 @@ None.
 ### Modified Capabilities
 
 - `extras-widgets`: Require final themed widget output to remain within the requested visible width.
-- `image-rendering`: Require themed fallback output to remain width-safe and sniffed dimensions to be positive and representable.
-- `developer-api`: Define the `siglyph` product identity and mandatory CI formatting, lint, and strict OpenSpec gates.
+- `image-rendering`: Require themed fallback output to remain width-safe, sniffed dimensions to be positive and representable, JPEG bounds arithmetic to be overflow-safe, and supported image rendering above 10,000 frame rows to use the existing readable fallback without allocating frame rows or an image id.
+- `developer-api`: Define the `siglyph` product identity and mandatory CI formatting and lint gates.
 - `markdown-rendering`: Limit parser recovery to non-fatal failures and require direct rendering to honor width zero.
 - `text-editing`: Define precise `Input` handling results without changing callback behavior.
 - `component-rendering`: Define precise `SelectList` handling results without claiming parent input bubbling.

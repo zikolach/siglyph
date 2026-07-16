@@ -88,7 +88,7 @@ final class PosixTerminal(
         throw IllegalStateException(
           "cannot restart PosixTerminal while the previous resize worker is still alive"
         )
-      if unistd.isatty(unistd.STDIN_FILENO) == 0 then
+      if unistd.isatty(unistd.STDIN_FILENO) === 0 then
         throw IllegalStateException(
           "Scala Native POSIX backend requires stdin to be an interactive TTY"
         )
@@ -103,8 +103,8 @@ final class PosixTerminal(
         inputCleanupPending = true
         running = true
         val generation = inputGeneration
-        val thread     = Thread(() => readLoop(generation), "scala-tui-posix-terminal-input")
-        val flusher    = Thread(() => flushLoop(generation), "scala-tui-posix-terminal-flush")
+        val thread     = Thread(() => readLoop(generation), "siglyph-posix-terminal-input")
+        val flusher    = Thread(() => flushLoop(generation), "siglyph-posix-terminal-flush")
         thread.setDaemon(true)
         flusher.setDaemon(true)
         inputThread = thread
@@ -190,10 +190,10 @@ final class PosixTerminal(
     kittyCleanupPending = false
 
   private def enableRawMode(): Unit =
-    if savedState == null then
+    if savedState === null then
       val original = stdlib.malloc(sizeof[termios.termios]).asInstanceOf[Ptr[termios.termios]]
-      if original == null then throw OutOfMemoryError("failed to allocate termios state")
-      if termios.tcgetattr(unistd.STDIN_FILENO, original) != 0 then
+      if original === null then throw OutOfMemoryError("failed to allocate termios state")
+      if termios.tcgetattr(unistd.STDIN_FILENO, original) !== 0 then
         stdlib.free(original.asInstanceOf[Ptr[Byte]])
         throw IllegalStateException("tcgetattr failed")
 
@@ -206,13 +206,13 @@ final class PosixTerminal(
       raw.c_cc(termios.VMIN) = 0.toUByte
       raw.c_cc(termios.VTIME) = 1.toUByte
 
-      if termios.tcsetattr(unistd.STDIN_FILENO, TCSAFLUSH, raw) != 0 then
+      if termios.tcsetattr(unistd.STDIN_FILENO, TCSAFLUSH, raw) !== 0 then
         stdlib.free(original.asInstanceOf[Ptr[Byte]])
         throw IllegalStateException("tcsetattr raw mode failed")
       savedState = original
 
   private def restoreMode(): Unit =
-    if savedState != null then
+    if savedState !== null then
       val state    = savedState
       val restored = termios.tcsetattr(unistd.STDIN_FILENO, TCSAFLUSH, state) === 0
       if restored then
@@ -226,7 +226,7 @@ final class PosixTerminal(
         unistd.STDOUT_FILENO,
         PosixTerminal.TIOCGWINSZ,
         winsize.asInstanceOf[Ptr[Byte]]
-      ) == 0
+      ) === 0
     then
       val rows = winsize._1.toInt
       val cols = winsize._2.toInt
@@ -242,7 +242,7 @@ final class PosixTerminal(
   private def startResizePolling(): Unit =
     if (resizeThread eq null) then
       resizePolling = true
-      val thread = Thread(() => resizeLoop(), "scala-tui-posix-terminal-resize")
+      val thread = Thread(() => resizeLoop(), "siglyph-posix-terminal-resize")
       thread.setDaemon(true)
       resizeThread = thread
       thread.start()
@@ -271,7 +271,7 @@ final class PosixTerminal(
       while inputDelivery.isActive(generation) do
         val read = unistd.read(unistd.STDIN_FILENO, buffer, 4096.toUSize)
         if read < 0 then terminateGeneration(generation)
-        else if read == 0 then ()
+        else if read.toLong === 0L then ()
         else
           val bytes = Array.ofDim[Byte](read)
           var i     = 0
@@ -308,7 +308,7 @@ final class PosixTerminal(
       }
 
   private def hasCleanupObligations: Boolean =
-    inputCleanupPending || kittyCleanupPending || pasteCleanupPending || savedState != null
+    inputCleanupPending || kittyCleanupPending || pasteCleanupPending || (savedState !== null)
 
   private def cleanup(): Option[Throwable] =
     var failure                                      = Option.empty[Throwable]
@@ -336,7 +336,7 @@ final class PosixTerminal(
         write("\u001b[?2004l")
         pasteCleanupPending = false
       }
-    if savedState != null then attempt("termios")(restoreMode())
+    if savedState !== null then attempt("termios")(restoreMode())
     failure
 
   private def reapInputThread(): Unit =

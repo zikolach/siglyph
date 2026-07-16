@@ -1,5 +1,7 @@
 package scalatui.terminal.jvm.interop
 
+import scalatui.syntax.Equality.*
+
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 
@@ -49,9 +51,9 @@ final class SiglyphJvmInteropCompileSuite extends munit.FunSuite:
 
     val protocolClass = Class.forName("scalatui.terminal.TerminalImageProtocol$")
     Vector("renderBase64Image", "encodeKitty", "encodeITerm2").foreach { name =>
-      val overloads = protocolClass.getMethods.filter(_.getName == name)
+      val overloads = protocolClass.getMethods.filter(_.getName === name)
       assert(overloads.nonEmpty, name)
-      assert(overloads.forall(_.getParameterTypes.head == payloadClass), name)
+      assert(overloads.forall(_.getParameterTypes.head === payloadClass), name)
       assert(overloads.forall(!_.getParameterTypes.contains(classOf[String])), name)
     }
 
@@ -75,7 +77,7 @@ final class SiglyphJvmInteropCompileSuite extends munit.FunSuite:
 
   private def assertJavaCompilation(source: String, expectedSuccess: Boolean): Unit =
     val compiler = ToolProvider.getSystemJavaCompiler
-    assert(compiler != null, "Java smoke compilation requires a JDK with javac")
+    assert(compiler ne null, "Java smoke compilation requires a JDK with javac")
     withTempDir("siglyph-java-interop") { dir =>
       val sourceFile  = dir.resolve("JavaInteropSmoke.java")
       val outputDir   = Files.createDirectory(dir.resolve("classes"))

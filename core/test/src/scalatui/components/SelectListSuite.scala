@@ -1,9 +1,19 @@
 package scalatui.components
 
+import java.nio.charset.StandardCharsets
+
 import scalatui.TestInputStreams
 
 import scalatui.ansi.Ansi
-import scalatui.terminal.{KeyModifiers, TerminalInput, TerminalKey}
+import scalatui.core.InputResult
+import scalatui.terminal.{
+  KeyEventType,
+  KeyModifiers,
+  TerminalInput,
+  TerminalInputChunk,
+  TerminalKey,
+  TerminalRawKind
+}
 
 class SelectListSuite extends munit.FunSuite:
   private def renderedLabel(line: String): String =
@@ -433,3 +443,170 @@ class SelectListSuite extends munit.FunSuite:
     assert(line.contains("\u001b[31m"), line)
     assert(Ansi.strip(line).startsWith("No"), line)
     assert(Ansi.visibleWidth(line) <= 10, line)
+
+  test("select list navigation returns precise results and callback counts"):
+    val list    = SelectList(
+      Vector(SelectItem("a", "Alpha"), SelectItem("b", "Beta"))
+    )
+    var changes = 0
+    list.onSelectionChange = _ => changes += 1
+
+    assertEquals(
+      list.handleInputResult(TerminalInput.Key(TerminalKey.Up)),
+      InputResult.NoRender
+    )
+    assertEquals(changes, 0)
+    assertEquals(
+      list.handleInputResult(TerminalInput.Key(TerminalKey.Down)),
+      InputResult.Render
+    )
+    assertEquals(changes, 1)
+    assertEquals(
+      list.handleInputResult(TerminalInput.Key(TerminalKey.Down)),
+      InputResult.NoRender
+    )
+    assertEquals(changes, 1)
+
+    val empty        = SelectList(Vector.empty)
+    var emptyChanges = 0
+    empty.onSelectionChange = _ => emptyChanges += 1
+    assertEquals(
+      empty.handleInputResult(TerminalInput.Key(TerminalKey.Up)),
+      InputResult.NoRender
+    )
+    assertEquals(
+      empty.handleInputResult(TerminalInput.Key(TerminalKey.Down)),
+      InputResult.NoRender
+    )
+    assertEquals(emptyChanges, 0)
+
+  test("select list duplicate item movement renders without duplicate callback"):
+    val duplicate = SelectItem("same", "Same")
+    val finalItem = SelectItem("final", "Final")
+    val list      = SelectList(Vector(duplicate, duplicate.copy(), finalItem))
+    var changes   = Vector.empty[Option[SelectItem]]
+    list.onSelectionChange = item => changes :+= item
+
+    assertEquals(
+      list.handleInputResult(TerminalInput.Key(TerminalKey.Down)),
+      InputResult.Render
+    )
+    assertEquals(changes, Vector.empty)
+    assertEquals(
+      list.handleInputResult(TerminalInput.Key(TerminalKey.Down)),
+      InputResult.Render
+    )
+    assertEquals(list.selected, Some(finalItem))
+    assertEquals(changes, Vector(Some(finalItem)))
+
+  test("select list activation and cancel preserve callback cardinality"):
+    val item       = SelectItem("a", "Alpha")
+    val list       = SelectList(Vector(item))
+    var selections = Vector.empty[SelectItem]
+    var cancels    = 0
+    var changes    = 0
+    list.onSelect = selected => selections :+= selected
+    list.onCancel = () => cancels += 1
+    list.onSelectionChange = _ => changes += 1
+
+    assertEquals(
+      list.handleInputResult(TerminalInput.Key(TerminalKey.Enter)),
+      InputResult.Render
+    )
+    assertEquals(selections, Vector(item))
+    assertEquals(cancels, 0)
+    assertEquals(changes, 0)
+    assertEquals(
+      list.handleInputResult(TerminalInput.Key(TerminalKey.Escape)),
+      InputResult.Render
+    )
+    assertEquals(selections, Vector(item))
+    assertEquals(cancels, 1)
+    assertEquals(changes, 0)
+
+    val empty           = SelectList(Vector.empty)
+    var emptySelections = 0
+    empty.onSelect = _ => emptySelections += 1
+    assertEquals(
+      empty.handleInputResult(TerminalInput.Key(TerminalKey.Enter)),
+      InputResult.NoRender
+    )
+    assertEquals(emptySelections, 0)
+
+  test("select list filtering returns precise mutation and no-match callback results"):
+    val list    = SelectList(
+      Vector(SelectItem("alpha", "Alpha"), SelectItem("beta", "Beta")),
+      SelectListOptions(filtering = SelectListFiltering.Containment)
+    )
+    var changes = Vector.empty[Option[SelectItem]]
+    list.onSelectionChange = item => changes :+= item
+
+    assertEquals(
+      list.handleInputResult(TerminalInput.Key(TerminalKey.Character("a"))),
+      InputResult.Render
+    )
+    assertEquals(changes, Vector.empty)
+    assertEquals(
+      list.handleInputResult(TerminalInput.Key(TerminalKey.Character("z"))),
+      InputResult.Render
+    )
+    assertEquals(changes, Vector(None))
+    assertEquals(
+      list.handleInputResult(TerminalInput.Key(TerminalKey.Backspace)),
+      InputResult.Render
+    )
+    assertEquals(changes.map(_.map(_.value)), Vector(None, Some("alpha")))
+
+    val clean        = SelectList(
+      Vector(SelectItem("alpha", "Alpha")),
+      SelectListOptions(filtering = SelectListFiltering.Containment)
+    )
+    var cleanChanges = 0
+    clean.onSelectionChange = _ => cleanChanges += 1
+    assertEquals(
+      clean.handleInputResult(TerminalInput.Key(TerminalKey.Backspace)),
+      InputResult.Ignored
+    )
+    assertEquals(cleanChanges, 0)
+
+  test("select list ignores unsupported input and all paste frames when filtering is disabled"):
+    val list       = SelectList(Vector(SelectItem("a", "Alpha")))
+    var selections = 0
+    var cancels    = 0
+    var changes    = 0
+    list.onSelect = _ => selections += 1
+    list.onCancel = () => cancels += 1
+    list.onSelectionChange = _ => changes += 1
+
+    val ignored = Vector(
+      TerminalInput.Key(TerminalKey.Tab),
+      TerminalInput.Key(TerminalKey.Character("z")),
+      TerminalInput.Key(TerminalKey.Character("z"), KeyModifiers(ctrl = true)),
+      TerminalInput.RawStart(TerminalRawKind.Csi),
+      TerminalInput.PasteStart,
+      TerminalInput.PasteChunk(TerminalInputChunk("x".getBytes(StandardCharsets.UTF_8))),
+      TerminalInput.PasteEnd
+    )
+    ignored.foreach(input => assertEquals(list.handleInputResult(input), InputResult.Ignored))
+    assertEquals(list.query, "")
+    assertEquals(selections, 0)
+    assertEquals(cancels, 0)
+    assertEquals(changes, 0)
+
+  test("select list keeps existing key-event matching for modifiers and releases"):
+    val list    = SelectList(Vector(SelectItem("a", "Alpha"), SelectItem("b", "Beta")))
+    var changes = 0
+    list.onSelectionChange = _ => changes += 1
+
+    assertEquals(
+      list.handleInputResult(TerminalInput.Key(TerminalKey.Down, KeyModifiers(shift = true))),
+      InputResult.Render
+    )
+    assertEquals(
+      list.handleInputResult(TerminalInput.KeyEvent(
+        TerminalKey.Up,
+        eventType = KeyEventType.Release
+      )),
+      InputResult.Render
+    )
+    assertEquals(changes, 2)

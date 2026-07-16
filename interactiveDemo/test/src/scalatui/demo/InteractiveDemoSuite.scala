@@ -74,7 +74,7 @@ class InteractiveDemoSuite extends munit.FunSuite:
     tui.start()
 
     val currentDir = System.getProperty("user.dir")
-    val tempFile   = Files.createTempFile("scala-tui-demo-preview-", ".txt")
+    val tempFile   = Files.createTempFile("siglyph-demo-preview-", ".txt")
     try
       Files.writeString(
         tempFile,
@@ -104,6 +104,32 @@ class InteractiveDemoSuite extends munit.FunSuite:
       )
     finally
       Files.deleteIfExists(tempFile)
+
+  test("missing file-manager path ends one submission and keeps path dispatch active"):
+    val terminal = VirtualTerminal(100, 30)
+    val tui      = TUI(terminal)
+    InteractiveDemo.install(tui)
+    tui.start()
+
+    val currentDir  = System.getProperty("user.dir")
+    val missingPath = Files.createTempFile("siglyph-demo-missing-path-", ".tmp")
+    Files.delete(missingPath)
+    val missing     = missingPath.toAbsolutePath.toString
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("m"), KeyModifiers(ctrl = true)))
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("p"), KeyModifiers(ctrl = true)))
+    currentDir.foreach(_ => terminal.sendInput(TerminalInput.Key(TerminalKey.Backspace)))
+    missing.foreach(character =>
+      terminal.sendInput(TerminalInput.Key(TerminalKey.Character(character.toString)))
+    )
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Enter))
+
+    assertEquals(terminal.viewportLines.count(_.contains("Path not found:")), 1)
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Character("x")))
+    assert(
+      terminal.viewportLines.exists(_.contains(s"${missing.takeRight(12)}x")),
+      terminal.viewportLines
+    )
 
   test("interactive demo lets Tab reach editor autocomplete"):
     val terminal = VirtualTerminal(60, 40)

@@ -67,4 +67,4 @@ final class VirtualTerminal(initialColumns: Int = 80, initialRows: Int = 24)
     allLines.takeRight(currentRows)
 
   private def stripAnsi(value: String): String =
-    value.replaceAll("\\u001b\\[[0-9;?]*[A-Za-z]", "")
+    value.replaceAll("\u001b\\[[0-9;?]*[A-Za-z]", "")

@@ -108,16 +108,23 @@ final class Input(
       case TerminalInput.PasteStart        =>
         val finalized = finishPaste()
         startPaste()
-        if finalized then InputResult.Render else InputResult.NoRender
+        if finalized.exposedChanged then InputResult.Render else InputResult.NoRender
       case TerminalInput.PasteChunk(chunk) =>
-        pasteSession.foreach(_.append(chunk))
-        InputResult.NoRender
+        pasteSession match
+          case Some(session) =>
+            val acceptedBefore = session.acceptedCharacterCount
+            session.append(chunk)
+            if session.acceptedCharacterCount !== acceptedBefore then InputResult.Render
+            else InputResult.NoRender
+          case None          => InputResult.Ignored
       case TerminalInput.PasteEnd          =>
-        if finishPaste() then InputResult.Render else InputResult.NoRender
+        if finishPaste().exposedChanged then InputResult.Render else InputResult.NoRender
       case _                               =>
-        finishPaste()
-        handleNonPasteInput(input)
-        InputResult.Render
+        val finalized = finishPaste()
+        val result    = handleNonPasteInput(input)
+        if finalized.exposedChanged || result === InputResult.Render then InputResult.Render
+        else if finalized.hadSession && result === InputResult.Ignored then InputResult.NoRender
+        else result
 
   override def render(width: Int): ComponentRender =
     val cs            = clusters
@@ -141,64 +148,73 @@ final class Input(
     pasteSession = Some(Input.PasteSession(currentValue, cursorCluster, prefix, suffix))
     currentValue = ""
 
-  private def finishPaste(): Boolean =
+  private def finishPaste(): Input.PasteFinalization =
     pasteSession match
-      case None          => false
+      case None          => Input.PasteFinalization(hadSession = false, exposedChanged = false)
       case Some(session) =>
+        val acceptedBefore = session.acceptedCharacterCount
         pasteSession = None
         session.finish()
+        val exposedChanged = session.acceptedCharacterCount !== acceptedBefore
         if session.isEmpty then
           currentValue = session.baseValue
           cursorCluster = session.baseCursor
-          false
         else
           undoStack.push(Input.State(session.baseValue, session.baseCursor))
           currentValue = session.value
           cursorCluster = session.cursorCluster
           resetAction()
-          true
+        Input.PasteFinalization(hadSession = true, exposedChanged = exposedChanged)
 
-  private def handleNonPasteInput(input: TerminalInput): Unit =
+  private def handleNonPasteInput(input: TerminalInput): InputResult =
     if keybindings.matches(input, KeybindingCommand.EditorUndo) then
-      undo()
+      mutationResult(undo())
     else if keybindings.matches(input, KeybindingCommand.EditorDeleteWordBackward) then
-      deleteWordBackwards()
+      mutationResult(deleteWordBackwards())
     else if keybindings.matches(input, KeybindingCommand.EditorDeleteToLineStart) then
-      deleteToStart()
+      mutationResult(deleteToStart())
     else if keybindings.matches(input, KeybindingCommand.EditorDeleteToLineEnd) then
-      deleteToEnd()
+      mutationResult(deleteToEnd())
     else if keybindings.matches(input, KeybindingCommand.EditorDeleteCharForward) then
-      deleteForwards()
+      mutationResult(deleteForwards())
     else if keybindings.matches(input, KeybindingCommand.EditorDeleteWordForward) then
-      deleteWordForwards()
+      mutationResult(deleteWordForwards())
     else if keybindings.matches(input, KeybindingCommand.EditorDeleteCharBackward) then
-      deleteBackwards()
+      mutationResult(deleteBackwards())
     else if keybindings.matches(input, KeybindingCommand.EditorYank) then
-      yank()
+      mutationResult(yank())
     else if keybindings.matches(input, KeybindingCommand.EditorYankPop) then
-      yankPop()
+      mutationResult(yankPop())
     else if keybindings.matches(input, KeybindingCommand.EditorCursorWordLeft) then
-      moveWordBackwards()
+      mutationResult(moveWordBackwards())
     else if keybindings.matches(input, KeybindingCommand.EditorCursorWordRight) then
-      moveWordForwards()
+      mutationResult(moveWordForwards())
     else if keybindings.matches(input, KeybindingCommand.EditorCursorLeft) then
-      moveLeft()
+      mutationResult(moveLeft())
     else if keybindings.matches(input, KeybindingCommand.EditorCursorRight) then
-      moveRight()
+      mutationResult(moveRight())
     else if keybindings.matches(input, KeybindingCommand.EditorCursorLineStart) then
-      moveToStart()
+      mutationResult(moveToStart())
     else if keybindings.matches(input, KeybindingCommand.EditorCursorLineEnd) then
-      moveToEnd()
+      mutationResult(moveToEnd())
     else if keybindings.matches(input, KeybindingCommand.InputSubmit) then
       onSubmit(currentValue)
+      InputResult.Render
     else if keybindings.matches(input, KeybindingCommand.InputNewLine) then
-      insert("\n")
+      mutationResult(insert("\n"))
     else
       input match
         case TerminalInput.Key(TerminalKey.Character(text), modifiers)
             if !modifiers.ctrl && !modifiers.alt && !modifiers.superKey =>
-          insert(text)
-        case _ => ()
+          mutationResult(insert(text))
+        case _ => InputResult.Ignored
+
+  private def mutationResult(action: => Unit): InputResult =
+    val valueBefore  = currentValue
+    val cursorBefore = cursorCluster
+    action
+    if (currentValue !== valueBefore) || (cursorCluster !== cursorBefore) then InputResult.Render
+    else InputResult.NoRender
 
   private def insert(text: String): Unit =
     if text.nonEmpty then
@@ -319,6 +335,7 @@ final class Input(
 
 object Input:
   private final case class State(value: String, cursorCluster: Int)
+  private final case class PasteFinalization(hadSession: Boolean, exposedChanged: Boolean)
 
   private[scalatui] final class PasteSession(
       val baseValue: String,

@@ -18,7 +18,7 @@ class InputPasteSuite extends munit.FunSuite:
     assertEquals(session.acceptedCharacterCount, chunks.map(_.length.toLong).sum)
     assertEquals(session.value, "leftabe\u0301👩‍💻🇦🇹-right")
 
-  test("active paste exposes value and cursor render without requesting intermediate renders"):
+  test("active paste chunks request render only when accepted text changes exposed state"):
     val input = Input("AB")
     input.focused = true
     input.handleInput(TerminalInput.Key(TerminalKey.Home))
@@ -27,19 +27,93 @@ class InputPasteSuite extends munit.FunSuite:
     assertEquals(input.handleInputResult(TerminalInput.PasteStart), InputResult.NoRender)
     assertEquals(
       input.handleInputResult(TerminalInput.PasteChunk(chunk("e"))),
-      InputResult.NoRender
+      InputResult.Render
     )
     assertEquals(
       input.handleInputResult(TerminalInput.PasteChunk(chunk("\u0301"))),
-      InputResult.NoRender
+      InputResult.Render
     )
     assertEquals(input.value, "Ae\u0301B")
     val active = input.render(20)
     assertEquals(Ansi.strip(active.lines.head), "Ae\u0301B")
     assertEquals(active.cursorPlacements, Vector(CursorPlacement(0, 2)))
 
-    assertEquals(input.handleInputResult(TerminalInput.PasteEnd), InputResult.Render)
+    assertEquals(input.handleInputResult(TerminalInput.PasteEnd), InputResult.NoRender)
     assertEquals(input.value, "Ae\u0301B")
+
+  test("input paste framing classifies fragmented orphan and empty states precisely"):
+    val input = Input("base")
+    val bytes = "€".getBytes(StandardCharsets.UTF_8)
+
+    assertEquals(
+      input.handleInputResult(TerminalInput.PasteChunk(chunk("orphan"))),
+      InputResult.Ignored
+    )
+    assertEquals(input.handleInputResult(TerminalInput.PasteEnd), InputResult.NoRender)
+    assertEquals(input.handleInputResult(TerminalInput.PasteStart), InputResult.NoRender)
+    assertEquals(
+      input.handleInputResult(TerminalInput.PasteChunk(TerminalInputChunk(bytes.take(1)))),
+      InputResult.NoRender
+    )
+    assertEquals(
+      input.handleInputResult(TerminalInput.PasteChunk(TerminalInputChunk(bytes.drop(1)))),
+      InputResult.Render
+    )
+    assertEquals(input.handleInputResult(TerminalInput.PasteStart), InputResult.NoRender)
+    assertEquals(input.handleInputResult(TerminalInput.PasteEnd), InputResult.NoRender)
+    assertEquals(input.value, "base€")
+
+    val flushing = Input()
+    flushing.handleInputResult(TerminalInput.PasteStart)
+    assertEquals(
+      flushing.handleInputResult(TerminalInput.PasteChunk(TerminalInputChunk(bytes.take(1)))),
+      InputResult.NoRender
+    )
+    assertEquals(flushing.handleInputResult(TerminalInput.PasteStart), InputResult.Render)
+    assertEquals(flushing.handleInputResult(TerminalInput.PasteEnd), InputResult.NoRender)
+    assertEquals(flushing.value, "�")
+
+    val ending = Input()
+    ending.handleInputResult(TerminalInput.PasteStart)
+    ending.handleInputResult(TerminalInput.PasteChunk(TerminalInputChunk(bytes.take(1))))
+    assertEquals(ending.handleInputResult(TerminalInput.PasteEnd), InputResult.Render)
+    assertEquals(ending.value, "�")
+
+  test("input paste interruption combines finalization with unsupported input locally"):
+    val empty = Input("base")
+    empty.handleInputResult(TerminalInput.PasteStart)
+    assertEquals(
+      empty.handleInputResult(TerminalInput.Key(TerminalKey.Tab)),
+      InputResult.NoRender
+    )
+    assertEquals(empty.value, "base")
+
+    val changed = Input("base")
+    changed.handleInputResult(TerminalInput.PasteStart)
+    changed.handleInputResult(TerminalInput.PasteChunk(chunk("x")))
+    assertEquals(
+      changed.handleInputResult(TerminalInput.Key(TerminalKey.Tab)),
+      InputResult.NoRender
+    )
+    assertEquals(changed.value, "basex")
+
+  test("unsupported input interruption renders incomplete UTF-8 decoder flush without submitting"):
+    var submitCount = 0
+    val input       = Input("base")
+    val bytes       = "€".getBytes(StandardCharsets.UTF_8)
+    input.onSubmit = _ => submitCount += 1
+
+    assertEquals(input.handleInputResult(TerminalInput.PasteStart), InputResult.NoRender)
+    assertEquals(
+      input.handleInputResult(TerminalInput.PasteChunk(TerminalInputChunk(bytes.take(1)))),
+      InputResult.NoRender
+    )
+    assertEquals(
+      input.handleInputResult(TerminalInput.Key(TerminalKey.Tab)),
+      InputResult.Render
+    )
+    assertEquals(input.value, "base\uFFFD")
+    assertEquals(submitCount, 0)
 
   test("pasted former cursor APC and ESC or C1 string candidates stay inert"):
     val formerApc  = "\u001b_" + "pi" + ":c\u001b\\"
@@ -101,10 +175,10 @@ class InputPasteSuite extends munit.FunSuite:
     (0 until repetitions).foreach { _ =>
       assertEquals(
         input.handleInputResult(TerminalInput.PasteChunk(TerminalInputChunk(blockBytes))),
-        InputResult.NoRender
+        InputResult.Render
       )
     }
-    assertEquals(input.handleInputResult(TerminalInput.PasteEnd), InputResult.Render)
+    assertEquals(input.handleInputResult(TerminalInput.PasteEnd), InputResult.NoRender)
     assertEquals(input.value, expected)
 
     input.handleInput(TerminalInput.Key(TerminalKey.Backspace))

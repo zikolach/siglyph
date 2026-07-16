@@ -3,6 +3,7 @@ package scalatui.demo
 import scalatui.ansi.Ansi
 import scalatui.components.*
 import scalatui.core.{Component, Container}
+import scalatui.syntax.Equality.*
 import scalatui.terminal.{TerminalInput, TerminalKey}
 import scalatui.unicode.Unicode
 
@@ -209,7 +210,7 @@ private object AsciinemaScenarios:
         helper = helper,
         suggestions = suggestions,
         footer = footer,
-        hold = if index == clusters.length - 1 then lastHold else hold
+        hold = if index === clusters.length - 1 then lastHold else hold
       )
     }
 
@@ -406,7 +407,7 @@ private object AsciinemaScenarios:
             Unicode.graphemeClusters(value).takeRight(5).map(cluster => s"key=Character($cluster)"),
           footer = "The input line is rendered by siglyph Input. Width stays stable."
         ),
-        if index == 0 then 0.8 else 1.0
+        if index === 0 then 0.8 else 1.0
       )
     }
 

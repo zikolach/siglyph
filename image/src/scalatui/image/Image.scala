@@ -93,68 +93,86 @@ object ImageDimensionsSniffer:
     else if ascii(bytes, 12, 4) !== "IHDR" then
       Left(ImageHelperError.InvalidImage("PNG data is missing IHDR"))
     else
-      Right(ImageMetadata(
-        "image/png",
-        ImageDimensions(readInt32BE(bytes, 16), readInt32BE(bytes, 20))
-      ))
+      validatedMetadata("image/png", readUInt32BE(bytes, 16), readUInt32BE(bytes, 20))
 
   private def sniffGif(bytes: Array[Byte]): Either[ImageHelperError, ImageMetadata] =
     if bytes.length < 10 then Left(ImageHelperError.InvalidImage("GIF data is missing dimensions"))
     else
-      Right(ImageMetadata(
-        "image/gif",
-        ImageDimensions(readInt16LE(bytes, 6), readInt16LE(bytes, 8))
-      ))
+      validatedMetadata("image/gif", readInt16LE(bytes, 6), readInt16LE(bytes, 8))
 
   private def sniffJpeg(bytes: Array[Byte]): Either[ImageHelperError, ImageMetadata] =
-    var offset = 2
-    while offset + 3 < bytes.length do
+    var offset  = 2
+    var outcome = Option.empty[Either[ImageHelperError, ImageMetadata]]
+    while outcome.isEmpty && ImageDimensionsSniffer.hasBytes(bytes.length, offset, 4) do
       while offset < bytes.length && (unsigned(bytes(offset)) !== 0xff) do offset += 1
       while offset < bytes.length && (unsigned(bytes(offset)) === 0xff) do offset += 1
       if offset >= bytes.length then
-        return Left(ImageHelperError.InvalidImage("JPEG marker is incomplete"))
-      val marker        = unsigned(bytes(offset))
-      offset += 1
-      if marker === 0xd9 || marker === 0xda then
-        return Left(ImageHelperError.InvalidImage("JPEG dimensions were not found"))
-      if offset + 1 >= bytes.length then
-        return Left(ImageHelperError.InvalidImage("JPEG segment length is incomplete"))
-      val segmentLength = readInt16BE(bytes, offset)
-      if segmentLength < 2 || offset + segmentLength > bytes.length then
-        return Left(ImageHelperError.InvalidImage("JPEG segment exceeds available data"))
-      if isStartOfFrame(marker) then
-        if segmentLength < 7 then
-          return Left(ImageHelperError.InvalidImage("JPEG SOF is incomplete"))
-        val height = readInt16BE(bytes, offset + 3)
-        val width  = readInt16BE(bytes, offset + 5)
-        return Right(ImageMetadata("image/jpeg", ImageDimensions(width, height)))
-      offset += segmentLength
-    Left(ImageHelperError.InvalidImage("JPEG dimensions were not found"))
+        outcome = Some(Left(ImageHelperError.InvalidImage("JPEG marker is incomplete")))
+      else
+        val marker = unsigned(bytes(offset))
+        offset += 1
+        if marker === 0xd9 || marker === 0xda then
+          outcome = Some(Left(ImageHelperError.InvalidImage("JPEG dimensions were not found")))
+        else if !ImageDimensionsSniffer.hasBytes(bytes.length, offset, 2) then
+          outcome = Some(Left(ImageHelperError.InvalidImage("JPEG segment length is incomplete")))
+        else
+          val segmentLength = readInt16BE(bytes, offset)
+          if segmentLength < 2 || !ImageDimensionsSniffer.hasBytes(
+              bytes.length,
+              offset,
+              segmentLength
+            )
+          then
+            outcome = Some(Left(ImageHelperError.InvalidImage(
+              "JPEG segment exceeds available data"
+            )))
+          else if isStartOfFrame(marker) then
+            if segmentLength < 7 then
+              outcome = Some(Left(ImageHelperError.InvalidImage("JPEG SOF is incomplete")))
+            else
+              val height = readInt16BE(bytes, offset + 3)
+              val width  = readInt16BE(bytes, offset + 5)
+              outcome = Some(validatedMetadata("image/jpeg", width, height))
+          else offset += segmentLength
+    outcome.getOrElse(Left(ImageHelperError.InvalidImage("JPEG dimensions were not found")))
 
   private def sniffWebP(bytes: Array[Byte]): Either[ImageHelperError, ImageMetadata] =
     if bytes.length < 20 then Left(ImageHelperError.InvalidImage("WebP data is incomplete"))
     else
       chunkType(bytes, 12) match
         case "VP8X" if bytes.length >= 30                                   =>
-          val width  = readUInt24LE(bytes, 24) + 1
-          val height = readUInt24LE(bytes, 27) + 1
-          Right(ImageMetadata("image/webp", ImageDimensions(width, height)))
+          val width  = readUInt24LE(bytes, 24) + 1L
+          val height = readUInt24LE(bytes, 27) + 1L
+          validatedMetadata("image/webp", width, height)
         case "VP8L" if bytes.length >= 25 && (unsigned(bytes(20)) === 0x2f) =>
           val b1     = unsigned(bytes(21))
           val b2     = unsigned(bytes(22))
           val b3     = unsigned(bytes(23))
           val b4     = unsigned(bytes(24))
-          val width  = 1 + (((b2 & 0x3f) << 8) | b1)
-          val height = 1 + (((b4 & 0x0f) << 10) | (b3 << 2) | ((b2 & 0xc0) >> 6))
-          Right(ImageMetadata("image/webp", ImageDimensions(width, height)))
+          val width  = 1L + (((b2 & 0x3f) << 8) | b1).toLong
+          val height = 1L + (((b4 & 0x0f) << 10) | (b3 << 2) | ((b2 & 0xc0) >> 6)).toLong
+          validatedMetadata("image/webp", width, height)
         case "VP8 "
             if bytes.length >= 30 && (unsigned(bytes(23)) === 0x9d) && (unsigned(
               bytes(24)
             ) === 0x01) && (unsigned(bytes(25)) === 0x2a) =>
-          val width  = readInt16LE(bytes, 26) & 0x3fff
-          val height = readInt16LE(bytes, 28) & 0x3fff
-          Right(ImageMetadata("image/webp", ImageDimensions(width, height)))
+          val width  = (readInt16LE(bytes, 26) & 0x3fff).toLong
+          val height = (readInt16LE(bytes, 28) & 0x3fff).toLong
+          validatedMetadata("image/webp", width, height)
         case _                                                              => Left(ImageHelperError.InvalidImage("WebP dimensions were not found"))
+
+  private def validatedMetadata(
+      mimeType: String,
+      width: Long,
+      height: Long
+  ): Either[ImageHelperError, ImageMetadata] =
+    if width <= 0L || height <= 0L || width > Int.MaxValue || height > Int.MaxValue then
+      Left(ImageHelperError.InvalidImage(s"Invalid image dimensions: ${width}x$height"))
+    else Right(ImageMetadata(mimeType, ImageDimensions(width.toInt, height.toInt)))
+
+  private[image] def hasBytes(bytesLength: Int, offset: Int, count: Int): Boolean =
+    bytesLength >= 0 && offset >= 0 && count >= 0 && offset <= bytesLength &&
+      count <= bytesLength - offset
 
   private def isPng(bytes: Array[Byte]): Boolean =
     bytes.length >= 8 && bytes(0) === 0x89.toByte && bytes(1) === 'P'.toByte && bytes(
@@ -183,11 +201,11 @@ object ImageDimensionsSniffer:
   private def ascii(bytes: Array[Byte], offset: Int, length: Int): String =
     String(bytes.slice(offset, offset + length), java.nio.charset.StandardCharsets.US_ASCII)
 
-  private def readInt32BE(bytes: Array[Byte], offset: Int): Int =
-    (unsigned(bytes(offset)) << 24) |
-      (unsigned(bytes(offset + 1)) << 16) |
-      (unsigned(bytes(offset + 2)) << 8) |
-      unsigned(bytes(offset + 3))
+  private def readUInt32BE(bytes: Array[Byte], offset: Int): Long =
+    (unsigned(bytes(offset)).toLong << 24) |
+      (unsigned(bytes(offset + 1)).toLong << 16) |
+      (unsigned(bytes(offset + 2)).toLong << 8) |
+      unsigned(bytes(offset + 3)).toLong
 
   private def readInt16BE(bytes: Array[Byte], offset: Int): Int =
     (unsigned(bytes(offset)) << 8) | unsigned(bytes(offset + 1))
@@ -195,10 +213,10 @@ object ImageDimensionsSniffer:
   private def readInt16LE(bytes: Array[Byte], offset: Int): Int =
     unsigned(bytes(offset)) | (unsigned(bytes(offset + 1)) << 8)
 
-  private def readUInt24LE(bytes: Array[Byte], offset: Int): Int =
-    unsigned(
-      bytes(offset)
-    ) | (unsigned(bytes(offset + 1)) << 8) | (unsigned(bytes(offset + 2)) << 16)
+  private def readUInt24LE(bytes: Array[Byte], offset: Int): Long =
+    unsigned(bytes(offset)).toLong |
+      (unsigned(bytes(offset + 1)).toLong << 8) |
+      (unsigned(bytes(offset + 2)).toLong << 16)
 
   private def unsigned(byte: Byte): Int = byte & 0xff
 
@@ -227,7 +245,8 @@ object ImageSizing:
  * so this module stays dependency-free. It does not decode, validate, scale, or transcode images.
  * Supported output reserves ordinary blank rows and carries one semantic control separately. The
  * TUI validates that control's geometry and encodes it only while assembling final synchronized
- * output. Unsupported capability returns readable ordinary text with no control.
+ * output. Unsupported capability and supported geometry above 10,000 frame rows return readable
+ * ordinary text with no control. The geometry guard runs before frame-row or image-id allocation.
  *
  * By default, this high-level component opts into runtime terminal cell dimensions because it is
  * rendered inside a [[scalatui.core.TUI]] lifecycle that sends the cell-size query on start. Pass
@@ -250,30 +269,51 @@ final class Image(
   def currentImageId: Option[Int] = imageId
 
   override def render(width: Int): ComponentRender =
-    val safeWidth = math.max(0, width)
-    if safeWidth <= 0 then ComponentRender.text("")
+    val safeWidth     = math.max(0, width)
+    val renderOptions = effectiveRenderOptions
+    if capabilities.images.nonEmpty &&
+      renderedRows(safeWidth, renderOptions) > Image.MaxRenderedFrameRows
+    then fallback(safeWidth)
+    else if safeWidth <= 0 && capabilities.images.nonEmpty then ComponentRender.text("")
     else
       TerminalImageProtocol.renderBase64Image(
         payload,
         dimensions,
         capabilities,
         safeWidth,
-        options.copy(imageId = imageId)
+        renderOptions
       ) match
-        case Some(result) =>
+        case Some(result) if result.rows <= Image.MaxRenderedFrameRows =>
+          val lines = Vector.fill(result.rows)("")
           imageId = result.imageId.orElse(imageId)
           ComponentRender(
-            Vector.fill(result.rows)(""),
+            lines,
             Vector(TerminalControlPlacement(row = 0, column = 0, result.control)),
             Vector.empty
           )
-        case None         =>
-          ComponentRender.text(theme.fallbackStyle(TerminalImageProtocol.fallback(
-            dimensions,
-            options.mimeType,
-            options.filename,
-            safeWidth
-          )))
+        case Some(_) | None                                            => fallback(safeWidth)
+
+  private def effectiveRenderOptions: ImageRenderOptions =
+    val currentOptions = options.copy(imageId = imageId)
+    currentOptions.cellDimensionsSource match
+      case ImageCellDimensionsSource.Fixed   => currentOptions
+      case ImageCellDimensionsSource.Runtime =>
+        currentOptions.copy(
+          cellDimensions = TerminalImageProtocol.cellDimensions,
+          cellDimensionsSource = ImageCellDimensionsSource.Fixed
+        )
+
+  private def renderedRows(width: Int, renderOptions: ImageRenderOptions): Int =
+    TerminalImageProtocol.calculateCellSize(dimensions, renderOptions, width).heightCells
+
+  private def fallback(width: Int): ComponentRender =
+    val themed = theme.fallbackStyle(TerminalImageProtocol.fallback(
+      dimensions,
+      options.mimeType,
+      options.filename,
+      width
+    ))
+    ComponentRender.text(Ansi.truncateToWidth(themed, width, ""))
 
   /**
    * Typed cleanup control for the current image id when the active protocol supports one.
@@ -285,6 +325,8 @@ final class Image(
     imageId.flatMap(TerminalImageProtocol.deleteImage(_, capabilities))
 
 object Image:
+  private[image] val MaxRenderedFrameRows = 10000
+
   /**
    * Validate raw standard base64 before constructing an image component on JVM or Scala Native.
    *
