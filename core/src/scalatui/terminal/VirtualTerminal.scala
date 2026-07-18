@@ -3,6 +3,7 @@ package scalatui.terminal
 import scalatui.syntax.Equality.*
 
 import scala.collection.mutable.ArrayBuffer
+import java.util.concurrent.atomic.AtomicReference
 
 /** Test terminal that records writes and can deliver scripted input/resize events. */
 final class VirtualTerminal(initialColumns: Int = 80, initialRows: Int = 24)
@@ -118,12 +119,17 @@ final class VirtualTerminal(initialColumns: Int = 80, initialRows: Int = 24)
   private def deliverInputOffCallerThread(inputs: Vector[TerminalInput]): Unit =
     if inputs.nonEmpty then
       val handler  = inputHandler
+      val failure  = AtomicReference[Throwable](null)
       val delivery = Thread(
-        () => inputs.foreach(handler),
+        () =>
+          try inputs.foreach(handler)
+          catch case error: Throwable => failure.set(error),
         "siglyph-virtual-terminal-input"
       )
       delivery.setDaemon(true)
       delivery.start()
+      delivery.join()
+      Option(failure.get()).foreach(throw _)
 
   private def processCsi(data: String, start: Int): Int =
     var index = start + 2
