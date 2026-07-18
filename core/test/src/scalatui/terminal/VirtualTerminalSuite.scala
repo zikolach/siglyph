@@ -55,7 +55,11 @@ class VirtualTerminalSuite extends munit.FunSuite:
   test("OSC and string-control output does not advance the emulated cursor"):
     val terminal = VirtualTerminal(80, 24)
     var inputs   = Vector.empty[TerminalInput]
-    terminal.start(input => inputs :+= input, () => ())
+    val reported = CountDownLatch(1)
+    val onInput  = (input: TerminalInput) =>
+      inputs :+= input
+      reported.countDown()
+    terminal.start(onInput, () => ())
 
     terminal.write("abc")
     terminal.setTitle("title")
@@ -63,6 +67,7 @@ class VirtualTerminalSuite extends munit.FunSuite:
     terminal.write("\u001b_ignored-apc\u001b\\")
     terminal.write(TerminalCursorProtocol.CursorPositionQuery)
 
+    assert(reported.await(5, TimeUnit.SECONDS), "cursor position report was not delivered")
     val report = inputs.collect { case TerminalInput.RawChunk(chunk) => chunk.toArray }.flatten
     assertEquals(
       String(report.toArray, java.nio.charset.StandardCharsets.UTF_8),

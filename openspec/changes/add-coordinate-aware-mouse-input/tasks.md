@@ -63,3 +63,4 @@
 - [x] 8.5 Precompute visible overlay ids once per mouse event to keep overlay routing linear.
 - [x] 8.6 Make mouse lifecycle intent visible across threads in JVM, Native, and virtual terminals.
 - [x] 8.7 Deliver virtual cursor-position reports off the output caller's thread.
+- [x] 8.8 Let a late cursor-position response establish the mouse frame origin and rerender.

@@ -24,7 +24,7 @@ import scalatui.terminal.{
 import scala.collection.mutable.ArrayBuffer
 
 import java.util.concurrent.{CountDownLatch, TimeUnit}
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 
 /** Terminal screen buffer mode owned by [[TUI]] for one runtime lifecycle. */
 enum TUIScreenMode derives CanEqual:
@@ -540,9 +540,11 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     flight.map(value => value.copy(subscribers = value.subscribers.filterNot(_ eq subscriber)))
 
   private def initializeMouseFrameOrigin(timeoutMillis: Long = 100L): Unit =
-    val result = AtomicReference(Option.empty[TerminalCursorProtocol.CursorPosition])
-    val ready  = CountDownLatch(1)
-    val cancel = subscribeQuery(
+    latestFrameStartRow = None
+    val result                 = AtomicReference(Option.empty[TerminalCursorProtocol.CursorPosition])
+    val ready                  = CountDownLatch(1)
+    val initializationComplete = AtomicBoolean(false)
+    subscribeQuery(
       () => cursorPositionFlight,
       flight => cursorPositionFlight = flight,
       "\r" + TerminalCursorProtocol.CursorPositionQuery,
@@ -550,12 +552,19 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         case TerminalQueryResult.Success(position) =>
           result.set(Some(position))
           ready.countDown()
+          if initializationComplete.get() then establishMouseFrameOrigin(position)
         case _                                     => ready.countDown()
       }
     )
-    try ready.await(math.max(0L, timeoutMillis), TimeUnit.MILLISECONDS)
-    finally cancel()
-    latestFrameStartRow = result.get().map(_.row)
+    ready.await(math.max(0L, timeoutMillis), TimeUnit.MILLISECONDS)
+    initializationComplete.set(true)
+    result.get().foreach(establishMouseFrameOrigin)
+    requestRenderInternal(force = true, clear = isAlternateScreenMode)
+
+  private def establishMouseFrameOrigin(
+      position: TerminalCursorProtocol.CursorPosition
+  ): Unit =
+    latestFrameStartRow = Some(position.row)
     requestRenderInternal(force = true, clear = isAlternateScreenMode)
 
   private def classifyIngressLocked(input: TerminalInput): TUI.IngressClassification =

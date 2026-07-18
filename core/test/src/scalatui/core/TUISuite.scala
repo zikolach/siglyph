@@ -315,12 +315,9 @@ class TUISuite extends munit.FunSuite:
     override def write(data: String): Unit =
       writes += data
       if repliesToCursorQueries && data.contains(TerminalCursorProtocol.CursorPositionQuery) then
-        val response = s"\u001b[${cursorRow + 1};1R"
-        scalatui.terminal.TerminalInputBuffer()
-          .process(scalatui.terminal.TerminalInputChunk(
-            response.getBytes(java.nio.charset.StandardCharsets.UTF_8)
-          ))
-          .foreach(inputHandler)
+        val delivery = Thread(() => sendCursorReport(), "cursor-query-switching-terminal-input")
+        delivery.setDaemon(true)
+        delivery.start()
 
     override def columns: Int             = 20
     override def rows: Int                = 10
@@ -333,6 +330,13 @@ class TUISuite extends munit.FunSuite:
 
     def sendMouse(input: TerminalInput.Mouse): Unit = inputHandler(input)
     def sendResize(): Unit                          = resizeHandler()
+    def sendCursorReport(): Unit                    =
+      val response = s"\u001b[${cursorRow + 1};1R"
+      scalatui.terminal.TerminalInputBuffer()
+        .process(scalatui.terminal.TerminalInputChunk(
+          response.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+        ))
+        .foreach(inputHandler)
 
   final class DrainingTerminal extends Terminal, TerminalInputDrainSupport:
     var drainCalls     = 0
@@ -688,6 +692,24 @@ class TUISuite extends munit.FunSuite:
     tui.stop()
 
     assertEquals(target.events.toVector, Vector.empty)
+
+  test("mouse routing accepts a cursor-position report after the startup timeout"):
+    val terminal = CursorQuerySwitchingTerminal()
+    val target   = MouseLine("target")
+    val tui      = TUI(terminal, TUIOptions(mouseInput = true))
+    tui.addChild(target)
+
+    terminal.cursorRow = 4
+    terminal.repliesToCursorQueries = false
+    tui.start()
+    terminal.sendMouse(TerminalInput.Mouse(MouseAction.Press(MouseButton.Left), row = 4, col = 0))
+    assertEquals(target.events.toVector, Vector.empty)
+
+    terminal.sendCursorReport()
+    terminal.sendMouse(TerminalInput.Mouse(MouseAction.Press(MouseButton.Left), row = 4, col = 0))
+    tui.stop()
+
+    assertEquals(target.events.map(_._1).toVector, Vector("target"))
 
   test("mouse routing falls back to ancestor when child ignores"):
     val terminal = VirtualTerminal(20, 5)

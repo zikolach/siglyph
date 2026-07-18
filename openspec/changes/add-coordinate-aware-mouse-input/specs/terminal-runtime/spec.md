@@ -72,6 +72,10 @@ The terminal runtime SHALL track the visible origin of mouse-enabled TUI frames 
 - **WHEN** the terminal does not provide a usable cursor-position report before rendering
 - **THEN** coordinate-aware component mouse routing is ignored until a frame origin is known
 
+#### Scenario: Late cursor position enables mouse routing
+- **WHEN** a usable cursor-position report arrives after the initial startup wait
+- **THEN** the runtime records the frame origin, rerenders, and enables coordinate-aware component mouse routing
+
 ### Requirement: Mouse reporting captures terminal wheel scrollback
 Interactive terminal mouse reporting SHALL document that wheel events are delivered to the application rather than normal terminal scrollback while mouse input is enabled.
 
