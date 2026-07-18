@@ -155,7 +155,10 @@ class TUISuite extends munit.FunSuite:
   ) extends Component,
         MouseInputHandler:
     val events                                                        = scala.collection.mutable.ArrayBuffer.empty[(String, MouseInputContext)]
-    override def render(width: Int): ComponentRender                  = ComponentRender.text(lines)
+    var renders                                                       = 0
+    override def render(width: Int): ComponentRender                  =
+      renders += 1
+      ComponentRender.text(lines)
     override def handleMouse(context: MouseInputContext): InputResult =
       events += name -> context
       result
@@ -706,6 +709,7 @@ class TUISuite extends munit.FunSuite:
     assertEquals(target.events.toVector, Vector.empty)
 
     terminal.sendCursorReport()
+    assertEquals(target.renders, 2)
     terminal.sendMouse(TerminalInput.Mouse(MouseAction.Press(MouseButton.Left), row = 4, col = 0))
     tui.stop()
 

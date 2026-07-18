@@ -24,7 +24,6 @@ import scalatui.terminal.{
 import scala.collection.mutable.ArrayBuffer
 
 import java.util.concurrent.{CountDownLatch, TimeUnit}
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 
 /** Terminal screen buffer mode owned by [[TUI]] for one runtime lifecycle. */
 enum TUIScreenMode derives CanEqual:
@@ -541,24 +540,30 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
 
   private def initializeMouseFrameOrigin(timeoutMillis: Long = 100L): Unit =
     latestFrameStartRow = None
-    val result                 = AtomicReference(Option.empty[TerminalCursorProtocol.CursorPosition])
+    val stateLock              = Object()
     val ready                  = CountDownLatch(1)
-    val initializationComplete = AtomicBoolean(false)
+    var result                 = Option.empty[TerminalCursorProtocol.CursorPosition]
+    var initialRenderRequested = false
     subscribeQuery(
       () => cursorPositionFlight,
       flight => cursorPositionFlight = flight,
       "\r" + TerminalCursorProtocol.CursorPositionQuery,
       {
         case TerminalQueryResult.Success(position) =>
-          result.set(Some(position))
-          ready.countDown()
-          if initializationComplete.get() then establishMouseFrameOrigin(position)
+          val arrivedLate = stateLock.synchronized {
+            result = Some(position)
+            ready.countDown()
+            initialRenderRequested
+          }
+          if arrivedLate then establishMouseFrameOrigin(position)
         case _                                     => ready.countDown()
       }
     )
     ready.await(math.max(0L, timeoutMillis), TimeUnit.MILLISECONDS)
-    initializationComplete.set(true)
-    result.get().foreach(establishMouseFrameOrigin)
+    stateLock.synchronized {
+      initialRenderRequested = true
+      latestFrameStartRow = result.map(_.row)
+    }
     requestRenderInternal(force = true, clear = isAlternateScreenMode)
 
   private def establishMouseFrameOrigin(
