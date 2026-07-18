@@ -2,6 +2,7 @@ package scalatui.core
 
 import scalatui.ansi.Ansi
 import scalatui.syntax.Equality.*
+import scalatui.syntax.Containment.*
 import scalatui.terminal.{
   KeyEventType,
   RgbColor,
@@ -1050,11 +1051,13 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     val frameStart = latestFrameStartRow
     val result     = frameStart match
       case Some(startRow) =>
-        val frameRow      = input.row - startRow
-        val overlayResult = latestOverlayLayouts.reverseIterator
-          .filter(layout =>
-            overlayStack.exists(entry => (entry.id === layout.id) && isOverlayVisible(entry))
-          )
+        val frameRow          = input.row - startRow
+        val visibleOverlayIds = overlayStack.iterator
+          .filter(isOverlayVisible)
+          .map(_.id)
+          .toSet
+        val overlayResult     = latestOverlayLayouts.reverseIterator
+          .filter(layout => visibleOverlayIds.contains_(layout.id))
           .map(layout => routeMouseInNode(input, frameRow, input.col, startRow, layout.node))
           .find(_ !== InputResult.Ignored)
         overlayResult

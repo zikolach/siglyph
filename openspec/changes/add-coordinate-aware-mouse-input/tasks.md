@@ -60,3 +60,6 @@
 - [x] 8.2 Clarify that terminal mouse reporting configuration records start/stop lifecycle intent rather than immediately toggling a running backend.
 - [x] 8.3 Integrate retained mouse layout with typed component output and migrate the mouse demo after rebasing onto the typed-rendering API.
 - [x] 8.4 Keep VirtualTerminal cursor reports stable across OSC and string-control output used by rendered frames.
+- [x] 8.5 Precompute visible overlay ids once per mouse event to keep overlay routing linear.
+- [x] 8.6 Make mouse lifecycle intent visible across threads in JVM, Native, and virtual terminals.
+- [x] 8.7 Deliver virtual cursor-position reports off the output caller's thread.

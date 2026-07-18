@@ -54,7 +54,7 @@ final class SttyTerminal(
     rowsOverride.orElse(StreamTerminal.envInt("LINES")).getOrElse(24)
   private var resizeHandler: () => Unit                                  = () => ()
   private var resizeThread: Thread | Null                                = null
-  private var mouseReportingEnabled                                      = false
+  @volatile private var mouseReportingEnabled                            = false
   private var mouseCleanupPending                                        = false
   private val keyboardProtocolNegotiator                                 = KittyKeyboardProtocolNegotiator()
 

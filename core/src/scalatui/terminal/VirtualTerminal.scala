@@ -3,6 +3,7 @@ package scalatui.terminal
 import scalatui.syntax.Equality.*
 
 import scala.collection.mutable.ArrayBuffer
+import java.util.concurrent.atomic.AtomicReference
 
 /** Test terminal that records writes and can deliver scripted input/resize events. */
 final class VirtualTerminal(initialColumns: Int = 80, initialRows: Int = 24)
@@ -18,7 +19,7 @@ final class VirtualTerminal(initialColumns: Int = 80, initialRows: Int = 24)
   private var currentRows                         = initialRows
   private var cursorRow                           = 0
   private var cursorCol                           = 0
-  private var mouseReportingEnabled               = false
+  @volatile private var mouseReportingEnabled     = false
 
   override def mouseReportingEnabled_=(enabled: Boolean): Unit =
     mouseReportingEnabled = enabled
@@ -91,9 +92,9 @@ final class VirtualTerminal(initialColumns: Int = 80, initialRows: Int = 24)
       data.charAt(index) match
         case '\u001b' if data.startsWith(TerminalCursorProtocol.CursorPositionQuery, index) =>
           val response = s"\u001b[${cursorRow + 1};${cursorCol + 1}R"
-          TerminalInputBuffer()
+          val inputs   = TerminalInputBuffer()
             .process(TerminalInputChunk(response.getBytes(java.nio.charset.StandardCharsets.UTF_8)))
-            .foreach(inputHandler)
+          deliverInputOffCallerThread(inputs)
           index += TerminalCursorProtocol.CursorPositionQuery.length
         case '\u001b' if index + 1 < data.length && data.charAt(index + 1) === '['          =>
           index = processCsi(data, index)
@@ -114,6 +115,19 @@ final class VirtualTerminal(initialColumns: Int = 80, initialRows: Int = 24)
           advanceColumn()
           index += Character.charCount(data.codePointAt(index))
         case _                                                                              => index += 1
+
+  private def deliverInputOffCallerThread(inputs: Vector[TerminalInput]): Unit =
+    if inputs.nonEmpty then
+      val handler       = inputHandler
+      val failure       = AtomicReference[Throwable](null)
+      val run: Runnable = () =>
+        try inputs.foreach(handler)
+        catch case error: Throwable => failure.set(error)
+      val delivery      = Thread(run, "siglyph-virtual-terminal-input")
+      delivery.setDaemon(true)
+      delivery.start()
+      delivery.join()
+      Option(failure.get()).foreach(throw _)
 
   private def processCsi(data: String, start: Int): Int =
     var index = start + 2

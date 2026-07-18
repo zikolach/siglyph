@@ -64,7 +64,7 @@ final class PosixTerminal(
   private var inputCleanupPending                                           = false
   private var pasteCleanupPending                                           = false
   private var kittyCleanupPending                                           = false
-  private var mouseReportingEnabled                                         = false
+  @volatile private var mouseReportingEnabled                               = false
   private var mouseCleanupPending                                           = false
   private[native] var cleanupFailureForTesting: String => Option[Throwable] = _ => None
   private[native] var writeFailureForTesting: String => Option[Throwable]   = _ => None
