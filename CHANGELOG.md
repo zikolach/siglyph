@@ -7,6 +7,40 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-18
+
+### Added
+
+- Added closed, typed `ComponentRender` output with semantic terminal controls
+  and frame-relative cursor placements preserved through containers, overlays,
+  differential rendering, and JVM and Scala Native backends. #39 #40
+- Added generated Unicode 17.0.0 grapheme-break tables and all 766 official
+  UAX #29 conformance fixtures for shared JVM and Scala Native behavior. #40
+
+### Changed
+
+- **Breaking:** Changed `Component.render(width)` and frame builders to return
+  `ComponentRender`, and replaced the removed `CursorMarker` API with validated
+  `CursorPlacement` metadata. #39 #40
+- **Breaking:** Replaced raw image base64 strings with validated
+  `Base64ImagePayload` values, renamed `ImageSource.base64Data` to `payload`,
+  and required typed image construction or validation before protocol output.
+  #38
+- Restricted executable component-string metadata to bounded, validated SGR and
+  OSC 8 sequences; image protocol authority now flows only through typed terminal
+  controls with deterministic Kitty cleanup. #39 #40
+- **Behavior change:** Replaced heuristic grapheme grouping with Unicode 17.0.0
+  UAX #29 extended grapheme segmentation across text editing, cursor movement,
+  ANSI width calculations, wrapping, truncation, and slicing. #40
+
+### Fixed
+
+- Hardened image dimension parsing, JPEG bounds, oversized render geometry, and
+  width-safe fallbacks for malformed or extreme inputs. #38 #42
+- Improved precise `InputResult` handling for `Input` and `SelectList`, Markdown
+  failure recovery, themed extras width safety, and deterministic terminal
+  lifecycle and concurrency behavior. #42
+
 ## [0.5.0] - 2026-07-12
 
 ### Added
@@ -194,7 +228,8 @@ and this project uses semantic versioning while it remains pre-1.0.
 - GitHub Actions CI, jar packaging, GitHub Packages publishing, and GitHub
   release artifacts.
 
-[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/zikolach/siglyph/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/zikolach/siglyph/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/zikolach/siglyph/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/zikolach/siglyph/compare/v0.2.7...v0.3.0
