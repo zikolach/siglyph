@@ -105,10 +105,8 @@ class PosixTerminalSuite extends munit.FunSuite:
       () =>
         try
           started.countDown()
-          val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
-          while release.getCount > 0L && System.nanoTime() < deadline do Thread.onSpinWait()
           scala.Predef.assert(
-            release.getCount <= 0L,
+            release.await(5, TimeUnit.SECONDS),
             "synthetic old Native flush worker was not released"
           )
         catch case failure: Throwable => workerFailure.set(Some(failure))

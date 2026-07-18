@@ -86,3 +86,4 @@
 
 - [x] 11.1 Use the explicit Scalafix CLI Maven coordinate for the Coursier fallback.
 - [x] 11.2 Gate the cleanup-failure concurrency test on the pre-started `run()` thread's observable waiting state before calling `stop()`.
+- [x] 11.3 Block the synthetic Native flush worker on its release latch instead of CPU-spinning.
