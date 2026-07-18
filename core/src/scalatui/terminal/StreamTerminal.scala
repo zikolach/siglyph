@@ -43,8 +43,8 @@ class StreamTerminal(
     inputGeneration = inputDelivery.start(inputBuffer.clear())
     running = true
     val generation = inputGeneration
-    val thread     = Thread(() => readLoop(generation), "scala-tui-stream-terminal-input")
-    val flusher    = Thread(() => flushLoop(generation), "scala-tui-stream-terminal-flush")
+    val thread     = Thread(() => readLoop(generation), "siglyph-stream-terminal-input")
+    val flusher    = Thread(() => flushLoop(generation), "siglyph-stream-terminal-flush")
     thread.setDaemon(true)
     flusher.setDaemon(true)
     inputThread = thread

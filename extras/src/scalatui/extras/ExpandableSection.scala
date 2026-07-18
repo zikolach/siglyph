@@ -99,7 +99,7 @@ final class ExpandableSection(
     val horizontal = " ".repeat(paddingX)
     Ansi.wrapTextWithAnsi(content, innerWidth).map { line =>
       val padded = horizontal + Ansi.padRight(line, innerWidth) + horizontal
-      style(Ansi.truncateToWidth(padded, width, ""))
+      Ansi.truncateToWidth(style(padded), width, "")
     }
 
 private final case class SectionContent(title: String, body: String, hint: Option[String])

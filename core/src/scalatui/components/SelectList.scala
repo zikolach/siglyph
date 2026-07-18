@@ -36,35 +36,56 @@ final class SelectList private (
     ()
 
   override def handleInputResult(input: TerminalInput): InputResult = input match
-    case TerminalInput.PasteStart if options.effectiveFiltering.enabled        =>
+    case TerminalInput.PasteStart if options.effectiveFiltering.enabled                  =>
       val changed = commitPaste()
       pasteSession = Some(FilterPasteSession(filterQuery))
       if changed then InputResult.Render else InputResult.NoRender
-    case TerminalInput.PasteChunk(chunk) if options.effectiveFiltering.enabled =>
+    case TerminalInput.PasteChunk(chunk) if options.effectiveFiltering.enabled           =>
       pasteSession match
         case Some(session) =>
           session.append(chunk)
           InputResult.NoRender
         case None          => InputResult.Ignored
-    case TerminalInput.PasteEnd if options.effectiveFiltering.enabled          =>
+    case TerminalInput.PasteEnd if options.effectiveFiltering.enabled                    =>
       if commitPaste() then InputResult.Render else InputResult.NoRender
-    case _                                                                     =>
-      commitPaste()
-      handleNonPasteInput(input)
-      InputResult.Render
+    case TerminalInput.PasteStart | TerminalInput.PasteChunk(_) | TerminalInput.PasteEnd =>
+      InputResult.Ignored
+    case _                                                                               =>
+      val hadPaste  = pasteSession.nonEmpty
+      val committed = commitPaste()
+      val result    = handleNonPasteInput(input)
+      if committed || result === InputResult.Render then InputResult.Render
+      else if hadPaste && result === InputResult.Ignored then InputResult.NoRender
+      else result
 
-  private def handleNonPasteInput(input: TerminalInput): Unit = input match
-    case TerminalInput.Key(TerminalKey.Up, _)     => moveSelection(-1)
-    case TerminalInput.Key(TerminalKey.Down, _)   => moveSelection(1)
-    case TerminalInput.Key(TerminalKey.Enter, _)  => selected.foreach(onSelect)
-    case TerminalInput.Key(TerminalKey.Escape, _) => onCancel()
+  private def handleNonPasteInput(input: TerminalInput): InputResult = input match
+    case TerminalInput.Key(TerminalKey.Up, _)     => selectionResult(-1)
+    case TerminalInput.Key(TerminalKey.Down, _)   => selectionResult(1)
+    case TerminalInput.Key(TerminalKey.Enter, _)  =>
+      selected match
+        case Some(item) =>
+          onSelect(item)
+          InputResult.Render
+        case None       => InputResult.NoRender
+    case TerminalInput.Key(TerminalKey.Escape, _) =>
+      onCancel()
+      InputResult.Render
     case TerminalInput.Key(TerminalKey.Backspace, _)
         if options.effectiveFiltering.enabled && filterQuery.nonEmpty =>
       updateFilter(dropLastGrapheme(filterQuery))
+      InputResult.Render
     case TerminalInput.Key(TerminalKey.Character(text), modifiers)
         if options.effectiveFiltering.enabled && !modifiers.ctrl && !modifiers.alt && !modifiers.superKey && text.nonEmpty =>
       updateFilter(filterQuery + text)
-    case _                                        => ()
+      InputResult.Render
+    case _                                        => InputResult.Ignored
+
+  private def selectionResult(delta: Int): InputResult =
+    val indexBefore  = selectedIndex
+    val scrollBefore = scrollOffset
+    moveSelection(delta)
+    if (selectedIndex !== indexBefore) || (scrollOffset !== scrollBefore) then InputResult.Render
+    else InputResult.NoRender
 
   /** Move selection up/down by logical items. */
   def moveSelectionBy(delta: Int): Unit = moveSelection(delta)

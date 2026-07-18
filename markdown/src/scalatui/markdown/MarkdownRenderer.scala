@@ -4,6 +4,7 @@ import scalatui.ansi.Ansi
 import scalatui.core.{Component, ComponentRender}
 import scalatui.syntax.Equality.*
 import scalatui.terminal.TerminalCapabilities
+import scala.util.control.NonFatal
 
 /** Converts Markdown source to ANSI-aware, width-safe terminal lines. */
 trait MarkdownRenderer:
@@ -70,12 +71,16 @@ object MarkdownBlock:
 /** Dependency-free line-oriented Markdown parser for the documented baseline subset. */
 object BasicMarkdownParser extends MarkdownParser:
   override def parse(markdown: String): Either[String, Vector[MarkdownBlock]] =
-    try
-      Right(parseBlocks(markdown.replace(
-        "\r\n",
-        "\n"
-      ).replace('\r', '\n').split("\n", -1).toVector))
-    catch case e: Throwable => Left(Option(e.getMessage).getOrElse(e.getClass.getSimpleName))
+    recoverParse(parseBlocks(markdown.replace(
+      "\r\n",
+      "\n"
+    ).replace('\r', '\n').split("\n", -1).toVector))
+
+  private[markdown] def recoverParse(
+      parseResult: => Vector[MarkdownBlock]
+  ): Either[String, Vector[MarkdownBlock]] =
+    try Right(parseResult)
+    catch case NonFatal(e) => Left(Option(e.getMessage).getOrElse(e.getClass.getSimpleName))
 
   private def parseBlocks(lines: Vector[String]): Vector[MarkdownBlock] =
     val out = Vector.newBuilder[MarkdownBlock]
@@ -224,12 +229,13 @@ final class BasicMarkdownRenderer(
     options: MarkdownRenderOptions = MarkdownRenderOptions()
 ) extends MarkdownRenderer:
   override def render(markdown: String, width: Int): Vector[String] =
-    val safeWidth = math.max(1, width)
-    val rendered  = parser.parse(markdown) match
-      case Right(blocks) => renderBlocks(blocks, safeWidth)
-      case Left(_)       => plainFallback(markdown, safeWidth)
-    if rendered.isEmpty && markdown.trim.nonEmpty then plainFallback(markdown, safeWidth)
-    else rendered.map(line => Ansi.truncateToWidth(line, safeWidth, ""))
+    if width <= 0 then Vector.empty
+    else
+      val rendered = parser.parse(markdown) match
+        case Right(blocks) => renderBlocks(blocks, width)
+        case Left(_)       => plainFallback(markdown, width)
+      if rendered.isEmpty && markdown.trim.nonEmpty then plainFallback(markdown, width)
+      else rendered.map(line => Ansi.truncateToWidth(line, width, ""))
 
   private def renderBlocks(blocks: Vector[MarkdownBlock], width: Int): Vector[String] =
     blocks.flatMap(renderBlock(_, width)).dropWhile(_.isEmpty).reverse.dropWhile(_.isEmpty).reverse

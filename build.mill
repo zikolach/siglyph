@@ -62,12 +62,20 @@ private def runScalafmt(check: Boolean): Unit =
 
 private def runScalafix(): Unit =
   runShell("""
-    sources="core/src core/test terminalJvm/src terminalNative/src markdown/src markdown/test image/src image/test extras/src extras/test demo/src asciinemaDemo/src keyTester/src interactiveDemo/src interactiveJvmDemo/src interactiveNativeDemo/src scripts/GenerateUnicodeTables.scala"
+    sources="core/src core/test terminalJvm/src terminalJvm/test terminalNative/src terminalNative/test markdown/src markdown/test image/src image/test extras/src extras/test demo/src asciinemaDemo/src keyTester/src interactiveDemo/src interactiveDemo/test interactiveJvmDemo/src interactiveNativeDemo/src scripts/GenerateUnicodeTables.scala"
+    set -- --syntactic --check --scala-version 3.7.4
+    for source in $sources; do
+      set -- "$@" --files "$source"
+    done
+    set -- "$@" \
+      --exclude 'core/src/scalatui/unicode/UnicodeTables.scala' \
+      --exclude 'core/test/src/scalatui/unicode/UnicodeGraphemeBreakFixtures.scala'
     if command -v scalafix >/dev/null 2>&1; then
-      exec scalafix --syntactic --check --scala-version 3.7.4 --files $sources
+      exec scalafix "$@"
     fi
     if command -v cs >/dev/null 2>&1; then
-      exec cs launch ch.epfl.scala:scalafix-cli_2.13:0.14.6 -- --syntactic --check --scala-version 3.7.4 --files $sources
+      exec cs launch ch.epfl.scala:scalafix-cli_3.8.2:0.14.6 \
+        -M scalafix.cli.Cli -- "$@"
     fi
     echo "scalafix or coursier (cs) is required" >&2
     exit 1
@@ -117,25 +125,7 @@ object coreNative extends SiglyphNativePublishModule {
   def sources      = Task.Sources(workspaceRoot / "core" / "src")
 
   object test extends ScalaNativeTests {
-    def sources       = Task.Sources(
-      workspaceRoot / "core" / "test" / "src" / "scalatui" / "TestInputStreams.scala",
-      workspaceRoot / "core" / "test" / "src" / "scalatui" / "ansi" / "AnsiSuite.scala",
-      workspaceRoot / "core" / "test" / "src" / "scalatui" / "components" / "EditorSuite.scala",
-      workspaceRoot / "core" / "test" / "src" / "scalatui" / "components" / "EditorLayoutSuite.scala",
-      workspaceRoot / "core" / "test" / "src" / "scalatui" / "components" / "FilterPasteSessionSuite.scala",
-      workspaceRoot / "core" / "test" / "src" / "scalatui" / "components" / "InputPasteSuite.scala",
-      workspaceRoot / "core" / "test" / "src" / "scalatui" / "core" / "ComponentRenderSuite.scala",
-      workspaceRoot / "core" / "test" / "src" / "scalatui" / "core" / "OverlayRendererSuite.scala",
-      workspaceRoot / "core" / "test" / "src" / "scalatui" / "core" / "TUITypedControlSuite.scala",
-      workspaceRoot / "core" / "test" / "src" / "scalatui" / "core" / "TUIConcurrencySuite.scala",
-      workspaceRoot / "core" / "test" / "src" / "scalatui" / "editing" / "EditorBufferSuite.scala",
-      workspaceRoot / "core" / "test" / "src" / "scalatui" / "terminal" / "Base64ImagePayloadSuite.scala",
-      workspaceRoot / "core" / "test" / "src" / "scalatui" / "terminal" / "TerminalImageProtocolSuite.scala",
-      workspaceRoot / "core" / "test" / "src" / "scalatui" / "terminal" / "TerminalInputBufferSuite.scala",
-      workspaceRoot / "core" / "test" / "src" / "scalatui" / "terminal" / "TerminalInputParserSuite.scala",
-      workspaceRoot / "core" / "test" / "src" / "scalatui" / "unicode" / "UnicodeGraphemeBreakFixtures.scala",
-      workspaceRoot / "core" / "test" / "src" / "scalatui" / "unicode" / "UnicodeSuite.scala"
-    )
+    def sources       = Task.Sources(workspaceRoot / "core" / "test" / "src")
     def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
     def testFramework = "munit.Framework"
   }
@@ -210,6 +200,12 @@ object extrasNative extends SiglyphNativePublishModule {
   def artifactName = "siglyph-extras"
   def moduleDeps   = Seq(coreNative)
   def sources      = Task.Sources(workspaceRoot / "extras" / "src")
+
+  object test extends ScalaNativeTests {
+    def sources       = Task.Sources(workspaceRoot / "extras" / "test" / "src")
+    def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
+    def testFramework = "munit.Framework"
+  }
 }
 
 object demo extends SiglyphModule {
@@ -238,6 +234,12 @@ object interactiveDemoNative extends ScalaNativeModule {
   def scalaNativeVersion = "0.5.12"
   def moduleDeps         = Seq(coreNative)
   def sources            = Task.Sources(workspaceRoot / "interactiveDemo" / "src")
+
+  object test extends ScalaNativeTests {
+    def sources       = Task.Sources(workspaceRoot / "interactiveDemo" / "test" / "src")
+    def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
+    def testFramework = "munit.Framework"
+  }
 }
 
 object interactiveJvmDemo extends SiglyphModule {

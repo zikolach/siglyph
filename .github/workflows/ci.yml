@@ -23,6 +23,11 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      - name: Set up Coursier
+        uses: coursier/setup-action@v3
+        with:
+          apps: ''
+
       - name: Cache Scala and Mill dependencies
         uses: actions/cache@v5
         with:
@@ -41,6 +46,12 @@ jobs:
           chmod +x mill
           echo "$PWD" >> "$GITHUB_PATH"
           ./mill --version
+
+      - name: Check formatting
+        run: mill scalafmtCheck
+
+      - name: Run Scalafix
+        run: mill scalafixCheck
 
       - name: Compile all modules
         run: mill __.compile

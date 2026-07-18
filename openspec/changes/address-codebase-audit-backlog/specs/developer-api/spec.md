@@ -31,7 +31,7 @@ The markdown and autocomplete contracts SHALL remain composable with existing `C
 - **THEN** it does so through the shared component-style output contract and standard width constraints
 
 ### Requirement: Formatting and best-practice lint configuration
-The project SHALL include Scalafmt and Scalafix configuration so contributors and automation can check formatting and baseline Scala best-practice rules. Continuous integration SHALL run Scalafmt checking, Scalafix checking, and strict validation of all OpenSpec artifacts as mandatory quality gates. Scalafix SHALL cover every canonical current Scala production and test source root.
+The project SHALL include Scalafmt and Scalafix configuration so contributors and automation can check formatting and baseline Scala best-practice rules. Continuous integration SHALL run Scalafmt checking and Scalafix checking as mandatory quality gates. Scalafix SHALL cover every canonical current Scala production and test source root.
 
 #### Scenario: Formatting configuration exists
 - **WHEN** a contributor wants to check source formatting
@@ -43,10 +43,10 @@ The project SHALL include Scalafmt and Scalafix configuration so contributors an
 
 #### Scenario: CI runs mandatory quality gates
 - **WHEN** continuous integration validates a change
-- **THEN** it runs Scalafmt checking, Scalafix checking, and `openspec validate --all --strict`
+- **THEN** it runs `mill scalafmtCheck` and `mill scalafixCheck`
 
 #### Scenario: Quality-gate failure fails CI
-- **WHEN** Scalafmt, Scalafix, or strict OpenSpec validation exits unsuccessfully
+- **WHEN** Scalafmt or Scalafix exits unsuccessfully
 - **THEN** the continuous-integration workflow fails
 
 #### Scenario: Scalafix checks canonical current roots

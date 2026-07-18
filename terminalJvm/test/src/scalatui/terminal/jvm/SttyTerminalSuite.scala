@@ -1,6 +1,7 @@
 package scalatui.terminal.jvm
 
 import scalatui.terminal.{KittyKeyboardProtocol, KittyKeyboardProtocolState, Terminal}
+import scalatui.syntax.Equality.*
 
 import java.io.{ByteArrayOutputStream, IOException, InputStream, OutputStream, PrintStream}
 import java.util.concurrent.{CountDownLatch, TimeUnit}
@@ -81,10 +82,10 @@ class SttyTerminalSuite extends munit.FunSuite:
             KittyKeyboardProtocol.DisableSequence
           else ""
         if latest.nonEmpty then writes += latest
-        if latest == KittyKeyboardProtocol.EnableSequence && failEnable then
+        if (latest === KittyKeyboardProtocol.EnableSequence) && failEnable then
           failEnable = false
           throw RuntimeException("injected Kitty enable failure")
-        if latest == KittyKeyboardProtocol.DisableSequence && failDisable then
+        if (latest === KittyKeyboardProtocol.DisableSequence) && failDisable then
           failDisable = false
           throw RuntimeException("injected Kitty disable failure")
     val terminal    = SttyTerminal(
@@ -132,9 +133,15 @@ class SttyTerminalSuite extends munit.FunSuite:
       terminal.keyboardProtocolState match
         case KittyKeyboardProtocolState.Pending(_, _) => System.currentTimeMillis() < deadline
         case _                                        => false
-    do Thread.sleep(1)
+    do
+      // Poll the real clock at 1 ms intervals so the strict zero-length deadline can expire.
+      Thread.sleep(1)
 
-    assertEquals(terminal.keyboardProtocolState, KittyKeyboardProtocolState.Inactive)
+    assertEquals(
+      terminal.keyboardProtocolState,
+      KittyKeyboardProtocolState.Inactive,
+      "Kitty keyboard negotiation remained pending after the 1000 ms expiry deadline"
+    )
 
   test("interactive start and output-side operations do not synchronously deliver callbacks"):
     val terminal        = SttyTerminal()
@@ -178,7 +185,7 @@ class SttyTerminalSuite extends munit.FunSuite:
       assertEquals(duplicate.getMessage, "SttyTerminal is already running")
 
       terminal.cleanupFailureForTesting = name =>
-        Option.when(name == "input")(RuntimeException("injected input cleanup failure"))
+        Option.when(name === "input")(RuntimeException("injected input cleanup failure"))
       intercept[RuntimeException](terminal.stop())
 
       val incompleteCleanup = intercept[IllegalStateException](terminal.start(_ => (), () => ()))
@@ -200,19 +207,24 @@ class SttyTerminalSuite extends munit.FunSuite:
       columnsOverride = Some(80),
       rowsOverride = Some(24),
       sizeQuery = () =>
-        if sizeQueries.getAndIncrement() == 0 then Some(24 -> 80)
-        else Some(25                                       -> 81)
+        if sizeQueries.getAndIncrement() === 0 then Some(24 -> 80)
+        else Some(25                                        -> 81)
     )
     terminal.start(
       _ => (),
       () => {
         resizeStarted.countDown()
         var released = false
-        while !released do
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while !released && System.nanoTime() < deadline do
           try
-            releaseResize.await()
-            released = true
+            released = releaseResize.await(
+              math.max(1L, deadline - System.nanoTime()),
+              TimeUnit.NANOSECONDS
+            )
           catch case _: InterruptedException => ()
+        if !released then
+          throw AssertionError("old JVM resize worker was not released within 5000 ms")
       }
     )
     assert(resizeStarted.await(1, TimeUnit.SECONDS))
@@ -254,7 +266,7 @@ class SttyTerminalSuite extends munit.FunSuite:
       var failed   = false
       terminal.cleanupFailureForTesting = name =>
         attempts += name
-        Option.when(name == failedObligation && !failed) {
+        Option.when((name === failedObligation) && !failed) {
           failed = true
           RuntimeException(s"injected $name cleanup failure")
         }
@@ -306,7 +318,7 @@ class SttyTerminalSuite extends munit.FunSuite:
       sizeQuery = () => Some(24 -> 80)
     )
     val original = RuntimeException("missing controlling terminal")
-    terminal.sttyFailureForTesting = args => Option.when(args == "-g")(original)
+    terminal.sttyFailureForTesting = args => Option.when(args === "-g")(original)
 
     val failure = intercept[IllegalStateException](terminal.start(_ => (), () => ()))
 
@@ -352,7 +364,7 @@ class SttyTerminalSuite extends munit.FunSuite:
       sizeQuery = () => Some(24 -> 80)
     )
     terminal.cleanupFailureForTesting = name =>
-      Option.when(name == "paste")(RuntimeException("injected paste disable failure"))
+      Option.when(name === "paste")(RuntimeException("injected paste disable failure"))
 
     val failure = intercept[RuntimeException](terminal.start(_ => (), () => ()))
     assertEquals(failure.getMessage, "injected paste enable failure")
@@ -392,7 +404,8 @@ class SttyTerminalSuite extends munit.FunSuite:
       sizeQuery = () => Some(24 -> 80)
     )
     val original = RuntimeException("raw mode failed")
-    terminal.sttyFailureForTesting = args => Option.when(args == "raw -echo min 1 time 0")(original)
+    terminal.sttyFailureForTesting = args =>
+      Option.when(args === "raw -echo min 1 time 0")(original)
 
     val failure = intercept[RuntimeException](terminal.start(_ => (), () => ()))
     assert(failure eq original)
@@ -409,7 +422,7 @@ class SttyTerminalSuite extends munit.FunSuite:
     terminal.start(_ => (), () => ())
     val original = RuntimeException("restoration failed")
     terminal.sttyFailureForTesting = args =>
-      Option.when(args != "-g" && args != "raw -echo min 1 time 0")(original)
+      Option.when((args !== "-g") && (args !== "raw -echo min 1 time 0"))(original)
 
     val failure = intercept[RuntimeException](terminal.stop())
     assert(failure eq original)

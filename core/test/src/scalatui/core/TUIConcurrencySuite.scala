@@ -1,5 +1,7 @@
 package scalatui.core
 
+import scalatui.syntax.Equality.*
+
 import scalatui.terminal.{
   Base64ImagePayload,
   RgbColor,
@@ -43,7 +45,7 @@ class TUIConcurrencySuite extends munit.FunSuite:
 
   private def awaitWaiting(thread: Thread, timeoutMillis: Long = 5000L): Unit =
     val deadline = System.currentTimeMillis() + timeoutMillis
-    while thread.getState != Thread.State.WAITING && System.currentTimeMillis() < deadline do
+    while (thread.getState !== Thread.State.WAITING) && System.currentTimeMillis() < deadline do
       Thread.`yield`()
     assertEquals(thread.getState, Thread.State.WAITING)
 
@@ -230,7 +232,7 @@ class TUIConcurrencySuite extends munit.FunSuite:
         depth += 1
         maxDepth = math.max(maxDepth, depth)
         renders += 1
-        if renders == 1 then
+        if renders === 1 then
           runtime.foreach(_.requestRender())
           runtime.foreach(_.flushRender())
           entered.release()

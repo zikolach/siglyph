@@ -3,6 +3,7 @@ package scalatui.core
 import scalatui.TestInputStreams
 
 import scalatui.ansi.Ansi
+import scalatui.syntax.Equality.*
 import scalatui.components.{
   Editor,
   EditorOptions,
@@ -30,8 +31,22 @@ import java.util.concurrent.{CountDownLatch, TimeUnit}
 import java.util.concurrent.atomic.AtomicReference
 
 class TUISuite extends munit.FunSuite:
+  private def awaitWaiting(thread: Thread, description: String): Unit =
+    val deadline = System.currentTimeMillis() + 5000L
+    while (thread.getState !== Thread.State.WAITING) && System.currentTimeMillis() < deadline do
+      Thread.`yield`()
+    assert(
+      thread.getState === Thread.State.WAITING,
+      s"$description did not enter its waiting state before the deadline"
+    )
+
   final class MutableLine(var value: String) extends Component:
     override def render(width: Int): ComponentRender = ComponentRender.text(Vector(value))
+
+  final class ReadyLine(ready: CountDownLatch, value: String) extends Component:
+    override def render(width: Int): ComponentRender =
+      ready.countDown()
+      ComponentRender.text(Vector(value))
 
   final class MutableFrame(var values: Vector[String])  extends Component:
     override def render(width: Int): ComponentRender = ComponentRender.text(values)
@@ -75,7 +90,7 @@ class TUISuite extends munit.FunSuite:
 
     def joinPublisher(): Unit =
       val publisher = publicationThread.get()
-      if publisher != null then
+      if publisher ne null then
         publisher.join(1000)
         assert(!publisher.isAlive, "startup publisher did not terminate")
 
@@ -824,10 +839,12 @@ class TUISuite extends munit.FunSuite:
 
   test("unrecoverable render failure restores terminal state through run"):
     val terminal  = VirtualTerminal(20, 5)
+    val ready     = CountDownLatch(1)
     val component = new Component:
       var fail                                             = false
       override def handleInput(input: TerminalInput): Unit = fail = true
       override def render(width: Int): ComponentRender     =
+        ready.countDown()
         if fail then throw RuntimeException("boom")
         ComponentRender.text("stable")
     val tui       = TUI(terminal)
@@ -839,12 +856,15 @@ class TUISuite extends munit.FunSuite:
       catch case e: Throwable => failure.set(e)
     )
     thread.start()
-    Thread.sleep(50)
+    assert(
+      ready.await(5, TimeUnit.SECONDS),
+      "TUI run did not complete its initial render before failure input"
+    )
 
     terminal.sendInput(TerminalInput.Key(TerminalKey.Character("x")))
-    thread.join(1000)
+    thread.join(5000)
+    assert(!thread.isAlive, "TUI run did not terminate after render failure")
 
-    assertEquals(thread.isAlive, false)
     assertEquals(Option(failure.get()).map(_.getMessage), Some("boom"))
     assert(terminal.output.contains("\u001b[?25h"), terminal.output)
 
@@ -987,17 +1007,21 @@ class TUISuite extends munit.FunSuite:
 
   test("global input listener can request exit"):
     val terminal = VirtualTerminal(20, 5)
+    val ready    = CountDownLatch(1)
     val tui      = TUI(terminal)
-    tui.addChild(MutableLine("stable"))
+    tui.addChild(ReadyLine(ready, "stable"))
     tui.addInputListener(_ => InputResult.Exit)
     val thread   = Thread(() => tui.run())
     thread.start()
-    Thread.sleep(50)
+    assert(
+      ready.await(5, TimeUnit.SECONDS),
+      "TUI run did not complete its initial render before listener exit input"
+    )
 
     terminal.sendInput(TerminalInput.Key(TerminalKey.Character("x")))
-    thread.join(1000)
+    thread.join(5000)
+    assert(!thread.isAlive, "TUI run did not terminate after listener requested exit")
 
-    assertEquals(thread.isAlive, false)
     assert(terminal.output.contains("\u001b[?25h"), terminal.output)
 
   test("key release is ignored by default"):
@@ -1096,20 +1120,26 @@ class TUISuite extends munit.FunSuite:
 
   test("input result can request exit"):
     val terminal  = VirtualTerminal(20, 5)
+    val ready     = CountDownLatch(1)
     val component = new Component:
       override def handleInputResult(input: TerminalInput): InputResult = InputResult.Exit
-      override def render(width: Int): ComponentRender                  = ComponentRender.text(Vector("stable"))
+      override def render(width: Int): ComponentRender                  =
+        ready.countDown()
+        ComponentRender.text(Vector("stable"))
     val tui       = TUI(terminal)
     tui.addChild(component)
     tui.setFocus(component)
     val thread    = Thread(() => tui.run())
     thread.start()
-    Thread.sleep(50)
+    assert(
+      ready.await(5, TimeUnit.SECONDS),
+      "TUI run did not complete its initial render before component exit input"
+    )
 
     terminal.sendInput(TerminalInput.Key(TerminalKey.Enter))
-    thread.join(1000)
+    thread.join(5000)
+    assert(!thread.isAlive, "TUI run did not terminate after component requested exit")
 
-    assertEquals(thread.isAlive, false)
     assert(terminal.output.contains("\r\n\u001b[?25h"), terminal.output)
 
   test("TUI title and progress helpers report virtual terminal support"):
@@ -1343,7 +1373,7 @@ class TUISuite extends munit.FunSuite:
 
   private def countOccurrences(value: String, needle: String): Int =
     if needle.isEmpty then 0
-    else value.sliding(needle.length).count(_ == needle)
+    else value.sliding(needle.length).count(_ === needle)
 
   test("typed escape exits when configured"):
     val terminal = VirtualTerminal(20, 5)
@@ -1358,33 +1388,38 @@ class TUISuite extends munit.FunSuite:
 
   test("run exits on ctrl+c and stop positions cursor below content"):
     val terminal = VirtualTerminal(20, 5)
+    val ready    = CountDownLatch(1)
     val tui      = TUI(terminal)
-    tui.addChild(MutableLine("hello"))
+    tui.addChild(ReadyLine(ready, "hello"))
     val thread   = Thread(() => tui.run())
     thread.start()
-    Thread.sleep(50)
+    assert(
+      ready.await(5, TimeUnit.SECONDS),
+      "TUI run did not complete its initial render before ctrl+c"
+    )
     terminal.sendInput(TerminalInput.Key(TerminalKey.Character("c"), KeyModifiers(ctrl = true)))
-    thread.join(1000)
+    thread.join(5000)
+    assert(!thread.isAlive, "TUI run did not terminate after ctrl+c")
 
-    assertEquals(thread.isAlive, false)
     assert(terminal.output.contains("\r\n\u001b[?25h"), terminal.output)
 
   test("stop restores cursor stops terminal and notifies run when cleanup write fails"):
     val terminal = StopCleanupFailingTerminal(TerminalColorProtocol.DisableColorSchemeNotifications)
     val tui      = TUI(terminal)
     tui.setTerminalColorSchemeNotifications(enabled = true)
+    tui.start()
     val failure  = AtomicReference[Throwable](null)
     val thread   = Thread(() =>
       try tui.run()
       catch case e: Throwable => failure.set(e)
     )
     thread.start()
-    Thread.sleep(50)
+    awaitWaiting(thread, "TUI run thread")
 
     intercept[RuntimeException](tui.stop())
-    thread.join(1000)
+    thread.join(5000)
+    assert(!thread.isAlive, "TUI run did not terminate after stop cleanup failure")
 
-    assertEquals(thread.isAlive, false)
     assertEquals(failure.get(), null)
     assertEquals(terminal.showCursorCalled, true)
     assertEquals(terminal.stopCalled, true)
@@ -1419,32 +1454,44 @@ class TUISuite extends munit.FunSuite:
     assertEquals(terminal.isRunning, false)
 
   test("run does not exit on ctrl+c key release when component opts in"):
-    val terminal  = VirtualTerminal(20, 5)
-    val tui       = TUI(terminal)
-    val component = new Component:
+    val terminal        = VirtualTerminal(20, 5)
+    val ready           = CountDownLatch(1)
+    val releaseObserved = CountDownLatch(1)
+    val tui             = TUI(terminal)
+    val component       = new Component:
       override def wantsKeyRelease: Boolean                             = true
       override def handleInputResult(input: TerminalInput): InputResult =
+        input match
+          case TerminalInput.KeyEvent(_, _, KeyEventType.Release) => releaseObserved.countDown()
+          case _                                                  => ()
         InputResult.NoRender
-      override def render(width: Int): ComponentRender                  = ComponentRender.text(Vector("stable"))
+      override def render(width: Int): ComponentRender                  =
+        ready.countDown()
+        ComponentRender.text(Vector("stable"))
     tui.addChild(component)
     tui.setFocus(component)
-    val thread    = Thread(() => tui.run())
+    val thread          = Thread(() => tui.run())
     thread.start()
-    Thread.sleep(50)
+    assert(
+      ready.await(5, TimeUnit.SECONDS),
+      "TUI run did not complete its initial render before key release"
+    )
 
     terminal.sendInput(TerminalInput.KeyEvent(
       TerminalKey.Character("c"),
       KeyModifiers(ctrl = true),
       KeyEventType.Release
     ))
-    Thread.sleep(50)
+    assert(
+      releaseObserved.await(5, TimeUnit.SECONDS),
+      "focused component did not observe ctrl+c key release"
+    )
 
     assertEquals(thread.isAlive, true)
 
     terminal.sendInput(TerminalInput.Key(TerminalKey.Character("c"), KeyModifiers(ctrl = true)))
-    thread.join(1000)
-
-    assertEquals(thread.isAlive, false)
+    thread.join(5000)
+    assert(!thread.isAlive, "TUI run did not terminate after ctrl+c press")
 
   test("visible overlay is composited over base content"):
     val terminal = VirtualTerminal(10, 3)

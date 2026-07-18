@@ -1,5 +1,7 @@
 package scalatui.terminal
 
+import scalatui.syntax.Equality.*
+
 class KeybindingManagerSuite extends munit.FunSuite:
   test("matches typed input to default command definitions") {
     val manager = KeybindingManager()
@@ -80,7 +82,7 @@ class KeybindingManagerSuite extends munit.FunSuite:
       )
     )
 
-    val conflict = manager.getConflicts.find(_.key == KeyDescriptor(TerminalKey.PageUp)).get
+    val conflict = manager.getConflicts.find(_.key === KeyDescriptor(TerminalKey.PageUp)).get
     assert(conflict.commands.toSet.contains(KeybindingCommand.EditorCursorUp))
     assert(conflict.commands.toSet.contains(KeybindingCommand.EditorPageUp))
   }

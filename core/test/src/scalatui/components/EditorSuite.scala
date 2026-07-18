@@ -5,6 +5,7 @@ import scalatui.TestInputStreams
 import scalatui.ansi.Ansi
 import scalatui.autocomplete.*
 import scalatui.core.{CursorPlacement, InputResult, OverlayOptions, OverlaySize, TUI}
+import scalatui.syntax.Equality.*
 import scalatui.editing.EditorCursor
 import scalatui.terminal.{
   KeyDescriptor,
@@ -1284,9 +1285,9 @@ class EditorSuite extends munit.FunSuite:
       val line     = rendered.lines.head
 
       assertEquals(Ansi.strip(line).trim, "abc", boundary.toString)
-      assertEquals(line.sliding(red.length).count(_ == red), 1, boundary.toString)
-      assertEquals(line.sliding(open.length).count(_ == open), 1, boundary.toString)
-      assertEquals(line.sliding(close.length).count(_ == close), 1, boundary.toString)
+      assertEquals(line.sliding(red.length).count(_ === red), 1, boundary.toString)
+      assertEquals(line.sliding(open.length).count(_ === open), 1, boundary.toString)
+      assertEquals(line.sliding(close.length).count(_ === close), 1, boundary.toString)
       assertEquals(rendered.cursorPlacements.length, 1, boundary.toString)
       assertEquals(rendered.validate(80), Right(()), boundary.toString)
     }

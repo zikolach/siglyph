@@ -49,10 +49,21 @@ class StreamTerminalSuite extends munit.FunSuite:
           buffer(off) = value.toByte
           1
     val terminal = StreamTerminal(input = in)
+    val observed = CountDownLatch(1)
     var inputs   = Vector.empty[TerminalInput]
-    terminal.start(input => inputs :+= input, () => ())
-    Thread.sleep(100)
-    terminal.stop()
+    terminal.start(
+      input => {
+        inputs :+= input
+        observed.countDown()
+      },
+      () => ()
+    )
+    try
+      assert(
+        observed.await(5, TimeUnit.SECONDS),
+        "fragmented input was not delivered as one parsed key"
+      )
+    finally terminal.stop()
     assertEquals(inputs, Vector(TerminalInput.Key(TerminalKey.Up)))
 
   test("stream terminal flushes pending escape when read times out"):
@@ -576,6 +587,7 @@ class StreamTerminalSuite extends munit.FunSuite:
 
   test("stream terminal drain discards pending escape without dispatching input"):
     val drained                         = CountDownLatch(1)
+    val observationWindowComplete       = CountDownLatch(1)
     var terminal: StreamTerminal | Null = null
     val in                              = new java.io.InputStream:
       private var reads                                               = 0
@@ -589,14 +601,21 @@ class StreamTerminalSuite extends munit.FunSuite:
           case 2 =>
             Option(terminal).foreach(_.drainInput())
             drained.countDown()
-            try Thread.sleep(150)
+            try
+              // Keep input blocked for 150 ms, spanning more than one 75 ms flush period.
+              Thread.sleep(150)
             catch case _: InterruptedException => ()
+            finally observationWindowComplete.countDown()
             -1
           case _ => -1
     terminal = StreamTerminal(input = in)
     var inputs                          = Vector.empty[TerminalInput]
     terminal.start(input => inputs :+= input, () => ())
     assertEquals(drained.await(1, TimeUnit.SECONDS), true)
+    assert(
+      observationWindowComplete.await(5, TimeUnit.SECONDS),
+      "pending escape observation window did not complete"
+    )
     terminal.stop()
     assertEquals(inputs, Vector.empty)
 

@@ -361,7 +361,7 @@ class FileSystemPathCompletionProviderSuite extends munit.FunSuite:
     result
 
   private def withTempDirectory(test: Path => Unit): Unit =
-    val root = Files.createTempDirectory("scala-tui-path-completion")
+    val root = Files.createTempDirectory("siglyph-path-completion")
     try test(root)
     finally deleteRecursively(root)
 

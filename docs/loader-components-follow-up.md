@@ -13,7 +13,7 @@
 
 ## Upstream behavior still intentionally different
 
-`pi-tui`'s loader owns a Node `setInterval` and `CancellableLoader` exposes JavaScript `AbortSignal`. `scala-tui` does not copy those primitives into shared core. Applications drive ticking themselves or adapt the cancellation token to their chosen async/effect runtime.
+`pi-tui`'s loader owns a Node `setInterval` and `CancellableLoader` exposes JavaScript `AbortSignal`. `siglyph` does not copy those primitives into shared core. Applications drive ticking themselves or adapt the cancellation token to their chosen async/effect runtime.
 
 ## Remaining follow-up: optional scheduler integration
 

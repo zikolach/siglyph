@@ -156,7 +156,7 @@ final class SttyTerminal(
   private def startResizePolling(): Unit =
     if (resizeThread eq null) then
       resizePolling = true
-      val thread = Thread(() => resizeLoop(), "scala-tui-stty-terminal-resize")
+      val thread = Thread(() => resizeLoop(), "siglyph-stty-terminal-resize")
       thread.setDaemon(true)
       resizeThread = thread
       thread.start()

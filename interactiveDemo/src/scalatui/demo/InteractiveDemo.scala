@@ -542,9 +542,7 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
         if candidate.isAbsolute then candidate else File(fileDirectory, trimmed)
     if !target.exists then
       fileManagerStatus.text = s"Path not found: ${target.getPath}"
-      return
-
-    if target.isDirectory then
+    else if target.isDirectory then
       fileDirectory = target.getAbsoluteFile
       fileManagerPathInput.setValue(fileManagerPathFor(fileDirectory))
       refreshFileManagerDirectory()

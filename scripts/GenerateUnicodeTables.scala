@@ -123,8 +123,8 @@ object GenerateUnicodeTables:
     val text       = scala.io.Source.fromURL(URI(source.url).toURL, "UTF-8").mkString
     require(text.nonEmpty, s"${source.filename}: empty source")
     val filenameOk =
-      if source.filename == "ReadMe.txt" then text.startsWith("# Unicode Character Database")
-      else if source.filename == "emoji-data.txt" then
+      if source.filename.equals("ReadMe.txt") then text.startsWith("# Unicode Character Database")
+      else if source.filename.equals("emoji-data.txt") then
         text.linesIterator.take(3).contains("# emoji-data.txt")
       else
         text.linesIterator.take(
@@ -132,8 +132,8 @@ object GenerateUnicodeTables:
         ).exists(_.startsWith(s"# ${source.filename.stripSuffix(".txt")}-"))
     require(filenameOk, s"${source.filename}: missing or mismatched filename header")
     val versionOk  =
-      if source.filename == "ReadMe.txt" then text.contains(s"Version $Version")
-      else if source.filename == "emoji-data.txt" then
+      if source.filename.equals("ReadMe.txt") then text.contains(s"Version $Version")
+      else if source.filename.equals("emoji-data.txt") then
         text.linesIterator.take(12).contains("# Version: 17.0")
       else text.linesIterator.take(3).exists(_.contains(s"-${source.headerVersion}.txt"))
     require(versionOk, s"${source.filename}: expected Unicode ${source.headerVersion} header")
@@ -150,10 +150,13 @@ object GenerateUnicodeTables:
   ): Map[String, Vector[Interval]] =
     val result = scala.collection.mutable.Map.from(wanted.iterator.map(_ -> Vector.empty[Interval]))
     text.linesIterator.zipWithIndex.foreach { case (raw, index) =>
-      val line = raw.takeWhile(_ != '#').trim
+      val line = raw.takeWhile(char => !char.equals('#')).trim
       if line.nonEmpty then
         val fields   = line.split(";", -1).map(_.trim)
-        require(fields.length == 2, s"$filename:${index + 1}: property record must have two fields")
+        require(
+          fields.length.equals(2),
+          s"$filename:${index + 1}: property record must have two fields"
+        )
         val interval = parseRange(fields(0), filename, index + 1)
         val property = fields(1)
         require(
@@ -176,16 +179,19 @@ object GenerateUnicodeTables:
     val filename = "DerivedCoreProperties.txt"
     val result   = scala.collection.mutable.Map.from(wanted.iterator.map(_ -> Vector.empty[Interval]))
     text.linesIterator.zipWithIndex.foreach { case (raw, index) =>
-      val line = raw.takeWhile(_ != '#').trim
+      val line = raw.takeWhile(char => !char.equals('#')).trim
       if line.nonEmpty then
         val fields = line.split(";", -1).map(_.trim)
         require(
-          fields.length == 2 || (fields.length == 3 && fields(1) == "InCB"),
+          fields.length.equals(2) || (fields.length.equals(3) && fields(1).equals("InCB")),
           s"$filename:${index + 1}: malformed property record"
         )
         parseRange(fields(0), filename, index + 1)
-        if fields(1) == "InCB" then
-          require(fields.length == 3, s"$filename:${index + 1}: InCB record must have three fields")
+        if fields(1).equals("InCB") then
+          require(
+            fields.length.equals(3),
+            s"$filename:${index + 1}: InCB record must have three fields"
+          )
           require(
             wanted.contains(fields(2)),
             s"$filename:${index + 1}: unknown InCB value ${fields(2)}"
@@ -234,16 +240,16 @@ object GenerateUnicodeTables:
   private def parseGraphemeTests(text: String): Vector[GraphemeTest] =
     val filename = "GraphemeBreakTest.txt"
     val tests    = text.linesIterator.zipWithIndex.flatMap { case (raw, index) =>
-      val line = raw.takeWhile(_ != '#').trim
+      val line = raw.takeWhile(char => !char.equals('#')).trim
       if line.isEmpty then None
       else
         val tokens     = line.split("\\s+").toVector
         require(
-          tokens.nonEmpty && tokens.head == "÷" && tokens.last == "÷",
+          tokens.nonEmpty && tokens.head.equals("÷") && tokens.last.equals("÷"),
           s"$filename:${index + 1}: malformed marker sequence"
         )
         require(
-          tokens.length % 2 == 1,
+          (tokens.length % 2).equals(1),
           s"$filename:${index + 1}: malformed marker/code-point sequence"
         )
         val codePoints = Vector.newBuilder[Int]
@@ -252,8 +258,11 @@ object GenerateUnicodeTables:
         var tokenIndex = 0
         while tokenIndex < tokens.length do
           val marker = tokens(tokenIndex)
-          require(marker == "÷" || marker == "×", s"$filename:${index + 1}: invalid marker $marker")
-          if marker == "÷" then boundaries += cpCount
+          require(
+            marker.equals("÷") || marker.equals("×"),
+            s"$filename:${index + 1}: invalid marker $marker"
+          )
+          if marker.equals("÷") then boundaries += cpCount
           if tokenIndex + 1 < tokens.length then
             codePoints += parseCodePoint(tokens(tokenIndex + 1), filename, index + 1)
             cpCount += 1
@@ -282,7 +291,7 @@ object GenerateUnicodeTables:
     value
 
   private def renderRuntime(byName: Map[String, Vector[Interval]]): String =
-    val sourceList = Sources.filterNot(_.key == "GraphemeBreakTest").map(source =>
+    val sourceList = Sources.filterNot(_.key.equals("GraphemeBreakTest")).map(source =>
       s"    \"${source.url}\""
     ).sorted.mkString(",\n")
     val tableDefs  = byName.toVector.sortBy(_._1).map { case (name, intervals) =>
@@ -338,7 +347,7 @@ $tableDefs
 """
 
   private def renderFixtures(tests: Vector[GraphemeTest]): String =
-    val source = Sources.find(_.key == "GraphemeBreakTest").get
+    val source = Sources.find(_.key.equals("GraphemeBreakTest")).get
     val rows   = tests.map { test =>
       val cps        = test.codePoints.map(hex).mkString("Vector(", ", ", ")")
       val boundaries = test.boundaries.mkString("Vector(", ", ", ")")
