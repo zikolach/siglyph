@@ -28,10 +28,10 @@ Published artifacts are available on Maven Central. GitHub Packages and GitHub R
 
 ```scala
 libraryDependencies ++= Seq(
-  "io.github.zikolach" %% "siglyph-core" % "0.5.0",
-  "io.github.zikolach" %% "siglyph-terminal-jvm" % "0.5.0",
-  "io.github.zikolach" %% "siglyph-markdown" % "0.5.0",
-  "io.github.zikolach" %% "siglyph-image" % "0.5.0"
+  "io.github.zikolach" %% "siglyph-core" % "0.6.0",
+  "io.github.zikolach" %% "siglyph-terminal-jvm" % "0.6.0",
+  "io.github.zikolach" %% "siglyph-markdown" % "0.6.0",
+  "io.github.zikolach" %% "siglyph-image" % "0.6.0"
 )
 ```
 
@@ -42,18 +42,18 @@ object app extends ScalaModule {
   def scalaVersion = "3.7.4"
 
   def mvnDeps = Seq(
-    mvn"io.github.zikolach::siglyph-core::0.5.0",
-    mvn"io.github.zikolach::siglyph-terminal-jvm::0.5.0",
-    mvn"io.github.zikolach::siglyph-markdown::0.5.0",
-    mvn"io.github.zikolach::siglyph-image::0.5.0"
+    mvn"io.github.zikolach::siglyph-core::0.6.0",
+    mvn"io.github.zikolach::siglyph-terminal-jvm::0.6.0",
+    mvn"io.github.zikolach::siglyph-markdown::0.6.0",
+    mvn"io.github.zikolach::siglyph-image::0.6.0"
   )
 }
 ```
 
 To include optional `siglyph-extras`, add it to your dependency list:
 
-- **SBT:** `"io.github.zikolach" %% "siglyph-extras" % "0.5.0"`
-- **Mill:** `mvn"io.github.zikolach::siglyph-extras::0.5.0"`
+- **SBT:** `"io.github.zikolach" %% "siglyph-extras" % "0.6.0"`
+- **Mill:** `mvn"io.github.zikolach::siglyph-extras::0.6.0"`
 
 For Scala Native versions that include optional Native artifacts, add these platform-aware Mill coordinates from a `ScalaNativeModule` in addition to `siglyph-core` and `siglyph-terminal-native`:
 

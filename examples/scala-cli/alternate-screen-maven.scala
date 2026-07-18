@@ -1,7 +1,7 @@
 #!/usr/bin/env -S scala-cli shebang
 //> using scala 3.7.4
-//> using dep io.github.zikolach::siglyph-core:0.5.0
-//> using dep io.github.zikolach::siglyph-terminal-jvm:0.5.0
+//> using dep io.github.zikolach::siglyph-core:0.6.0
+//> using dep io.github.zikolach::siglyph-terminal-jvm:0.6.0
 //> using dep com.github.plokhotnyuk.jsoniter-scala::jsoniter-scala-core:2.38.17
 //> using dep com.github.plokhotnyuk.jsoniter-scala::jsoniter-scala-macros:2.38.17
 
