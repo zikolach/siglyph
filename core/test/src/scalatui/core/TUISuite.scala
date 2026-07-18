@@ -31,6 +31,15 @@ import java.util.concurrent.{CountDownLatch, TimeUnit}
 import java.util.concurrent.atomic.AtomicReference
 
 class TUISuite extends munit.FunSuite:
+  private def awaitWaiting(thread: Thread, description: String): Unit =
+    val deadline = System.currentTimeMillis() + 5000L
+    while (thread.getState !== Thread.State.WAITING) && System.currentTimeMillis() < deadline do
+      Thread.`yield`()
+    assert(
+      thread.getState === Thread.State.WAITING,
+      s"$description did not enter its waiting state before the deadline"
+    )
+
   final class MutableLine(var value: String) extends Component:
     override def render(width: Int): ComponentRender = ComponentRender.text(Vector(value))
 
@@ -1405,6 +1414,7 @@ class TUISuite extends munit.FunSuite:
       catch case e: Throwable => failure.set(e)
     )
     thread.start()
+    awaitWaiting(thread, "TUI run thread")
 
     intercept[RuntimeException](tui.stop())
     thread.join(5000)
