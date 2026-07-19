@@ -10,6 +10,8 @@
 
 The public Scala package namespace is `scalatui`.
 
+We use OpenAI GPT-5.6 to assist with development, testing, and code review.
+
 ## Demo
 
 [![siglyph agent prompt composer](https://asciinema.org/a/UznjMGz4rWVWwLXm.svg)](https://asciinema.org/a/UznjMGz4rWVWwLXm)
