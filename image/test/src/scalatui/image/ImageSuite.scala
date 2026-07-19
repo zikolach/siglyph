@@ -2,17 +2,22 @@ package scalatui.image
 
 import scalatui.ansi.Ansi
 import scalatui.components.Box
-import scalatui.core.{Component, TUI}
+import scalatui.core.{Component, Container, OverlayOptions, TUI}
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{
   Base64ImagePayload,
   Base64ImagePayloadError,
   ImageCellDimensions,
+  ImageCellDimensionsSource,
   ImageDimensions,
   ImageProtocol,
   ImageRenderOptions,
   TerminalCapabilities,
   TerminalImageProtocol,
+  TerminalInput,
+  TerminalInputChunk,
+  TerminalRawKind,
+  TerminalRawTermination,
   TerminalRenderControl,
   TerminalRenderControlEncoder,
   VirtualTerminal
@@ -21,6 +26,12 @@ import scalatui.terminal.{
 import java.nio.file.Files
 
 class ImageSuite extends munit.FunSuite:
+  private val imageCapabilities = TerminalCapabilities(
+    trueColor = true,
+    hyperlinks = true,
+    images = Some(ImageProtocol.Kitty)
+  )
+
   test("raw base64 factory rejects invalid input before creating an image"):
     val result = Image.fromBase64(
       "AAAA\u001b\\",
@@ -110,6 +121,62 @@ class ImageSuite extends munit.FunSuite:
 
     val encoded = TerminalRenderControlEncoder.encode(frame.controls.head.control)
     assert(terminal.output.contains(s"\u001b[1C$encoded\r"), terminal.output)
+
+  test("runtime image sizing follows direct and nested owning TUI contexts"):
+    val direct   = runtimeImage()
+    val nested   = runtimeImage()
+    val inner    = Container()
+    val outer    = Box(paddingX = 0)
+    inner.addChild(nested)
+    outer.addChild(inner)
+    val terminal = VirtualTerminal(10, 10)
+    val tui      = TUI(terminal)
+    tui.addChild(direct)
+    tui.addChild(outer)
+    tui.start()
+
+    sendCellDimensions(terminal, "\u001b[6;10;20t")
+
+    assertEquals(direct.render(1).lines.length, 2)
+    assertEquals(nested.render(1).lines.length, 2)
+
+  test("runtime image sizing follows overlay context and returns to fallback after detach"):
+    val overlayImage = runtimeImage()
+    val overlayBox   = Box(paddingX = 0)
+    overlayBox.addChild(overlayImage)
+    val terminal     = VirtualTerminal(10, 10)
+    val tui          = TUI(terminal)
+    tui.start()
+    val handle       = tui.showOverlay(
+      overlayBox,
+      OverlayOptions(width = Some(scalatui.core.OverlaySize.Absolute(1)))
+    )
+
+    sendCellDimensions(terminal, "\u001b[6;10;20t")
+    assertEquals(overlayImage.render(1).lines.length, 2)
+
+    handle.hide()
+    assertEquals(overlayImage.render(1).lines.length, 1)
+
+  test("fixed image sizing ignores owning TUI runtime geometry"):
+    val image    = Image(
+      payload("AAAA"),
+      ImageDimensions(100, 100),
+      imageCapabilities,
+      ImageRenderOptions(
+        maxWidthCells = Some(1),
+        cellDimensions = ImageCellDimensions(),
+        cellDimensionsSource = ImageCellDimensionsSource.Fixed
+      )
+    )
+    val terminal = VirtualTerminal(10, 10)
+    val tui      = TUI(terminal)
+    tui.addChild(image)
+    tui.start()
+
+    sendCellDimensions(terminal, "\u001b[6;10;20t")
+
+    assertEquals(image.render(1).lines.length, 1)
 
   test("image component emits protocol rows and tracks Kitty id"):
     val image = Image(
@@ -642,6 +709,21 @@ class ImageSuite extends munit.FunSuite:
   private final class FixedLine(var value: String) extends Component:
     override def render(width: Int): scalatui.core.ComponentRender =
       scalatui.core.ComponentRender.text(value)
+
+  private def runtimeImage(): Image = Image(
+    payload("AAAA"),
+    ImageDimensions(100, 100),
+    imageCapabilities,
+    ImageRenderOptions(
+      maxWidthCells = Some(1),
+      cellDimensionsSource = ImageCellDimensionsSource.Runtime
+    )
+  )
+
+  private def sendCellDimensions(terminal: VirtualTerminal, value: String): Unit =
+    terminal.sendInput(TerminalInput.RawStart(TerminalRawKind.Csi))
+    terminal.sendInput(TerminalInput.RawChunk(TerminalInputChunk(value.getBytes)))
+    terminal.sendInput(TerminalInput.RawEnd(TerminalRawTermination.Complete))
 
   private def renderedRowBreaksBefore(output: String, text: String): Int =
     val renderStart = output.indexOf(TUI.SyncStart)

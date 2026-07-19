@@ -238,7 +238,7 @@ final class SettingsList(
             val end = math.min(entries.length, pageOffset + visibleCount)
             out += fit(s"${pageOffset + 1}-$end of ${entries.length}", safeWidth)
           entries.lift(selectedIndex).flatMap(_.item.description).foreach { description =>
-            Ansi.wrapTextWithAnsi(description, safeWidth).foreach { line =>
+            Ansi.wrapLogicalLinesWithAnsi(description, safeWidth).foreach { line =>
               out += fit(options.theme.description(line), safeWidth)
             }
           }

@@ -20,6 +20,11 @@ This clip shows a prompt composer built with siglyph components: typed input, sl
 
 siglyph is pre-1.0. The current focus is a small, testable TUI core with `pi-tui`-style editing and input behavior. macOS and Linux are the target platforms; Windows and Scala.js/browser support are out of scope for now.
 
+The version-pinned feature and behavior comparison is maintained in
+[`docs/pi-tui-compatibility.md`](docs/pi-tui-compatibility.md). All upstream component categories
+have Siglyph counterparts, while Markdown, image processing, terminal-specific key encodings, and
+Node-owned scheduling intentionally remain partial or different as recorded there.
+
 ## Install
 
 Published artifacts are available on Maven Central. GitHub Packages and GitHub Release jars are also published for releases; details live in [`docs/publishing.md`](docs/publishing.md).
@@ -130,6 +135,11 @@ import scalatui.terminal.jvm.SttyTerminal
 
 By default, `TUI` runs in normal-screen mode. Frames are written to the normal terminal screen, and existing applications can keep constructing `TUI(SttyTerminal())` without entering alternate screen. Resize redraws in normal-screen mode clear the viewport, home the cursor, and clear scrollback to avoid stale frame cells.
 
+`TUIOptions(normalResizeClearPolicy = NormalResizeClearPolicy.PreserveScrollback)` is an opt-in
+alternative that clears only the viewport on normal-screen resize. It may leave emulator-specific
+stale rows, so full clearing remains the default. Instance-scoped, redacted lifecycle/write/resize
+diagnostics are also opt-in; see [`docs/runtime-diagnostics.md`](docs/runtime-diagnostics.md).
+
 Applications that need a full-screen terminal experience can opt into alternate-screen mode:
 
 ```scala
@@ -232,7 +242,9 @@ import scalatui.terminal.jvm.SttyTerminal
       val provider = CombinedAutocompleteProvider(
         commands = Vector(SlashCommand("help"), SlashCommand("quit")),
         pathProvider = Some(FileSystemPathCompletionProvider(FileSystemPathCompletionOptions(
-          baseDirectory = File("."), // Java/NIO only; no fd/find/shell dependency
+          // Legacy mode: this directory is both the current directory and containment root;
+          // parent, home, and absolute syntax remain disabled unless explicitly enabled.
+          baseDirectory = File("."),
           maxResults = 20
         ))),
         triggerSources = Vector(tagSource),
@@ -253,7 +265,7 @@ import scalatui.terminal.jvm.SttyTerminal
 
 ## Optional helper modules
 
-Markdown rendering stays in `siglyph-markdown`. The baseline renderer is dependency-free, is available for JVM and Scala Native releases that include the Native artifact, and supports theme hooks, readable link fallback, OSC 8 links when `TerminalCapabilities.hyperlinks` is true, parser adapters, optional fenced-code highlighter hooks, normalized list markers by default, and opt-in source list marker preservation with `MarkdownRenderOptions(preserveSourceListMarkers = true)`. Task-list markers render as visible text; they are not interactive checkboxes.
+Markdown rendering stays in `siglyph-markdown`. The baseline renderer is dependency-free, is available for JVM and Scala Native releases that include the Native artifact, and supports theme hooks, readable link fallback, OSC 8 links when `TerminalCapabilities.hyperlinks` is true, parser adapters, optional fenced-code highlighter hooks, normalized list markers by default, and opt-in source list marker preservation with `MarkdownRenderOptions(preserveSourceListMarkers = true)`. Task-list markers render as visible text; they are not interactive checkboxes. A `Markdown` component retains at most one successful render keyed by its text, geometry, renderer identity, and `MarkdownRenderer.cacheGeneration`; mutable custom renderers must advance that generation or call `invalidate()`.
 
 Image rendering stays in `siglyph-image`. JVM and Scala Native releases that include the Native artifact expose the same baseline public API. `ImageSource.fromFile(path)` loads supported PNG, JPEG, GIF, and WebP files into a validated payload, MIME type, and dimensions. Unsupported terminals render readable fallback text. The `Image` component uses runtime cell-size replies by default; pass `ImageRenderOptions(cellDimensionsSource = ImageCellDimensionsSource.Fixed, cellDimensions = ...)` for deterministic fixed sizing. `examples/scala-cli/image.scala` is the quickest visual smoke test for protocol rendering, fallback behavior, runtime cell-size sizing in supported versions, and row reservation (see `examples/scala-cli/README.md` for running it against local sources from this checkout).
 

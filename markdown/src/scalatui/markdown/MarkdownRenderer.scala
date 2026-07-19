@@ -6,8 +6,17 @@ import scalatui.syntax.Equality.*
 import scalatui.terminal.TerminalCapabilities
 import scala.util.control.NonFatal
 
-/** Converts Markdown source to ANSI-aware, width-safe terminal lines. */
+/**
+ * Converts Markdown source to ANSI-aware, width-safe terminal lines.
+ *
+ * Immutable renderers can use the default cache generation. A stateful renderer whose visible
+ * output can change without changing its identity must advance [[cacheGeneration]] or have its
+ * owning [[Markdown]] component explicitly invalidated.
+ */
 trait MarkdownRenderer:
+  /** Generation included in the one-entry Markdown component cache key. */
+  def cacheGeneration: Long = 0L
+
   def render(markdown: String, width: Int): Vector[String]
 
 /** Optional syntax-highlighting boundary for fenced Markdown code blocks. */
@@ -364,7 +373,7 @@ final class BasicMarkdownRenderer(
     if value.contains("\u001b[") && !value.endsWith(Ansi.Reset) then value + Ansi.Reset else value
 
   private def wrap(value: String, width: Int): Vector[String] =
-    Ansi.wrapTextWithAnsi(value, width).map(Ansi.truncateToWidth(_, width, ""))
+    Ansi.wrapLogicalLinesWithAnsi(value, width).map(Ansi.truncateToWidth(_, width, ""))
 
   private def wrapWithPrefix(prefix: String, value: String, width: Int): Vector[String] =
     val bodyWidth = math.max(1, width - Ansi.visibleWidth(prefix))
@@ -390,7 +399,7 @@ final class BasicMarkdownRenderer(
     if ordered then s"${index + 1}." else "-"
 
   private def plainFallback(markdown: String, width: Int): Vector[String] =
-    Ansi.wrapTextWithAnsi(markdown, width).map(Ansi.truncateToWidth(_, width, ""))
+    Ansi.wrapLogicalLinesWithAnsi(markdown, width).map(Ansi.truncateToWidth(_, width, ""))
 
 object BasicMarkdownRenderer:
   val default: BasicMarkdownRenderer = BasicMarkdownRenderer()
@@ -402,22 +411,88 @@ final class Markdown(
     paddingX: Int = 0,
     paddingY: Int = 0
 ) extends Component:
-  private var currentText = initialText
+  private var currentText     = initialText
+  private var currentPaddingX = paddingX
+  private var currentPaddingY = paddingY
+  private var cachedRender    = Option.empty[Markdown.RenderCache]
 
-  def text: String                = currentText
-  def text_=(value: String): Unit = currentText = value
+  def text: String = currentText
 
-  override def render(width: Int): ComponentRender = ComponentRender.text(renderLines(width))
+  def text_=(value: String): Unit =
+    currentText = value
+    cachedRender = None
 
-  private def renderLines(width: Int): Vector[String] =
-    val safeWidth    = math.max(0, width)
-    val horizontal   = " ".repeat(math.max(0, paddingX))
+  /** Update horizontal padding and invalidate the one-entry render cache. */
+  def setPaddingX(value: Int): Unit =
+    currentPaddingX = value
+    cachedRender = None
+
+  /** Update vertical padding and invalidate the one-entry render cache. */
+  def setPaddingY(value: Int): Unit =
+    currentPaddingY = value
+    cachedRender = None
+
+  /** Explicitly discard cached output, including output from a stateful custom renderer. */
+  override def invalidate(): Unit = cachedRender = None
+
+  override def render(width: Int): ComponentRender =
+    val safeWidth  = math.max(0, width)
+    val horizontal = math.max(0, currentPaddingX)
+    val vertical   = math.max(0, currentPaddingY)
+    val generation = renderer.cacheGeneration
+    cachedRender match
+      case Some(cache)
+          if cache.matches(
+            currentText,
+            safeWidth,
+            horizontal,
+            vertical,
+            renderer,
+            generation
+          ) => cache.render
+      case _ =>
+        val rendered = ComponentRender.text(renderLines(safeWidth, horizontal, vertical))
+        cachedRender = Some(Markdown.RenderCache(
+          currentText,
+          safeWidth,
+          horizontal,
+          vertical,
+          renderer,
+          generation,
+          rendered
+        ))
+        rendered
+
+  private def renderLines(safeWidth: Int, paddingX: Int, paddingY: Int): Vector[String] =
+    val horizontal   = " ".repeat(paddingX)
     val contentWidth = math.max(1, safeWidth - horizontal.length * 2)
     val content      = renderer.render(currentText, contentWidth).map { line =>
       Ansi.truncateToWidth(horizontal + line + horizontal, safeWidth, "")
     }
     val blank        = " ".repeat(safeWidth)
-    Vector.fill(math.max(0, paddingY))(blank) ++ content ++ Vector.fill(math.max(
-      0,
-      paddingY
-    ))(blank)
+    Vector.fill(paddingY)(blank) ++ content ++ Vector.fill(paddingY)(blank)
+
+private object Markdown:
+  final case class RenderCache(
+      text: String,
+      width: Int,
+      paddingX: Int,
+      paddingY: Int,
+      renderer: MarkdownRenderer,
+      rendererGeneration: Long,
+      render: ComponentRender
+  ):
+    def matches(
+        currentText: String,
+        currentWidth: Int,
+        currentPaddingX: Int,
+        currentPaddingY: Int,
+        currentRenderer: MarkdownRenderer,
+        currentRendererGeneration: Long
+    ): Boolean =
+      text === currentText &&
+        width === currentWidth &&
+        paddingX === currentPaddingX &&
+        paddingY === currentPaddingY &&
+        (renderer eq currentRenderer) &&
+        rendererGeneration === currentRendererGeneration

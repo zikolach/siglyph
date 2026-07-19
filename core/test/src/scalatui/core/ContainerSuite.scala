@@ -161,3 +161,33 @@ class ContainerSuite extends munit.FunSuite:
 
     container.invalidate()
     assertEquals(invalidated, 1)
+
+  test("container and box propagate context idempotently across child mutation and detach"):
+    val firstTui  = TUI(scalatui.terminal.VirtualTerminal(10, 5))
+    val secondTui = TUI(scalatui.terminal.VirtualTerminal(10, 5))
+    var contexts  = Vector.empty[Option[TUIContext]]
+    val leaf      = new Component with ContextualComponent:
+      override def render(width: Int): ComponentRender           = ComponentRender.empty
+      override def tuiContext_=(value: Option[TUIContext]): Unit = contexts :+= value
+    val inner     = Container()
+    val outer     = Box(paddingX = 0)
+    outer.addChild(inner)
+    outer.tuiContext_=(Some(firstTui))
+    outer.tuiContext_=(Some(firstTui))
+    inner.addChild(leaf)
+    inner.addChild(leaf)
+
+    assertEquals(contexts, Vector(Some(firstTui)))
+    assertEquals(inner.removeChild(leaf), true)
+    assertEquals(contexts, Vector(Some(firstTui)))
+    assertEquals(inner.removeChild(leaf), true)
+    assertEquals(contexts, Vector(Some(firstTui), None))
+
+    inner.addChild(leaf)
+    outer.tuiContext_=(Some(secondTui))
+    outer.clear()
+
+    assertEquals(
+      contexts,
+      Vector(Some(firstTui), None, Some(firstTui), Some(secondTui), None)
+    )

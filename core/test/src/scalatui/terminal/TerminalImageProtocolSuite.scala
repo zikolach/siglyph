@@ -230,10 +230,9 @@ class TerminalImageProtocolSuite extends munit.FunSuite:
     assertEquals(TerminalImageProtocol.parseCellSizeResponse("\u001b[6;abc;24t"), None)
     assertEquals(TerminalImageProtocol.isCellSizeResponse("\u001b[6;abc;24t"), false)
 
-  test("cell-size query is reflected in image size calculation"):
-    TerminalImageProtocol.resetCellDimensions()
-    val dimensions  = ImageDimensions(100, 100)
-    val defaultSize = TerminalImageProtocol.calculateCellSize(
+  test("low-level runtime sizing uses its supplied deterministic fallback"):
+    val dimensions   = ImageDimensions(100, 100)
+    val defaultSize  = TerminalImageProtocol.calculateCellSize(
       dimensions,
       ImageRenderOptions(
         maxWidthCells = Some(1),
@@ -241,24 +240,21 @@ class TerminalImageProtocolSuite extends munit.FunSuite:
       ),
       terminalWidth = 20
     )
-    TerminalImageProtocol.setCellDimensions(20, 10)
-    val queriedSize = TerminalImageProtocol.calculateCellSize(
+    val suppliedSize = TerminalImageProtocol.calculateCellSize(
       dimensions,
       ImageRenderOptions(
         maxWidthCells = Some(1),
+        cellDimensions = ImageCellDimensions(20, 10),
         cellDimensionsSource = ImageCellDimensionsSource.Runtime
       ),
       terminalWidth = 20
     )
 
     assertEquals(defaultSize.heightCells, 1)
-    assertEquals(queriedSize.heightCells, 2)
-    assert(queriedSize.heightCells > defaultSize.heightCells)
+    assertEquals(suppliedSize.heightCells, 2)
+    assert(suppliedSize.heightCells > defaultSize.heightCells)
 
-  test("explicit fallback cell dimensions stay deterministic after runtime query"):
-    TerminalImageProtocol.resetCellDimensions()
-    TerminalImageProtocol.setCellDimensions(20, 10)
-
+  test("explicit fixed cell dimensions stay deterministic"):
     val fixedSize = TerminalImageProtocol.calculateCellSize(
       ImageDimensions(100, 100),
       ImageRenderOptions(
@@ -269,11 +265,6 @@ class TerminalImageProtocolSuite extends munit.FunSuite:
     )
 
     assertEquals(fixedSize.heightCells, 1)
-
-  test("invalid cell dimensions leave sizing fallback unchanged"):
-    TerminalImageProtocol.resetCellDimensions()
-    TerminalImageProtocol.setCellDimensions(0, 10)
-    assertEquals(TerminalImageProtocol.cellDimensions, ImageCellDimensions())
 
   test("cell-size query sequence is deterministic"):
     assertEquals(TerminalImageProtocol.QueryCellDimensions, "\u001b[16t")

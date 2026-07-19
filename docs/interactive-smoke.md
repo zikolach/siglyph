@@ -2,6 +2,9 @@
 
 Manual smoke checks for interactive runtime demos and the multiline editor demo. Static utility components are shown by `mill demo.run`; tick-driven `Loader` and `CancellableLoader` are shown in the shared interactive demo actions so their state can change live.
 
+Automated PTY lifecycle and terminal-restoration coverage is documented in
+[terminal-conformance.md](terminal-conformance.md).
+
 ## JVM interactive demo
 
 Run in a macOS/Linux terminal:
@@ -19,7 +22,7 @@ Expected behavior:
 - `Ctrl+T` cycles focus between the multiline editor, action list, and settings list, leaving `Tab` available to the focused editor for autocomplete.
 - `Enter` submits editor text, selects an action, ticks/cancels loader components through the action list, or accepts a visible autocomplete suggestion.
 - `Shift+Enter` inserts a newline in the editor when the terminal reports a normalized modified Enter event.
-- Type `/he`, `./`, `../`, `@"README`, or `#do` in editor input and press `Tab` to show slash-command, dependency-free filesystem path, attachment, or application-owned `#` trigger suggestions adjacent to the editor area. Completion uses Java/NIO filesystem enumeration only; no external shell tools are required.
+- Type `/he`, `./`, `@"README`, or `#do` in editor input and press `Tab` to show slash-command, dependency-free filesystem path, attachment, or application-owned `#` trigger suggestions adjacent to the editor area. The demo explicitly confines filesystem completion to its workspace root; parent, home, and absolute syntax stay disabled. Completion uses Java/NIO filesystem enumeration only; no external shell tools are required.
 - Verify autocomplete fuzzy ranking by typing partial command/path/tag text (for example `/hp` or `#dc`) and checking likely matches are ranked before looser matches when enabled in the demo.
 - In `examples/scala-cli/editor-autocomplete.scala`, which injects `EditorAutocompleteDebouncer.Delayed`, type additional characters quickly while autocomplete is visible and confirm stale work is cancelled/ignored: old suggestions remain visible while a refresh is pending, then are replaced or closed by the latest request.
 - With suggestions visible, `↑` / `↓` navigates, `Enter` or `Tab` accepts, and `Esc` cancels without changing editor text.

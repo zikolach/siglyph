@@ -77,7 +77,7 @@ final class ExpandableText(
     val vertical    = Vector.fill(math.max(0, paddingY))(
       Ansi.truncateToWidth(style(" ".repeat(safeWidth)), safeWidth, "")
     )
-    val body        = Ansi.wrapTextWithAnsi(content, innerWidth).map { line =>
+    val body        = Ansi.wrapLogicalLinesWithAnsi(content, innerWidth).map { line =>
       val padded = horizontal + Ansi.padRight(line, innerWidth) + horizontal
       Ansi.truncateToWidth(style(padded), safeWidth, "")
     }

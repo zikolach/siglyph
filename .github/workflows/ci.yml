@@ -62,6 +62,9 @@ jobs:
           script --version
           script -q -e -c 'mill --no-daemon __.test' /dev/null
 
+      - name: Run terminal PTY lifecycle tests
+        run: ./scripts/test-terminal-pty.sh
+
       - name: Package jars
         run: mill __.jar
 
@@ -104,3 +107,58 @@ jobs:
           name: siglyph-jars
           path: artifacts/jars/*.jar
           if-no-files-found: error
+
+  macos-terminal-conformance:
+    name: macOS terminal conformance
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Coursier
+        uses: coursier/setup-action@v3
+        with:
+          apps: ''
+
+      - name: Cache Scala and Mill dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/coursier
+            ~/.cache/mill
+            ~/.ivy2/cache
+            ~/.sbt
+          key: ${{ runner.os }}-scala-${{ hashFiles('build.mill', '.scalafix.conf', '.scalafmt.conf') }}
+          restore-keys: |
+            ${{ runner.os }}-scala-
+
+      - name: Install Mill
+        run: |
+          curl -fLo mill https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/1.1.6/mill-dist-1.1.6-mill.sh
+          chmod +x mill
+          echo "$PWD" >> "$GITHUB_PATH"
+          ./mill --version
+
+      - name: Check formatting
+        run: mill scalafmtCheck
+
+      - name: Run Scalafix
+        run: mill scalafixCheck
+
+      - name: Compile JVM and Native terminal paths
+        run: mill core.compile terminalJvm.compile coreNative.compile terminalNative.compile
+
+      - name: Run JVM and Native terminal tests under a PTY
+        run: |
+          script -q -e /dev/null mill --no-daemon \
+            core.test terminalJvm.test coreNative.test terminalNative.test
+
+      - name: Run terminal PTY lifecycle tests
+        run: ./scripts/test-terminal-pty.sh

@@ -22,6 +22,24 @@ class ExtrasSuite extends munit.FunSuite:
     val narrow = text.render(8).lines
     assert(narrow.forall(Ansi.visibleWidth(_) <= 8), narrow.toString)
 
+  test("extras text and section preserve logical line boundaries"):
+    val text = ExpandableText("one\r\ntwo", "three\rfour")
+    assertEquals(
+      text.render(20).lines.map(line => Ansi.strip(line).stripTrailing()),
+      Vector("one", "two")
+    )
+    text.setExpanded(true)
+    assertEquals(
+      text.render(20).lines.map(line => Ansi.strip(line).stripTrailing()),
+      Vector("three", "four")
+    )
+
+    val section = ExpandableSection("title\nnext", "body", "expanded")
+    assertEquals(
+      section.render(20).lines.take(2).map(line => Ansi.strip(line).stripTrailing()),
+      Vector("title", "next")
+    )
+
   test("expandable text constrains final plain and ANSI-themed lines at all widths"):
     val red  = "\u001b[31m"
     val text = ExpandableText(

@@ -28,7 +28,7 @@ final class Text(
       val innerWidth = math.max(0, width - paddingX * 2)
       val horizontal = " ".repeat(math.max(0, paddingX))
       val vertical   = Vector.fill(math.max(0, paddingY))(style(" ".repeat(width)))
-      val body       = Ansi.wrapTextWithAnsi(content, innerWidth).map { line =>
+      val body       = Ansi.wrapLogicalLinesWithAnsi(content, innerWidth).map { line =>
         val padded = horizontal + Ansi.padRight(line, innerWidth) + horizontal
         style(Ansi.truncateToWidth(padded, width, ""))
       }

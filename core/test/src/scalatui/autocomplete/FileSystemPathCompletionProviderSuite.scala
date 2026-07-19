@@ -279,6 +279,58 @@ class FileSystemPathCompletionProviderSuite extends munit.FunSuite:
       assertEquals(request(provider, "~/"), Vector.empty)
     }
 
+  test("filesystem provider separates current directory from contained parent traversal"):
+    withTempDirectory { root =>
+      val work     = Files.createDirectory(root.resolve("work"))
+      val shared   = Files.createDirectory(root.resolve("shared"))
+      Files.writeString(shared.resolve("guide.md"), "guide")
+      val provider = FileSystemPathCompletionProvider(FileSystemPathCompletionOptions(
+        baseDirectory = root.toFile,
+        currentDirectory = Some(work.toFile),
+        containmentRoots = Vector(root.toFile),
+        allowParentTraversal = true
+      ))
+
+      assertEquals(request(provider, "../shared/").map(_.path), Vector("../shared/guide.md"))
+      assertEquals(request(provider, "../../"), Vector.empty)
+
+      val disabled = FileSystemPathCompletionProvider(FileSystemPathCompletionOptions(
+        baseDirectory = root.toFile,
+        currentDirectory = Some(work.toFile),
+        containmentRoots = Vector(root.toFile)
+      ))
+      assertEquals(request(disabled, "../shared/"), Vector.empty)
+    }
+
+  test("filesystem provider gates contained absolute and home syntax independently"):
+    withTempDirectory { root =>
+      Files.writeString(root.resolve("inside.txt"), "inside")
+      val absolutePrefix = root.toAbsolutePath.toString + "/"
+      val absolute       = FileSystemPathCompletionProvider(FileSystemPathCompletionOptions(
+        baseDirectory = root.toFile,
+        containmentRoots = Vector(root.toFile),
+        allowAbsolutePaths = true
+      ))
+      assertEquals(
+        request(absolute, absolutePrefix).map(_.path),
+        Vector(absolutePrefix + "inside.txt")
+      )
+
+      val previousHome = System.getProperty("user.home")
+      try
+        System.setProperty("user.home", root.toString)
+        val home = FileSystemPathCompletionProvider(FileSystemPathCompletionOptions(
+          baseDirectory = root.toFile,
+          containmentRoots = Vector(root.toFile),
+          allowHomeExpansion = true
+        ))
+        assertEquals(request(home, "~/").map(_.path), Vector("~/inside.txt"))
+      finally
+        Option(previousHome) match
+          case Some(value) => System.setProperty("user.home", value)
+          case None        => System.clearProperty("user.home")
+    }
+
   test("filesystem provider rejects symlink completions escaping configured base"):
     withTempDirectory { root =>
       withTempDirectory { outside =>
@@ -324,12 +376,121 @@ class FileSystemPathCompletionProviderSuite extends munit.FunSuite:
       assertEquals(completed, false)
     }
 
+  test("recursive attachment provider finds descendants and preserves combined syntax"):
+    withTempDirectory { root =>
+      val src       = Files.createDirectories(root.resolve("src/main"))
+      Files.writeString(src.resolve("Main.scala"), "object Main")
+      val recursive = RecursiveAttachmentCompletionProvider(
+        RecursiveAttachmentCompletionOptions(
+          paths = FileSystemPathCompletionOptions(baseDirectory = root.toFile),
+          maxDepth = 3,
+          maxVisitedEntries = 20,
+          maxResults = 10
+        )
+      )
+
+      assertEquals(
+        requestAttachment(recursive, "Ma").map(_.path),
+        Vector("src/main/Main.scala")
+      )
+      assertEquals(request(recursive, "Ma"), Vector.empty)
+
+      val combined = CombinedAutocompleteProvider(pathProvider = Some(recursive))
+      val result   = requestAutocompleteAtEnd(combined, "attach @\"Ma").get
+      assertEquals(result.prefix, "@\"Ma")
+      assertEquals(result.items.map(_.value), Vector("@\"src/main/Main.scala\""))
+    }
+
+  test("recursive attachment provider honors depth visited-entry and result bounds"):
+    withTempDirectory { root =>
+      val nested = Files.createDirectories(root.resolve("one/two"))
+      Files.writeString(nested.resolve("target-a.txt"), "a")
+      Files.writeString(nested.resolve("target-b.txt"), "b")
+
+      def recursive(depth: Int, visited: Int, results: Int) =
+        RecursiveAttachmentCompletionProvider(RecursiveAttachmentCompletionOptions(
+          paths = FileSystemPathCompletionOptions(baseDirectory = root.toFile),
+          maxDepth = depth,
+          maxVisitedEntries = visited,
+          maxResults = results
+        ))
+
+      assertEquals(requestAttachment(recursive(1, 20, 10), "target"), Vector.empty)
+      assertEquals(requestAttachment(recursive(2, 0, 10), "target"), Vector.empty)
+      assertEquals(requestAttachment(recursive(2, 20, 1), "target").length, 1)
+      assertEquals(
+        requestAttachment(recursive(2, 20, 10), "target").map(_.path),
+        Vector("one/two/target-a.txt", "one/two/target-b.txt")
+      )
+    }
+
+  test("recursive attachment provider rejects escaping symlinks"):
+    withTempDirectory { root =>
+      withTempDirectory { outside =>
+        Files.writeString(outside.resolve("outside-secret.txt"), "secret")
+        Files.writeString(root.resolve("inside.txt"), "inside")
+        try
+          Files.createSymbolicLink(root.resolve("escape"), outside)
+          val recursive = RecursiveAttachmentCompletionProvider(
+            RecursiveAttachmentCompletionOptions(
+              paths = FileSystemPathCompletionOptions(baseDirectory = root.toFile)
+            )
+          )
+
+          assertEquals(requestAttachment(recursive, "outside"), Vector.empty)
+          assertEquals(requestAttachment(recursive, "inside").map(_.path), Vector("inside.txt"))
+        catch
+          case _: UnsupportedOperationException => ()
+          case _: java.io.IOException           => ()
+          case _: SecurityException             => ()
+      }
+    }
+
+  test("recursive attachment provider suppresses cancelled queued traversal"):
+    withTempDirectory { root =>
+      Files.writeString(root.resolve("file.txt"), "file")
+      var queued    = Vector.empty[Runnable]
+      var completed = false
+      val provider  = RecursiveAttachmentCompletionProvider(
+        RecursiveAttachmentCompletionOptions(
+          paths = FileSystemPathCompletionOptions(baseDirectory = root.toFile)
+        ),
+        dispatch = runnable => queued :+= runnable
+      )
+      val handle    = provider.requestPathSuggestions(
+        PathCompletionRequest(
+          PathCompletionPrefix("@f", "f", isAttachment = true, isQuoted = false),
+          force = false
+        ),
+        new PathCompletionProvider.Callback:
+          override def complete(result: Vector[PathCompletion]): Unit = completed = true
+          override def fail(error: Throwable): Unit                   = throw error
+      )
+
+      handle.cancel()
+      queued.foreach(_.run())
+
+      assertEquals(completed, false)
+    }
+
   private def request(provider: PathCompletionProvider, rawPrefix: String): Vector[PathCompletion] =
+    request(provider, rawPrefix, isAttachment = false)
+
+  private def requestAttachment(
+      provider: PathCompletionProvider,
+      rawPrefix: String
+  ): Vector[PathCompletion] = request(provider, rawPrefix, isAttachment = true)
+
+  private def request(
+      provider: PathCompletionProvider,
+      rawPrefix: String,
+      isAttachment: Boolean
+  ): Vector[PathCompletion] =
     var result = Vector.empty[PathCompletion]
     var failed = Option.empty[Throwable]
     provider.requestPathSuggestions(
       PathCompletionRequest(
-        PathCompletionPrefix(rawPrefix, rawPrefix, isAttachment = false, isQuoted = false),
+        PathCompletionPrefix(rawPrefix, rawPrefix, isAttachment, isQuoted = false),
         force = false
       ),
       new PathCompletionProvider.Callback:
