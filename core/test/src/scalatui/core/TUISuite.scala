@@ -310,6 +310,7 @@ class TUISuite extends munit.FunSuite:
     private var inputHandler: TerminalInput => Unit = _ => ()
     private var resizeHandler: () => Unit           = () => ()
     private var mouseReportingEnabled               = false
+    private val automaticCursorReportDelivered      = CountDownLatch(1)
     var repliesToCursorQueries                      = true
     var cursorRow                                   = 0
     val writes                                      = scala.collection.mutable.ArrayBuffer.empty[String]
@@ -330,7 +331,12 @@ class TUISuite extends munit.FunSuite:
     override def write(data: String): Unit =
       writes += data
       if repliesToCursorQueries && data.contains(TerminalCursorProtocol.CursorPositionQuery) then
-        val delivery = Thread(() => sendCursorReport(), "cursor-query-switching-terminal-input")
+        val delivery = Thread(
+          () =>
+            try sendCursorReport()
+            finally automaticCursorReportDelivered.countDown(),
+          "cursor-query-switching-terminal-input"
+        )
         delivery.setDaemon(true)
         delivery.start()
 
@@ -345,6 +351,8 @@ class TUISuite extends munit.FunSuite:
 
     def sendMouse(input: TerminalInput.Mouse): Unit = inputHandler(input)
     def sendResize(): Unit                          = resizeHandler()
+    def awaitAutomaticCursorReport(): Boolean       =
+      automaticCursorReportDelivered.await(5, TimeUnit.SECONDS)
     def sendCursorReport(): Unit                    =
       val response = s"\u001b[${cursorRow + 1};1R"
       scalatui.terminal.TerminalInputBuffer()
@@ -759,6 +767,10 @@ class TUISuite extends munit.FunSuite:
     terminal.cursorRow = 4
     terminal.repliesToCursorQueries = true
     tui.start()
+    assert(
+      terminal.awaitAutomaticCursorReport(),
+      "automatic cursor-position report was not delivered"
+    )
     terminal.sendMouse(TerminalInput.Mouse(MouseAction.Press(MouseButton.Left), row = 4, col = 0))
     assertEquals(target.events.map(_._1).toVector, Vector("target"))
     tui.stop()
