@@ -2,8 +2,8 @@
 
 Small single-file demos intended for `scala-cli`.
 
-The released examples use Maven Central `0.5.0` artifacts. The mouse example uses local
-`0.5.0-SNAPSHOT` artifacts to exercise unreleased mouse-input APIs; run
+The released examples use Maven Central `0.6.0` artifacts. The mouse example uses local
+`0.6.0-SNAPSHOT` artifacts to exercise unreleased mouse-input APIs; run
 `./scripts/publish-local-snapshot.sh` from the repository root before running it.
 
 Run from this repository:
