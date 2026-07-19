@@ -24,3 +24,13 @@ target/
 *.log
 .tmp/
 tmp/
+
+# Generated project/demo artifacts
+/artifacts/
+/*.md
+!/AGENTS.md
+!/CHANGELOG.md
+!/CODE_OF_CONDUCT.md
+!/CONTRIBUTING.md
+!/README.md
+!/SECURITY.md
