@@ -1341,8 +1341,6 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     val height              = positiveDimension(terminal.rows)
     val baseFrame           = root.renderFrame(width)
     val (composed, layouts) = renderOverlays(baseFrame.render, width, height)
-    latestBaseLayout = Some(baseFrame.layout)
-    latestOverlayLayouts = layouts
     val frame               = prepareFrame(composed.validated(width), width)
 
     val currentWidth      = positiveDimension(terminal.columns)
@@ -1370,6 +1368,8 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         previousFrame = Some(frame)
         previousWidth = width
         previousHeight = height
+      latestBaseLayout = Some(baseFrame.layout)
+      latestOverlayLayouts = layouts
 
   private def fullRender(
       frame: TUI.PreparedFrame,

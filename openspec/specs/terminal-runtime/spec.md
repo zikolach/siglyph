@@ -965,4 +965,3 @@ Interactive terminal mouse reporting SHALL document that wheel events are delive
 #### Scenario: Unhandled wheel cannot be passed back
 - **WHEN** a wheel event is delivered to the application by terminal mouse reporting and no component handles it
 - **THEN** the runtime preserves focus and does not attempt to pass that event back to terminal scrollback
-

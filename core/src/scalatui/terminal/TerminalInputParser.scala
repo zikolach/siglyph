@@ -136,11 +136,13 @@ object TerminalInputParser:
   private def parseInt(value: String): Option[Int] =
     scala.util.Try(value.toInt).toOption
 
-  private def mouseButton(code: Int): MouseButton = (code & 3) match
-    case 0 => MouseButton.Left
-    case 1 => MouseButton.Middle
-    case 2 => MouseButton.Right
-    case _ => MouseButton.Other(code & 3)
+  private def mouseButton(code: Int): MouseButton =
+    val identity = code & ~(4 | 8 | 16 | 32 | 64)
+    identity match
+      case 0 => MouseButton.Left
+      case 1 => MouseButton.Middle
+      case 2 => MouseButton.Right
+      case _ => MouseButton.Other(identity)
 
   private def wheelDirection(code: Int): MouseWheelDirection = code match
     case 0 => MouseWheelDirection.Up
