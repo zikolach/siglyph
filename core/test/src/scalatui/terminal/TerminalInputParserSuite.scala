@@ -11,6 +11,66 @@ class TerminalInputParserSuite extends munit.FunSuite:
     assertEquals(parse("\u001b[A"), Vector(TerminalInput.Key(TerminalKey.Up)))
     assertEquals(parse("ä"), Vector(TerminalInput.Key(TerminalKey.Character("ä"))))
 
+  test("parses SGR mouse press release wheel and modifiers"):
+    assertEquals(
+      parse("\u001b[<0;3;2M"),
+      Vector(TerminalInput.Mouse(MouseAction.Press(MouseButton.Left), row = 1, col = 2))
+    )
+    assertEquals(
+      parse("\u001b[<0;3;2m"),
+      Vector(TerminalInput.Mouse(MouseAction.Release(MouseButton.Left), row = 1, col = 2))
+    )
+    val directions = Vector(
+      64 -> MouseWheelDirection.Up,
+      65 -> MouseWheelDirection.Down,
+      66 -> MouseWheelDirection.Left,
+      67 -> MouseWheelDirection.Right
+    )
+    directions.foreach { (code, direction) =>
+      assertEquals(
+        parse(s"\u001b[<${code};3;2M"),
+        Vector(TerminalInput.Mouse(MouseAction.Wheel(direction), row = 1, col = 2))
+      )
+    }
+    assertEquals(
+      parse("\u001b[<28;1;1M"),
+      Vector(TerminalInput.Mouse(
+        MouseAction.Press(MouseButton.Left),
+        row = 0,
+        col = 0,
+        modifiers = KeyModifiers(ctrl = true, shift = true, alt = true)
+      ))
+    )
+    assertEquals(
+      parse("\u001b[<3;1;1M"),
+      Vector(TerminalInput.Mouse(MouseAction.Press(MouseButton.Other(3)), row = 0, col = 0))
+    )
+    assertEquals(
+      parse("\u001b[<31;1;1M"),
+      Vector(TerminalInput.Mouse(
+        MouseAction.Press(MouseButton.Other(3)),
+        row = 0,
+        col = 0,
+        modifiers = KeyModifiers(ctrl = true, shift = true, alt = true)
+      ))
+    )
+
+  test("preserves invalid SGR mouse coordinates as raw input"):
+    Vector(
+      "\u001b[<0;0;2M",
+      "\u001b[<0;3;0M",
+      "\u001b[<999999999999999999999;1;1M"
+    ).foreach { value =>
+      val bytes  = value.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+      val events = parse(value)
+      assertEquals(events.head, TerminalInput.RawStart(TerminalRawKind.Csi))
+      assertEquals(events.last, TerminalInput.RawEnd(TerminalRawTermination.Complete))
+      assertEquals(
+        events.collect { case TerminalInput.RawChunk(chunk) => chunk.toArray }.flatten.toVector,
+        bytes.toVector
+      )
+    }
+
   test("preserves modified, Kitty CSI-u, modifyOtherKeys, SS3, Alt, and controls"):
     assertEquals(
       parse("\u001b[1;5D"),

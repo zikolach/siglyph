@@ -2,13 +2,16 @@ package scalatui.core
 
 import scalatui.ansi.Ansi
 import scalatui.syntax.Equality.*
+import scalatui.syntax.Containment.*
 import scalatui.terminal.{
   KeyEventType,
   RgbColor,
   Terminal,
   TerminalColorProtocol,
   TerminalColorScheme,
+  TerminalCursorProtocol,
   TerminalImageProtocol,
+  MouseInputContext,
   TerminalInput,
   TerminalInputChunk,
   TerminalKey,
@@ -19,6 +22,8 @@ import scalatui.terminal.{
 }
 
 import scala.collection.mutable.ArrayBuffer
+
+import java.util.concurrent.{CountDownLatch, TimeUnit}
 
 /** Terminal screen buffer mode owned by [[TUI]] for one runtime lifecycle. */
 enum TUIScreenMode derives CanEqual:
@@ -47,10 +52,14 @@ enum TUIScreenMode derives CanEqual:
  *   Terminal screen buffer mode for this TUI lifecycle. The default [[TUIScreenMode.Normal]] keeps
  *   existing normal-screen behavior. [[TUIScreenMode.Alternate]] enters the terminal alternate
  *   screen on start and exits it during cleanup without changing the component render contract.
+ * @param mouseInput
+ *   Enable opt-in terminal mouse reporting for coordinate-aware mouse input. Disabled by default
+ *   because terminal mouse reporting can affect normal text selection.
  */
 final case class TUIOptions(
     hardwareCursorPositioning: Boolean = false,
-    screenMode: TUIScreenMode = TUIScreenMode.Normal
+    screenMode: TUIScreenMode = TUIScreenMode.Normal,
+    mouseInput: Boolean = false
 ) derives CanEqual
 
 /**
@@ -88,6 +97,9 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   private var nextQueryFlightId                       = 0L
   private var nextQuerySubscriberId                   = 0L
   private var previousFrame                           = Option.empty[TUI.PreparedFrame]
+  private var latestBaseLayout                        = Option.empty[LayoutNode]
+  private var latestOverlayLayouts                    = Vector.empty[TUI.OverlayLayout]
+  private var latestFrameStartRow                     = Option.empty[Int]
   private var previousWidth                           = 0
   private var previousHeight                          = 0
   private var cursorRow                               = 0
@@ -106,6 +118,8 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   private var nextFocusOrder                          = 0L
   private var backgroundColorFlight                   = Option.empty[TUI.QueryFlight[RgbColor]]
   private var colorSchemeFlight                       = Option.empty[TUI.QueryFlight[TerminalColorScheme]]
+  private var cursorPositionFlight                    =
+    Option.empty[TUI.QueryFlight[TerminalCursorProtocol.CursorPosition]]
   private var rawCorrelation                          = Option.empty[TUI.RawCorrelation]
   private val terminalColorSchemeListeners            = ArrayBuffer.empty[TerminalColorScheme => Unit]
   private var terminalColorSchemeNotificationsEnabled = false
@@ -316,6 +330,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     }
     if shouldStart then
       try
+        Terminal.setMouseReporting(terminal, options.mouseInput)
         writeTerminal(terminal.start(
           input => safeRuntimeCallback(publishInput(input)),
           () => safeRuntimeCallback(publishResize())
@@ -328,12 +343,17 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
           TerminalImageProtocol.resetCellDimensions()
           writeTerminal(terminal.hideCursor())
           writeTerminal(terminal.write(TerminalImageProtocol.QueryCellDimensions))
-          requestRenderInternal(force = true, clear = isAlternateScreenMode)
+          if !options.mouseInput then
+            requestRenderInternal(force = true, clear = isAlternateScreenMode)
         lifecycleLock.synchronized {
           startupOwner = false
           if lifecycleState === TUI.LifecycleState.Starting then
             lifecycleState = TUI.LifecycleState.Running
         }
+        if options.mouseInput && lifecycleLock.synchronized(
+            lifecycleState === TUI.LifecycleState.Running
+          )
+        then initializeMouseFrameOrigin()
         drainOrReturn()
         finishDeferredCleanupIfNeeded()
         runtimeFailure.foreach(throw _)
@@ -397,11 +417,20 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   override def flushRender(): Unit = drainOrReturn()
 
   private def handleInput(input: TerminalInput): Unit =
-    if routeGlobalInputListeners(input) !== InputResult.Ignored then ()
+    if isMouseInputDisabled(input) then ()
+    else if routeGlobalInputListeners(input) !== InputResult.Ignored then ()
     else if isIgnoredKeyRelease(input) then ()
     else if handlesControlC && isCtrl(input, "c") then requestExit()
     else if exitsOnEscape && (input === TerminalInput.Key(TerminalKey.Escape)) then requestExit()
-    else inputTarget.map(_.handleInputResult(input)).foreach(handleInputResult)
+    else
+      input match
+        case mouse: TerminalInput.Mouse => routeMouseInput(mouse)
+        case _                          =>
+          inputTarget.map(_.handleInputResult(input)).foreach(handleInputResult)
+
+  private def isMouseInputDisabled(input: TerminalInput): Boolean = input match
+    case _: TerminalInput.Mouse => !options.mouseInput
+    case _                      => false
 
   private def subscribeQuery[A](
       getFlight: () => Option[TUI.QueryFlight[A]],
@@ -500,6 +529,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         subscriber.state = TUI.QuerySubscriberState.Cancelled
         backgroundColorFlight = removeQuerySubscriber(backgroundColorFlight, subscriber)
         colorSchemeFlight = removeQuerySubscriber(colorSchemeFlight, subscriber)
+        cursorPositionFlight = removeQuerySubscriber(cursorPositionFlight, subscriber)
     }
 
   private def removeQuerySubscriber[A](
@@ -507,6 +537,40 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
       subscriber: TUI.QuerySubscriber[?]
   ): Option[TUI.QueryFlight[A]] =
     flight.map(value => value.copy(subscribers = value.subscribers.filterNot(_ eq subscriber)))
+
+  private def initializeMouseFrameOrigin(timeoutMillis: Long = 100L): Unit =
+    latestFrameStartRow = None
+    val stateLock              = Object()
+    val ready                  = CountDownLatch(1)
+    var result                 = Option.empty[TerminalCursorProtocol.CursorPosition]
+    var initialRenderRequested = false
+    subscribeQuery(
+      () => cursorPositionFlight,
+      flight => cursorPositionFlight = flight,
+      "\r" + TerminalCursorProtocol.CursorPositionQuery,
+      {
+        case TerminalQueryResult.Success(position) =>
+          val arrivedLate = stateLock.synchronized {
+            result = Some(position)
+            ready.countDown()
+            initialRenderRequested
+          }
+          if arrivedLate then establishMouseFrameOrigin(position)
+        case _                                     => ready.countDown()
+      }
+    )
+    ready.await(math.max(0L, timeoutMillis), TimeUnit.MILLISECONDS)
+    stateLock.synchronized {
+      initialRenderRequested = true
+      latestFrameStartRow = result.map(_.row)
+    }
+    requestRenderInternal(force = true, clear = isAlternateScreenMode)
+
+  private def establishMouseFrameOrigin(
+      position: TerminalCursorProtocol.CursorPosition
+  ): Unit =
+    latestFrameStartRow = Some(position.row)
+    requestRenderInternal(force = true, clear = isAlternateScreenMode)
 
   private def classifyIngressLocked(input: TerminalInput): TUI.IngressClassification =
     if replayContinuation.nonEmpty then TUI.IngressClassification.Blocked
@@ -613,6 +677,21 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         () =>
           rawCorrelation = None
           colorSchemeFlight = None
+      )
+    else if termination === TerminalRawTermination.Complete && TerminalCursorProtocol.isCursorPositionReport(
+        data
+      )
+    then
+      val result      = TerminalCursorProtocol.parseCursorPositionReport(data)
+        .map(TerminalQueryResult.Success(_))
+        .getOrElse(TerminalQueryResult.InvalidResponse)
+      val completions = completeFlightLocked(cursorPositionFlight, result)
+      TUI.IngressClassification.Publish(
+        TUI.Ingress.Protocol(completions, Vector.empty),
+        Vector.empty,
+        () =>
+          rawCorrelation = None
+          cursorPositionFlight = None
       )
     else
       val replay = TerminalInput.RawStart(correlation.kind) +:
@@ -982,6 +1061,56 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     handleInputResult(result)
     result
 
+  private def routeMouseInput(input: TerminalInput.Mouse): Unit =
+    val frameStart = latestFrameStartRow
+    val result     = frameStart match
+      case Some(startRow) =>
+        val frameRow          = input.row - startRow
+        val visibleOverlayIds = overlayStack.iterator
+          .filter(isOverlayVisible)
+          .map(_.id)
+          .toSet
+        val overlayResult     = latestOverlayLayouts.reverseIterator
+          .filter(layout => visibleOverlayIds.contains_(layout.id))
+          .map(layout => routeMouseInNode(input, frameRow, input.col, startRow, layout.node))
+          .find(_ !== InputResult.Ignored)
+        overlayResult
+          .getOrElse(
+            latestBaseLayout
+              .map(routeMouseInNode(input, frameRow, input.col, startRow, _))
+              .getOrElse(InputResult.Ignored)
+          )
+      case None           => InputResult.Ignored
+    handleInputResult(result)
+
+  private def routeMouseInNode(
+      input: TerminalInput.Mouse,
+      frameRow: Int,
+      frameCol: Int,
+      frameStartRow: Int,
+      node: LayoutNode
+  ): InputResult =
+    if !node.bounds.contains(frameRow, frameCol) then InputResult.Ignored
+    else
+      val childResult = node.children.reverseIterator
+        .map(routeMouseInNode(input, frameRow, frameCol, frameStartRow, _))
+        .find(_ !== InputResult.Ignored)
+      childResult.getOrElse {
+        node.component match
+          case handler: MouseInputHandler =>
+            val bounds = node.bounds
+            handler.handleMouse(MouseInputContext(
+              input = input,
+              boundsRow = frameStartRow + bounds.row,
+              boundsCol = bounds.col,
+              boundsWidth = bounds.width,
+              boundsHeight = bounds.height,
+              localRow = frameRow - bounds.row,
+              localCol = frameCol - bounds.col
+            ))
+          case _                          => InputResult.Ignored
+      }
+
   private def handleInputResult(result: InputResult): Unit = result match
     case InputResult.Ignored               => ()
     case InputResult.Handled(shouldRender) =>
@@ -999,23 +1128,39 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
       baseFrame: ComponentRender,
       width: Int,
       height: Int
-  ): ComponentRender =
+  ): (ComponentRender, Vector[TUI.OverlayLayout]) =
     val visible  = overlayStack.toVector.filter(isOverlayVisible)
     val rendered = visible
       .sortBy(_.focusOrder)
       .flatMap { entry =>
         val initialLayout = OverlayRenderer.resolve(entry.options, overlayHeight = 0, width, height)
-        val rawFrame      = entry.component.render(initialLayout.width).validated(initialLayout.width)
-        val clippedLines  = initialLayout.maxHeight.fold(rawFrame.lines)(rawFrame.lines.take)
-        val controls      = rawFrame.controls.filter(_.row < clippedLines.length)
-        val cursors       = rawFrame.cursorPlacements.filter(_.row < clippedLines.length)
+        val rawFrame      = entry.component.renderFrame(
+          initialLayout.width,
+          initialLayout.row,
+          initialLayout.col
+        )
+        val validated     = rawFrame.render.validated(initialLayout.width)
+        val clippedLines  = initialLayout.maxHeight.fold(validated.lines)(validated.lines.take)
+        val controls      = validated.controls.filter(_.row < clippedLines.length)
+        val cursors       = validated.cursorPlacements.filter(_.row < clippedLines.length)
         val clippedFrame  =
           ComponentRender(clippedLines, controls, cursors).validated(initialLayout.width)
         val layout        = OverlayRenderer.resolve(entry.options, clippedLines.length, width, height)
-        Option.when(clippedLines.nonEmpty)(clippedFrame -> layout)
+        Option.when(clippedLines.nonEmpty) {
+          val shifted = translateLayout(
+            rawFrame.layout,
+            rowDelta = layout.row - rawFrame.layout.bounds.row,
+            colDelta = layout.col - rawFrame.layout.bounds.col
+          )
+          val node    = shifted.copy(
+            bounds = LayoutBounds(layout.row, layout.col, layout.width, clippedLines.length)
+          )
+          (clippedFrame -> layout) -> TUI.OverlayLayout(entry.id, node)
+        }
       }
     latestOverlayVisibility = visible.nonEmpty
-    OverlayRenderer.composite(baseFrame, rendered, width, height)
+    val frame    = OverlayRenderer.composite(baseFrame, rendered.map(_._1), width, height)
+    frame -> rendered.map(_._2)
 
   private def makeOverlayHandle(entry: TUI.OverlayEntry): OverlayHandle = new OverlayHandle:
     override def id: OverlayId = entry.id
@@ -1108,6 +1253,15 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   private def isOverlayComponent(component: Component): Boolean =
     overlayStack.exists(_.component eq component)
 
+  private def translateLayout(node: LayoutNode, rowDelta: Int, colDelta: Int): LayoutNode =
+    node.copy(
+      bounds = node.bounds.copy(
+        row = node.bounds.row + rowDelta,
+        col = node.bounds.col + colDelta
+      ),
+      children = node.children.map(translateLayout(_, rowDelta, colDelta))
+    )
+
   private def attachContext(component: Component): Unit = component match
     case contextual: ContextualComponent => contextual.tuiContext_=(Some(this))
     case _                               => ()
@@ -1154,6 +1308,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     attempt(writeTerminal(terminal.showCursor()))
     attempt(exitAlternateScreenIfNeeded())
     attempt(writeTerminal(terminal.stop()))
+    attempt(Terminal.setMouseReporting(terminal, enabled = false))
 
     val detachedCompletions = lifecycleLock.synchronized {
       postRestorationCutoff = true
@@ -1165,6 +1320,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     lifecycleLock.synchronized {
       backgroundColorFlight = None
       colorSchemeFlight = None
+      cursorPositionFlight = None
       rawCorrelation = None
       pendingIngress.clear()
       replayContinuation = None
@@ -1180,12 +1336,14 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     case _                                                                          => false
 
   private def renderNow(force: Boolean, clear: Boolean): Unit =
-    val generation = lifecycleLock.synchronized(resizeGeneration)
-    val width      = positiveDimension(terminal.columns)
-    val height     = positiveDimension(terminal.rows)
-    val rawFrame   = root.render(width)
-    val composed   = renderOverlays(rawFrame, width, height).validated(width)
-    val frame      = prepareFrame(composed, width)
+    val generation          = lifecycleLock.synchronized(resizeGeneration)
+    val width               = positiveDimension(terminal.columns)
+    val height              = positiveDimension(terminal.rows)
+    val baseFrame           = root.renderFrame(width)
+    val (composed, layouts) = renderOverlays(baseFrame.render, width, height)
+    latestBaseLayout = Some(baseFrame.layout)
+    latestOverlayLayouts = layouts
+    val frame               = prepareFrame(composed.validated(width), width)
 
     val currentWidth      = positiveDimension(terminal.columns)
     val currentHeight     = positiveDimension(terminal.rows)
@@ -1219,7 +1377,8 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
       height: Int,
       clear: Boolean
   ): Unit =
-    val builder    = StringBuilder()
+    val startRowBeforeRender = if clear then Some(0) else latestFrameStartRow
+    val builder              = StringBuilder()
     appendRenderStart(builder)
     if clear then builder.append(clearSequence)
     else
@@ -1227,7 +1386,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         appendVerticalMove(builder, fromRow = cursorRow, toRow = 0)
         builder.append("\r")
       }
-    val paintedRow = appendFrameContent(
+    val paintedRow           = appendFrameContent(
       builder,
       frame,
       fromRow = 0,
@@ -1236,6 +1395,8 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     appendHardwareCursorMove(builder, frame, paintedRow)
     appendRenderEnd(builder)
     writeRenderBuffer(builder.result())
+    latestFrameStartRow =
+      startRowBeforeRender.map(scrolledFrameStart(_, 0, frame.lines.length, height))
     previousFrame = Some(frame)
     previousWidth = width
     previousHeight = height
@@ -1256,6 +1417,9 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     appendRenderEnd(builder)
     writeRenderBuffer(builder.result())
     cursorRow = finalCursorRow(frame, paintedRow)
+    latestFrameStartRow = latestFrameStartRow.map(start =>
+      scrolledFrameStart(start, firstChanged, frame.lines.length - firstChanged, terminal.rows)
+    )
 
   private def appendFrameContent(
       builder: StringBuilder,
@@ -1392,6 +1556,18 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         builder.append("\r")
         appendMoveRight(builder, target.column)
       }
+
+  private def scrolledFrameStart(
+      frameStartRow: Int,
+      writeStartFrameRow: Int,
+      writtenLineCount: Int,
+      terminalHeight: Int
+  ): Int =
+    if writtenLineCount <= 0 then frameStartRow
+    else
+      val writeStartScreenRow = frameStartRow + writeStartFrameRow
+      val overflow            = math.max(0, writeStartScreenRow + writtenLineCount - terminalHeight)
+      frameStartRow - overflow
 
   private def finalCursorRow(frame: TUI.PreparedFrame, paintedRow: Int): Int =
     if options.hardwareCursorPositioning then frame.position.map(_.row).getOrElse(paintedRow)
@@ -1571,6 +1747,8 @@ object TUI:
       var hidden: Boolean,
       var focusOrder: Long
   )
+
+  private final case class OverlayLayout(id: OverlayId, node: LayoutNode)
 
   final case class RenderSanitization(
       lineIndex: Int,

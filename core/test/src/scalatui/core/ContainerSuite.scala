@@ -3,6 +3,53 @@ package scalatui.core
 import scalatui.terminal.{Base64ImagePayload, TerminalImageProtocol}
 
 class ContainerSuite extends munit.FunSuite:
+  final class Lines(value: Vector[String]) extends Component:
+    override def render(width: Int): ComponentRender = ComponentRender.text(value)
+
+  test("component default render frame records leaf bounds"):
+    val component = Lines(Vector("\u001b[31mwide\u001b[0m", "界"))
+    val frame     = component.renderFrame(width = 6, row = 2, col = 3)
+
+    assertEquals(frame.lines, component.render(6).lines)
+    assertEquals(frame.layout.component, component)
+    assertEquals(frame.layout.bounds, LayoutBounds(row = 2, col = 3, width = 6, height = 2))
+    assertEquals(frame.layout.children, Vector.empty)
+
+  test("container render frame records vertical child offsets"):
+    val first     = Lines(Vector("a", "b"))
+    val second    = Lines(Vector("c", "d", "e"))
+    val container = Container()
+    container.addChild(first)
+    container.addChild(second)
+
+    val frame = container.renderFrame(width = 10)
+
+    assertEquals(frame.lines, Vector("a", "b", "c", "d", "e"))
+    assertEquals(
+      frame.layout.children.map(_.bounds),
+      Vector(
+        LayoutBounds(row = 0, col = 0, width = 10, height = 2),
+        LayoutBounds(row = 2, col = 0, width = 10, height = 3)
+      )
+    )
+
+  test("nested container render frame records descendant bounds"):
+    val leaf  = Lines(Vector("leaf"))
+    val inner = Container()
+    val outer = Container()
+    inner.addChild(leaf)
+    outer.addChild(Lines(Vector("top")))
+    outer.addChild(inner)
+
+    val frame = outer.renderFrame(width = 12)
+
+    val innerNode = frame.layout.children(1)
+    assertEquals(innerNode.bounds, LayoutBounds(row = 1, col = 0, width = 12, height = 1))
+    assertEquals(
+      innerNode.children.head.bounds,
+      LayoutBounds(row = 1, col = 0, width = 12, height = 1)
+    )
+
   test("container renders children in insertion order"):
     val container = Container()
     container.addChild(new Component:

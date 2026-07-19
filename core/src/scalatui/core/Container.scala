@@ -23,6 +23,9 @@ final class Container extends Component:
     childBuffer.foreach(_.invalidate())
 
   override def render(width: Int): ComponentRender =
-    val frame = ComponentFrameBuilder(width)
+    renderFrame(width).render
+
+  override def renderFrame(width: Int, row: Int = 0, col: Int = 0): RenderedFrame =
+    val frame = ComponentFrameBuilder(width, row, col)
     childBuffer.foreach(frame.addComponent)
-    frame.result()
+    frame.resultFrame(this)

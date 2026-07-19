@@ -10,6 +10,28 @@ class TerminalInputBufferSuite extends munit.FunSuite:
     assertEquals(buffer.process(chunk("\u001b[")), Vector.empty)
     assertEquals(buffer.process(chunk("A")), Vector(TerminalInput.Key(TerminalKey.Up)))
 
+  test("buffers split SGR mouse report"):
+    val buffer = TerminalInputBuffer()
+    assertEquals(buffer.process(chunk("\u001b[<64;")), Vector.empty)
+    assertEquals(buffer.process(chunk("10;5")), Vector.empty)
+    assertEquals(
+      buffer.process(chunk("M")),
+      Vector(TerminalInput.Mouse(MouseAction.Wheel(MouseWheelDirection.Up), row = 4, col = 9))
+    )
+
+  test("flush emits incomplete SGR mouse report as exact raw input"):
+    val value  = "\u001b[<64;10;"
+    val buffer = TerminalInputBuffer()
+    assertEquals(buffer.process(chunk(value)), Vector.empty)
+    assertEquals(
+      buffer.flush(),
+      Vector(
+        TerminalInput.RawStart(TerminalRawKind.Csi),
+        TerminalInput.RawChunk(chunk(value)),
+        TerminalInput.RawEnd(TerminalRawTermination.Incomplete)
+      )
+    )
+
   test("flush emits a standalone escape as a typed key exactly once"):
     val buffer = TerminalInputBuffer()
     assertEquals(buffer.process(chunk("\u001b")), Vector.empty)

@@ -51,13 +51,40 @@ object TerminalInputParser:
   private val ModifiedFunc    = "\u001b\\[(\\d+);(\\d+)(?::\\d+)?~".r
   private val CsiU            = "\u001b\\[(\\d+)(?::(\\d*))?(?::(\\d+))?(?:;(\\d+))?(?::(\\d+))?u".r
   private val ModifyOtherKeys = "\u001b\\[27;(\\d+);(\\d+)~".r
+  private val SgrMouse        = "\u001b\\[<(\\d+);(-?\\d+);(-?\\d+)([Mm])".r
 
   private[terminal] def parseTyped(bytes: Array[Byte]): Option[TerminalInput] =
     val data = String(bytes, java.nio.charset.StandardCharsets.UTF_8)
-    SimpleKeys.get(data).orElse(parseModified(data)).orElse(parsePrintable(data))
+    SimpleKeys.get(data).orElse(parseMouse(data)).orElse(parseModified(data)).orElse(
+      parsePrintable(data)
+    )
 
   private def parseModified(data: String): Option[TerminalInput] =
     scala.util.Try(parseModifiedUnsafe(data)).toOption.flatten
+
+  private def parseMouse(data: String): Option[TerminalInput] = data match
+    case SgrMouse(codeText, colText, rowText, suffix) =>
+      val parsed =
+        for
+          code <- parseInt(codeText)
+          col  <- parseInt(colText)
+          row  <- parseInt(rowText)
+        yield (code, col, row)
+      parsed match
+        case Some((code, col, row)) if row > 0 && col > 0 =>
+          val modifiers = KeyModifiers(
+            shift = (code & 4) !== 0,
+            alt = (code & 8) !== 0,
+            ctrl = (code & 16) !== 0,
+            superKey = false
+          )
+          val action    =
+            if (code & 64) !== 0 then MouseAction.Wheel(wheelDirection(code & 3))
+            else if suffix === "m" then MouseAction.Release(mouseButton(code))
+            else MouseAction.Press(mouseButton(code))
+          Some(TerminalInput.Mouse(action, row - 1, col - 1, modifiers))
+        case _                                            => None
+    case _                                            => None
 
   private def parseModifiedUnsafe(data: String): Option[TerminalInput] = data match
     case ModifiedArrow(modText, code)                         =>
@@ -105,6 +132,21 @@ object TerminalInputParser:
     case 6  => Some(TerminalKey.PageDown)
     case 13 => Some(TerminalKey.Enter)
     case _  => None
+
+  private def parseInt(value: String): Option[Int] =
+    scala.util.Try(value.toInt).toOption
+
+  private def mouseButton(code: Int): MouseButton = (code & 3) match
+    case 0 => MouseButton.Left
+    case 1 => MouseButton.Middle
+    case 2 => MouseButton.Right
+    case _ => MouseButton.Other(code & 3)
+
+  private def wheelDirection(code: Int): MouseWheelDirection = code match
+    case 0 => MouseWheelDirection.Up
+    case 1 => MouseWheelDirection.Down
+    case 2 => MouseWheelDirection.Left
+    case _ => MouseWheelDirection.Right
 
   private def codePointKey(codePoint: Int): TerminalKey = codePoint match
     case 9              => TerminalKey.Tab

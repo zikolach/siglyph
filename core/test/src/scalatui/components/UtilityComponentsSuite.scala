@@ -11,7 +11,13 @@ import scalatui.core.{
   OverlayUnfocusOptions,
   TUIContext
 }
-import scalatui.terminal.{TerminalInput, TerminalKey}
+import scalatui.terminal.{
+  MouseAction,
+  MouseInputContext,
+  MouseWheelDirection,
+  TerminalInput,
+  TerminalKey
+}
 
 class UtilityComponentsSuite extends munit.FunSuite:
   private final class TestOverlayHandle(
@@ -74,6 +80,38 @@ class UtilityComponentsSuite extends munit.FunSuite:
         controller.foreach(_.cancel())
         InputResult.Render
       case _                                        => InputResult.Ignored
+
+  private def wheel(direction: MouseWheelDirection): MouseInputContext =
+    MouseInputContext(
+      TerminalInput.Mouse(MouseAction.Wheel(direction), row = 0, col = 0),
+      boundsRow = 0,
+      boundsCol = 0,
+      boundsWidth = 20,
+      boundsHeight = 5,
+      localRow = 0,
+      localCol = 0
+    )
+
+  test("settings list handles wheel movement and preserves filter query"):
+    val list = SettingsList(
+      Vector(
+        SettingItem("a", "Alpha", "1"),
+        SettingItem("b", "Beta", "2"),
+        SettingItem("g", "Gamma", "3")
+      ),
+      SettingsListOptions(filtering = SettingsListFiltering.Containment)
+    )
+    list.handleInput(TerminalInput.Key(TerminalKey.Character("a")))
+
+    assertEquals(list.query, "a")
+    assertEquals(list.handleMouse(wheel(MouseWheelDirection.Down)), InputResult.Render)
+    assertEquals(list.query, "a")
+    assertEquals(list.selected.map(_.id), Some("b"))
+    assertEquals(list.handleMouse(wheel(MouseWheelDirection.Down)), InputResult.Render)
+    assertEquals(list.selected.map(_.id), Some("g"))
+    assertEquals(list.handleMouse(wheel(MouseWheelDirection.Down)), InputResult.NoRender)
+    assertEquals(list.handleMouse(wheel(MouseWheelDirection.Up)), InputResult.Render)
+    assertEquals(list.selected.map(_.id), Some("b"))
 
   test("truncated text uses first line and pads to width"):
     val text  = TruncatedText("hello\nworld", paddingX = 1, paddingY = 1)

@@ -1,5 +1,10 @@
 package scalatui.terminal
 
+import scalatui.syntax.Equality.*
+
+import java.util.concurrent.{CountDownLatch, TimeUnit}
+import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
+
 class VirtualTerminalSuite extends munit.FunSuite:
   test("virtual terminal records writes and plain viewport"):
     val terminal = VirtualTerminal(initialColumns = 10, initialRows = 2)
@@ -47,13 +52,42 @@ class VirtualTerminalSuite extends munit.FunSuite:
 
     assertEquals(terminal.output, "\u001b]0;safetitle\u0007")
 
+  test("OSC and string-control output does not advance the emulated cursor"):
+    val terminal = VirtualTerminal(80, 24)
+    var inputs   = Vector.empty[TerminalInput]
+    val reported = CountDownLatch(1)
+    val onInput  = (input: TerminalInput) =>
+      inputs :+= input
+      reported.countDown()
+    terminal.start(onInput, () => ())
+
+    terminal.write("abc")
+    terminal.setTitle("title")
+    terminal.setProgress(active = true)
+    terminal.write("\u001b_ignored-apc\u001b\\")
+    terminal.write(TerminalCursorProtocol.CursorPositionQuery)
+
+    assert(reported.await(5, TimeUnit.SECONDS), "cursor position report was not delivered")
+    val report = inputs.collect { case TerminalInput.RawChunk(chunk) => chunk.toArray }.flatten
+    assertEquals(
+      String(report.toArray, java.nio.charset.StandardCharsets.UTF_8),
+      "\u001b[1;4R"
+    )
+    terminal.stop()
+
   test("start and output-side operations do not synchronously deliver registered callbacks"):
     val terminal        = VirtualTerminal(80, 24)
     val caller          = Thread.currentThread()
-    var inlineCallbacks = 0
+    val inlineCallbacks = AtomicInteger(0)
+    val cursorReported  = CountDownLatch(1)
+    val inputThread     = AtomicReference[Thread](null)
+    val onInput         = (_: TerminalInput) =>
+      inputThread.set(Thread.currentThread())
+      if Thread.currentThread() eq caller then inlineCallbacks.incrementAndGet()
+      cursorReported.countDown()
     terminal.start(
-      _ => if Thread.currentThread() eq caller then inlineCallbacks += 1,
-      () => if Thread.currentThread() eq caller then inlineCallbacks += 1
+      onInput,
+      () => if Thread.currentThread() eq caller then inlineCallbacks.incrementAndGet()
     )
 
     terminal.write("output")
@@ -65,6 +99,9 @@ class VirtualTerminalSuite extends munit.FunSuite:
     terminal.clearScreen()
     Terminal.setTitle(terminal, "title")
     Terminal.setProgress(terminal, active = true)
+    terminal.write(TerminalCursorProtocol.CursorPositionQuery)
 
-    assertEquals(inlineCallbacks, 0)
+    assert(cursorReported.await(5, TimeUnit.SECONDS), "cursor position report was not delivered")
+    assert(inputThread.get() ne caller, "cursor position report was delivered on the write caller")
+    assertEquals(inlineCallbacks.get(), 0)
     terminal.stop()

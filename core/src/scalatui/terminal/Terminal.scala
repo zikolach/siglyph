@@ -46,6 +46,16 @@ trait TerminalTitleSupport:
   /** Set the title without synchronously delivering registered input or resize callbacks. */
   def setTitle(title: String): Unit
 
+/** Optional terminal capability for backends that own mouse reporting lifecycle. */
+trait TerminalMouseProtocolSupport:
+  /**
+   * Configure whether backend start/stop should enable and disable terminal mouse reporting.
+   *
+   * This records lifecycle intent. It does not immediately write terminal protocol sequences for an
+   * already running backend.
+   */
+  def mouseReportingEnabled_=(enabled: Boolean): Unit
+
 /** Optional terminal capability for backends that can set terminal progress state. */
 trait TerminalProgressSupport:
   /**
@@ -61,6 +71,15 @@ object Terminal:
   private[terminal] val ProgressActiveSequence: String = "\u001b]9;4;3\u0007"
   private[terminal] val ProgressClearSequence: String  = "\u001b]9;4;0\u0007"
 
+  /** Xterm normal mouse tracking and SGR coordinate protocol sequences. */
+  object MouseProtocol:
+    val EnableNormalTracking: String  = "\u001b[?1000h"
+    val DisableNormalTracking: String = "\u001b[?1000l"
+    val EnableSgrCoordinates: String  = "\u001b[?1006h"
+    val DisableSgrCoordinates: String = "\u001b[?1006l"
+    val Enable: String                = EnableNormalTracking + EnableSgrCoordinates
+    val Disable: String               = DisableNormalTracking + DisableSgrCoordinates
+
   /**
    * Set the terminal window title when the backend supports title operations.
    *
@@ -73,6 +92,18 @@ object Terminal:
       titled.setTitle(sanitizeTitle(title))
       true
     case _                            => false
+
+  /**
+   * Configure terminal mouse reporting for backend lifecycle start/stop.
+   *
+   * This records lifecycle intent on supporting backends. It does not immediately write terminal
+   * protocol sequences for an already running backend.
+   */
+  def setMouseReporting(terminal: Terminal, enabled: Boolean): Boolean = terminal match
+    case mouse: TerminalMouseProtocolSupport =>
+      mouse.mouseReportingEnabled_=(enabled)
+      true
+    case _                                   => false
 
   /**
    * Set terminal progress state when the backend supports progress operations.

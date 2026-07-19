@@ -35,6 +35,14 @@ object TerminalInput:
   /** End and parsing outcome of an untyped byte sequence. */
   final case class RawEnd(termination: TerminalRawTermination) extends TerminalInput
 
+  /** Parsed terminal mouse event using zero-based terminal cell coordinates. */
+  final case class Mouse(
+      action: MouseAction,
+      row: Int,
+      col: Int,
+      modifiers: KeyModifiers = KeyModifiers.empty
+  ) extends TerminalInput
+
 /** Classification of a streamed untyped terminal byte sequence. */
 enum TerminalRawKind derives CanEqual:
   case Csi, Osc, Dcs, Apc, Ss3, Escape, Utf8, Bytes
@@ -69,6 +77,45 @@ object TerminalInputChunk:
     require(length > 0 && length <= MaxBytes, s"chunk length must be 1..$MaxBytes")
     require(offset >= 0 && offset <= bytes.length - length, "chunk range is outside input")
     new TerminalInputChunk(java.util.Arrays.copyOfRange(bytes, offset, offset + length))
+
+/** Mouse action reported by supported terminal mouse protocols. */
+sealed trait MouseAction derives CanEqual
+
+object MouseAction:
+  /** Mouse button press. */
+  final case class Press(button: MouseButton) extends MouseAction
+
+  /** Mouse button release. */
+  final case class Release(button: MouseButton) extends MouseAction
+
+  /** Mouse wheel movement. */
+  final case class Wheel(direction: MouseWheelDirection) extends MouseAction
+
+/** Mouse button identity parsed from terminal button codes. */
+sealed trait MouseButton derives CanEqual
+
+object MouseButton:
+  case object Left   extends MouseButton
+  case object Middle extends MouseButton
+  case object Right  extends MouseButton
+
+  /** SGR button identity bits without modifier, motion, or wheel flags. */
+  final case class Other(code: Int) extends MouseButton
+
+/** Mouse wheel direction parsed from terminal wheel reports. */
+enum MouseWheelDirection derives CanEqual:
+  case Up, Down, Left, Right
+
+/** Target-local context passed to components that opt into mouse handling. */
+final case class MouseInputContext(
+    input: TerminalInput.Mouse,
+    boundsRow: Int,
+    boundsCol: Int,
+    boundsWidth: Int,
+    boundsHeight: Int,
+    localRow: Int,
+    localCol: Int
+) derives CanEqual
 
 /** Key event kind reported by advanced keyboard protocols. */
 enum KeyEventType derives CanEqual:

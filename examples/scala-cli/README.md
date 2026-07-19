@@ -1,10 +1,10 @@
 # siglyph Scala CLI demos
 
-Small single-file demos intended for `scala-cli` and GitHub Gist.
+Small single-file demos intended for `scala-cli`.
 
-These examples use Maven Central dependencies, so they can run without Maven
-credentials or cloning this repository once the Central sync for the release has
-completed.
+The released examples use Maven Central `0.6.0` artifacts. The mouse example uses local
+`0.6.0-SNAPSHOT` artifacts to exercise unreleased mouse-input APIs; run
+`./scripts/publish-local-snapshot.sh` from the repository root before running it.
 
 Run from this repository:
 
@@ -14,9 +14,10 @@ Run from this repository:
 ./examples/scala-cli/editor-autocomplete.scala
 ./examples/scala-cli/image.scala /path/to/image.png
 ./examples/scala-cli/alternate-screen-maven.scala
+./examples/scala-cli/mouse.scala
 ```
 
-Run from a raw Gist URL:
+After replacing the dependency versions with a released Maven Central version, a script can also run from a raw Gist URL:
 
 ```bash
 curl -L -o hello.scala https://gist.githubusercontent.com/zikolach/<gist-id>/raw/hello.scala
@@ -24,7 +25,7 @@ chmod +x hello.scala
 ./hello.scala
 ```
 
-`hello.scala`, `editor-autocomplete.scala`, `image.scala`, and `alternate-screen-maven.scala` require a real macOS/Linux TTY.
+`hello.scala`, `editor-autocomplete.scala`, `image.scala`, `alternate-screen-maven.scala`, and `mouse.scala` require a real macOS/Linux TTY.
 `markdown.scala` is non-interactive and renders to standard output.
 
 
@@ -82,7 +83,16 @@ synchronized output. Image-looking bytes in ordinary text gain no semantic contr
 
 Validation has the same lexical contract on JVM and Scala Native. It accepts standard padded base64, empty input, and decoder-valid unpadded lengths with modulo-four remainder zero, two, or three; remainder one is rejected. Validation transiently allocates and discards decoded bytes. iTerm2 filenames use standard base64 over UTF-8, and fallback metadata controls become visible `\\uXXXX` text before width truncation. Protocol helpers and `Image` require typed payloads, and `ImageSource.payload` replaces the old `ImageSource.base64Data` field. These are direct source breaks with no compatibility path. There is no API that promotes an arbitrary protocol escape string to a semantic control.
 
-To test unreleased changes from this checkout before the next Maven Central release, run the image example against local sources:
+`mouse.scala` demonstrates opt-in mouse reporting with `TUIOptions(mouseInput = true)`, typed `TerminalInput.Mouse` logging, coordinate-routed mouse events in a custom component, and wheel scrolling over `SelectList` and `Editor`. While the demo runs, terminal wheel scrollback is captured by mouse reporting; unhandled wheel events are logged but cannot be passed back to the terminal reliably.
+
+To run an example against local sources instead of the published local snapshot, pass the source roots to Scala CLI:
+
+```bash
+scala-cli run --workspace /tmp/siglyph-mouse-demo \
+  examples/scala-cli/mouse.scala core/src terminalJvm/src
+```
+
+For the image example, include the image module and pass the image path after `--`:
 
 ```bash
 scala-cli run --workspace /tmp/siglyph-image-demo \
