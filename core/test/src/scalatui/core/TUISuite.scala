@@ -5,6 +5,7 @@ import scalatui.TestInputStreams
 import scalatui.ansi.Ansi
 import scalatui.syntax.Equality.*
 import scalatui.components.{
+  Box,
   Editor,
   EditorOptions,
   Loader,
@@ -171,6 +172,17 @@ class TUISuite extends munit.FunSuite:
     override def handleMouse(context: MouseInputContext): InputResult =
       events += name
       InputResult.Ignored
+
+  final class MutableLayoutLine(var target: Component) extends Component:
+    var beforeLayout: () => Unit = () => ()
+
+    override def render(width: Int): ComponentRender = ComponentRender.text("same")
+
+    override def renderFrame(width: Int, row: Int, col: Int): RenderedFrame =
+      beforeLayout()
+      val rendered = render(width)
+      val bounds   = LayoutBounds(row, col, width, rendered.lines.length)
+      RenderedFrame(rendered, LayoutNode(this, bounds, Vector(LayoutNode(target, bounds))))
 
   final class FocusableLine extends Component, Focusable:
     private var isFocused                            = false
@@ -646,6 +658,69 @@ class TUISuite extends munit.FunSuite:
     assertEquals(child.events.map(_._1).toVector, Vector("child"))
     assertEquals(parent.events.map(_._1).toVector, Vector.empty)
     assert(focus.focused)
+
+  test("mouse routing reaches a child through normalized Box padding"):
+    val terminal = VirtualTerminal(20, 10)
+    val child    = MouseLine("boxed")
+    val box      = Box(paddingX = 2, paddingY = 1)
+    box.addChild(child)
+    val tui      = TUI(terminal, TUIOptions(mouseInput = true))
+    tui.addChild(box)
+
+    tui.start()
+    terminal.sendMouse(TerminalInput.Mouse(MouseAction.Press(MouseButton.Left), row = 1, col = 2))
+
+    assertEquals(child.events.map(_._1).toVector, Vector("boxed"))
+    val context = child.events.head._2
+    assertEquals(context.boundsRow, 1)
+    assertEquals(context.boundsCol, 2)
+    assertEquals(context.boundsWidth, 16)
+    assertEquals(context.boundsHeight, 1)
+    assertEquals(context.localRow, 0)
+    assertEquals(context.localCol, 0)
+
+  test("resize-invalidated render keeps the committed mouse layout until replacement"):
+    val terminal  = VirtualTerminal(20, 5)
+    val committed = MouseLine("committed")
+    val rejected  = MouseLine("rejected")
+    val layout    = MutableLayoutLine(committed)
+    val tui       = TUI(terminal, TUIOptions(mouseInput = true))
+    tui.addChild(layout)
+    tui.start()
+
+    layout.target = rejected
+    var injected = false
+    layout.beforeLayout = () =>
+      if !injected then
+        injected = true
+        layout.beforeLayout = () => ()
+        terminal.resize(20, 5)
+        terminal.sendMouse(
+          TerminalInput.Mouse(MouseAction.Press(MouseButton.Left), row = 0, col = 0)
+        )
+
+    tui.requestRender()
+    tui.flushRender()
+
+    assertEquals(committed.events.map(_._1).toVector, Vector("committed"))
+    assertEquals(rejected.events.map(_._1).toVector, Vector.empty)
+
+  test("accepted no-output render publishes changed logical mouse ownership"):
+    val terminal    = VirtualTerminal(20, 5)
+    val previous    = MouseLine("previous")
+    val replacement = MouseLine("replacement")
+    val layout      = MutableLayoutLine(previous)
+    val tui         = TUI(terminal, TUIOptions(mouseInput = true))
+    tui.addChild(layout)
+    tui.start()
+
+    layout.target = replacement
+    tui.requestRender()
+    tui.flushRender()
+    terminal.sendMouse(TerminalInput.Mouse(MouseAction.Press(MouseButton.Left), row = 0, col = 0))
+
+    assertEquals(previous.events.map(_._1).toVector, Vector.empty)
+    assertEquals(replacement.events.map(_._1).toVector, Vector("replacement"))
 
   test("mouse routing maps terminal rows to frame rows when the frame starts below prior output"):
     val terminal = VirtualTerminal(20, 10)

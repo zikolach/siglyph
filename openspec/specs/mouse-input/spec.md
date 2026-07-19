@@ -1,7 +1,9 @@
 # mouse-input Specification
 
 ## Purpose
-TBD - created by archiving change add-coordinate-aware-mouse-input. Update Purpose after archive.
+Defines opt-in typed terminal mouse input, committed-frame coordinate routing, overlay precedence,
+and focus-preserving delivery to mouse-capable components.
+
 ## Requirements
 ### Requirement: Public typed mouse input
 The library SHALL expose typed mouse input as `TerminalInput.Mouse(...)` with terminal-cell coordinates, action, button or wheel direction, and modifier state.
@@ -88,4 +90,3 @@ Mouse routing SHALL NOT change keyboard focus unless a mouse-capable component e
 #### Scenario: Unhandled mouse does not move focus
 - **WHEN** no mouse-capable component handles a mouse event
 - **THEN** the focused component remains unchanged
-

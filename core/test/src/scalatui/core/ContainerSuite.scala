@@ -1,5 +1,6 @@
 package scalatui.core
 
+import scalatui.components.Box
 import scalatui.terminal.{Base64ImagePayload, TerminalImageProtocol}
 
 class ContainerSuite extends munit.FunSuite:
@@ -48,6 +49,56 @@ class ContainerSuite extends munit.FunSuite:
     assertEquals(
       innerNode.children.head.bounds,
       LayoutBounds(row = 1, col = 0, width = 12, height = 1)
+    )
+
+  test("box render frame retains padded children and nested descendants in visual order"):
+    val first  = Lines(Vector("a", "b"))
+    val leaf   = Lines(Vector("leaf"))
+    val nested = Container()
+    nested.addChild(leaf)
+    val box    = Box(paddingX = 2, paddingY = 1)
+    box.addChild(first)
+    box.addChild(nested)
+
+    val frame = box.renderFrame(width = 10, row = 3, col = 4)
+
+    assertEquals(
+      frame.lines,
+      Vector("          ", "  a       ", "  b       ", "  leaf    ", "          ")
+    )
+    assertEquals(frame.render, box.render(10))
+    assertEquals(frame.layout.bounds, LayoutBounds(row = 3, col = 4, width = 10, height = 5))
+    assertEquals(
+      frame.layout.children.map(_.bounds),
+      Vector(
+        LayoutBounds(row = 4, col = 6, width = 6, height = 2),
+        LayoutBounds(row = 6, col = 6, width = 6, height = 1)
+      )
+    )
+    assertEquals(
+      frame.layout.children(1).children.head.bounds,
+      LayoutBounds(row = 6, col = 6, width = 6, height = 1)
+    )
+
+  test("box render frame normalizes negative padding for layout and cursor geometry"):
+    val child = new Component:
+      override def render(width: Int): ComponentRender = ComponentRender(
+        Vector("x"),
+        Vector.empty,
+        Vector(CursorPlacement(row = 0, column = 0))
+      )
+    val box   = Box(paddingX = -2, paddingY = -3)
+    box.addChild(child)
+
+    val frame = box.renderFrame(width = 4, row = 5, col = 7)
+
+    assertEquals(frame.render, box.render(4))
+    assertEquals(frame.lines, Vector("x   "))
+    assertEquals(frame.render.cursorPlacements, Vector(CursorPlacement(row = 0, column = 0)))
+    assertEquals(frame.layout.bounds, LayoutBounds(row = 5, col = 7, width = 4, height = 1))
+    assertEquals(
+      frame.layout.children.map(_.bounds),
+      Vector(LayoutBounds(row = 5, col = 7, width = 4, height = 1))
     )
 
   test("container renders children in insertion order"):

@@ -1,7 +1,15 @@
 package scalatui.components
 
 import scalatui.ansi.Ansi
-import scalatui.core.{Component, ComponentRender, CursorPlacement, TerminalControlPlacement}
+import scalatui.core.{
+  Component,
+  ComponentRender,
+  CursorPlacement,
+  LayoutBounds,
+  LayoutNode,
+  RenderedFrame,
+  TerminalControlPlacement
+}
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -28,16 +36,25 @@ final class Box(paddingX: Int = 1, paddingY: Int = 0, style: String => String = 
 
   override def invalidate(): Unit = childrenBuffer.foreach(_.invalidate())
 
-  override def render(width: Int): ComponentRender =
+  override def render(width: Int): ComponentRender = renderFrame(width).render
+
+  override def renderFrame(width: Int, row: Int = 0, col: Int = 0): RenderedFrame =
     val innerWidth       = math.max(0, width - horizontalPadding * 2)
     val horizontal       = " ".repeat(horizontalPadding)
     val vertical         = Vector.fill(verticalPadding)(style(" ".repeat(width)))
     val bodyLines        = Vector.newBuilder[String]
     val controls         = Vector.newBuilder[TerminalControlPlacement]
     val cursorPlacements = Vector.newBuilder[CursorPlacement]
+    val childNodes       = Vector.newBuilder[LayoutNode]
     var bodyRow          = 0
     childrenBuffer.foreach { child =>
-      val frame = child.render(innerWidth).validated(innerWidth)
+      val childFrame = child.renderFrame(
+        innerWidth,
+        row + verticalPadding + bodyRow,
+        col + horizontalPadding
+      )
+      val frame      = childFrame.render.validated(innerWidth)
+      childNodes += childFrame.layout
       frame.lines.foreach { line =>
         val padded = horizontal + Ansi.padRight(line, innerWidth) + horizontal
         bodyLines += style(Ansi.truncateToWidth(padded, width, ""))
@@ -56,8 +73,16 @@ final class Box(paddingX: Int = 1, paddingY: Int = 0, style: String => String = 
       )
       bodyRow += frame.lines.length
     }
-    ComponentRender(
+    val render           = ComponentRender(
       vertical ++ bodyLines.result() ++ vertical,
       controls.result(),
       cursorPlacements.result()
+    )
+    RenderedFrame(
+      render,
+      LayoutNode(
+        this,
+        LayoutBounds(row, col, math.max(0, width), render.lines.length),
+        childNodes.result()
+      )
     )
