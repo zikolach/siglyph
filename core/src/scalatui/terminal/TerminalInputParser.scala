@@ -13,7 +13,6 @@ object TerminalInputParser:
   private val Ctrl                = KeyModifiers(ctrl = true)
   private val Alt                 = KeyModifiers(alt = true)
   private val Shift               = KeyModifiers(shift = true)
-  private val CtrlAlt             = KeyModifiers(ctrl = true, alt = true)
   private val fixedControlKeys    = Vector(
     FixedKey("\u0000", TerminalKey.Character(" "), Ctrl),
     FixedKey("\u001c", TerminalKey.Character("\\"), Ctrl),
@@ -36,7 +35,7 @@ object TerminalInputParser:
     FixedKey("\b", TerminalKey.Backspace),
     FixedKey("\u001b\u007f", TerminalKey.Backspace, Alt),
     FixedKey("\u001b\b", TerminalKey.Backspace, Alt),
-    FixedKey("\u001b\u001b", TerminalKey.Character("["), CtrlAlt),
+    FixedKey("\u001b\u001b", TerminalKey.Escape, Alt),
     FixedKey("\u001b[A", TerminalKey.Up),
     FixedKey("\u001b[B", TerminalKey.Down),
     FixedKey("\u001b[C", TerminalKey.Right),

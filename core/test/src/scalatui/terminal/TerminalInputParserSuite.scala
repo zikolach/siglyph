@@ -104,6 +104,10 @@ class TerminalInputParserSuite extends munit.FunSuite:
         KeyModifiers(ctrl = true, alt = true)
       ))
     )
+    assertEquals(
+      parse("\u001b\u001b"),
+      Vector(TerminalInput.Key(TerminalKey.Escape, KeyModifiers(alt = true)))
+    )
 
   test("fixed keyboard sequences parse at every byte boundary"):
     val cases = Vector(

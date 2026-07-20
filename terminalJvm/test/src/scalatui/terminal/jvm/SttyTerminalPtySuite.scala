@@ -88,6 +88,34 @@ class SttyTerminalPtySuite extends munit.FunSuite:
         restoreStty(originalState, originalRows, originalColumns)
     }
 
+  test("stty restoration skips invalid dimensions and always applies saved state"):
+    val invalidCommands = scala.collection.mutable.ArrayBuffer.empty[String]
+    restoreStty(
+      "saved-state",
+      rows = 0,
+      columns = 0,
+      command =>
+        invalidCommands += command
+        ""
+    )
+    assertEquals(invalidCommands.toVector, Vector("saved-state"))
+
+    val failedSizeCommands = scala.collection.mutable.ArrayBuffer.empty[String]
+    val sizeFailure        = RuntimeException("size restoration failed")
+    val failure            = intercept[RuntimeException] {
+      restoreStty(
+        "saved-state",
+        rows = 24,
+        columns = 80,
+        command =>
+          failedSizeCommands += command
+          if command.startsWith("rows ") then throw sizeFailure
+          ""
+      )
+    }
+    assert(failure eq sizeFailure)
+    assertEquals(failedSizeCommands.toVector, Vector("rows 24 cols 80", "saved-state"))
+
   private def withPtyTest(body: => Unit): Unit =
     if sys.env.get(PtyTestEnabled).contains("1") then body
 
@@ -96,9 +124,15 @@ class SttyTerminalPtySuite extends munit.FunSuite:
     if parts.lengthCompare(2) >= 0 then (parts(0).toInt, parts(1).toInt)
     else throw AssertionError(s"unexpected stty size output: ${parts.mkString(" ")}")
 
-  private def restoreStty(state: String, rows: Int, columns: Int): Unit =
-    runStty(s"rows $rows cols $columns")
-    runStty(state)
+  private def restoreStty(
+      state: String,
+      rows: Int,
+      columns: Int,
+      restore: String => String = runStty
+  ): Unit =
+    try
+      if rows > 0 && columns > 0 then restore(s"rows $rows cols $columns")
+    finally restore(state)
 
   private def stableSttyState(): String =
     runStty("-a")
