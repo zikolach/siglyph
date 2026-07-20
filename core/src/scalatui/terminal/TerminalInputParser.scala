@@ -26,91 +26,95 @@ object TerminalInputParser:
   private val fixedAltControlKeys = fixedControlKeys.map(entry =>
     entry.copy(sequence = "\u001b" + entry.sequence, modifiers = entry.modifiers.copy(alt = true))
   )
-  private val fixedKeys           = Vector(
-    FixedKey("\r", TerminalKey.Enter),
-    FixedKey("\n", TerminalKey.Enter),
-    FixedKey("\u001b", TerminalKey.Escape),
-    FixedKey("\t", TerminalKey.Tab),
-    FixedKey("\u007f", TerminalKey.Backspace),
-    FixedKey("\b", TerminalKey.Backspace),
-    FixedKey("\u001b\u007f", TerminalKey.Backspace, Alt),
-    FixedKey("\u001b\b", TerminalKey.Backspace, Alt),
-    FixedKey("\u001b\u001b", TerminalKey.Escape, Alt),
-    FixedKey("\u001b[A", TerminalKey.Up),
-    FixedKey("\u001b[B", TerminalKey.Down),
-    FixedKey("\u001b[C", TerminalKey.Right),
-    FixedKey("\u001b[D", TerminalKey.Left),
-    FixedKey("\u001b[H", TerminalKey.Home),
-    FixedKey("\u001b[F", TerminalKey.End),
-    FixedKey("\u001bOA", TerminalKey.Up),
-    FixedKey("\u001bOB", TerminalKey.Down),
-    FixedKey("\u001bOC", TerminalKey.Right),
-    FixedKey("\u001bOD", TerminalKey.Left),
-    FixedKey("\u001bOH", TerminalKey.Home),
-    FixedKey("\u001bOF", TerminalKey.End),
-    FixedKey("\u001b[E", TerminalKey.Clear),
-    FixedKey("\u001bOE", TerminalKey.Clear),
-    FixedKey("\u001b[1~", TerminalKey.Home),
-    FixedKey("\u001b[2~", TerminalKey.Insert),
-    FixedKey("\u001b[3~", TerminalKey.Delete),
-    FixedKey("\u001b[4~", TerminalKey.End),
-    FixedKey("\u001b[5~", TerminalKey.PageUp),
-    FixedKey("\u001b[6~", TerminalKey.PageDown),
-    FixedKey("\u001b[7~", TerminalKey.Home),
-    FixedKey("\u001b[8~", TerminalKey.End),
-    FixedKey("\u001b[[5~", TerminalKey.PageUp),
-    FixedKey("\u001b[[6~", TerminalKey.PageDown),
-    FixedKey("\u001b[Z", TerminalKey.Tab, Shift),
-    FixedKey("\u001b[a", TerminalKey.Up, Shift),
-    FixedKey("\u001b[b", TerminalKey.Down, Shift),
-    FixedKey("\u001b[c", TerminalKey.Right, Shift),
-    FixedKey("\u001b[d", TerminalKey.Left, Shift),
-    FixedKey("\u001b[e", TerminalKey.Clear, Shift),
-    FixedKey("\u001bOa", TerminalKey.Up, Ctrl),
-    FixedKey("\u001bOb", TerminalKey.Down, Ctrl),
-    FixedKey("\u001bOc", TerminalKey.Right, Ctrl),
-    FixedKey("\u001bOd", TerminalKey.Left, Ctrl),
-    FixedKey("\u001bOe", TerminalKey.Clear, Ctrl),
-    FixedKey("\u001b[2$", TerminalKey.Insert, Shift),
-    FixedKey("\u001b[3$", TerminalKey.Delete, Shift),
-    FixedKey("\u001b[5$", TerminalKey.PageUp, Shift),
-    FixedKey("\u001b[6$", TerminalKey.PageDown, Shift),
-    FixedKey("\u001b[7$", TerminalKey.Home, Shift),
-    FixedKey("\u001b[8$", TerminalKey.End, Shift),
-    FixedKey("\u001b[2^", TerminalKey.Insert, Ctrl),
-    FixedKey("\u001b[3^", TerminalKey.Delete, Ctrl),
-    FixedKey("\u001b[5^", TerminalKey.PageUp, Ctrl),
-    FixedKey("\u001b[6^", TerminalKey.PageDown, Ctrl),
-    FixedKey("\u001b[7^", TerminalKey.Home, Ctrl),
-    FixedKey("\u001b[8^", TerminalKey.End, Ctrl),
-    FixedKey("\u001bB", TerminalKey.Left, Alt),
-    FixedKey("\u001bF", TerminalKey.Right, Alt),
-    FixedKey("\u001bb", TerminalKey.Left, Alt),
-    FixedKey("\u001bf", TerminalKey.Right, Alt),
-    FixedKey("\u001bp", TerminalKey.Up, Alt),
-    FixedKey("\u001bn", TerminalKey.Down, Alt),
-    FixedKey("\u001bOP", TerminalKey.Function(1)),
-    FixedKey("\u001bOQ", TerminalKey.Function(2)),
-    FixedKey("\u001bOR", TerminalKey.Function(3)),
-    FixedKey("\u001bOS", TerminalKey.Function(4)),
-    FixedKey("\u001b[11~", TerminalKey.Function(1)),
-    FixedKey("\u001b[12~", TerminalKey.Function(2)),
-    FixedKey("\u001b[13~", TerminalKey.Function(3)),
-    FixedKey("\u001b[14~", TerminalKey.Function(4)),
-    FixedKey("\u001b[15~", TerminalKey.Function(5)),
-    FixedKey("\u001b[17~", TerminalKey.Function(6)),
-    FixedKey("\u001b[18~", TerminalKey.Function(7)),
-    FixedKey("\u001b[19~", TerminalKey.Function(8)),
-    FixedKey("\u001b[20~", TerminalKey.Function(9)),
-    FixedKey("\u001b[21~", TerminalKey.Function(10)),
-    FixedKey("\u001b[23~", TerminalKey.Function(11)),
-    FixedKey("\u001b[24~", TerminalKey.Function(12)),
-    FixedKey("\u001b[[A", TerminalKey.Function(1)),
-    FixedKey("\u001b[[B", TerminalKey.Function(2)),
-    FixedKey("\u001b[[C", TerminalKey.Function(3)),
-    FixedKey("\u001b[[D", TerminalKey.Function(4)),
-    FixedKey("\u001b[[E", TerminalKey.Function(5))
-  ) ++ fixedControlKeys ++ fixedAltControlKeys
+  private val fixedKeysBySequence =
+    val entries = Vector(
+      FixedKey("\r", TerminalKey.Enter),
+      FixedKey("\n", TerminalKey.Enter),
+      FixedKey("\u001b", TerminalKey.Escape),
+      FixedKey("\t", TerminalKey.Tab),
+      FixedKey("\u007f", TerminalKey.Backspace),
+      FixedKey("\b", TerminalKey.Backspace),
+      FixedKey("\u001b\u007f", TerminalKey.Backspace, Alt),
+      FixedKey("\u001b\b", TerminalKey.Backspace, Alt),
+      FixedKey("\u001b\u001b", TerminalKey.Escape, Alt),
+      FixedKey("\u001b[A", TerminalKey.Up),
+      FixedKey("\u001b[B", TerminalKey.Down),
+      FixedKey("\u001b[C", TerminalKey.Right),
+      FixedKey("\u001b[D", TerminalKey.Left),
+      FixedKey("\u001b[H", TerminalKey.Home),
+      FixedKey("\u001b[F", TerminalKey.End),
+      FixedKey("\u001bOA", TerminalKey.Up),
+      FixedKey("\u001bOB", TerminalKey.Down),
+      FixedKey("\u001bOC", TerminalKey.Right),
+      FixedKey("\u001bOD", TerminalKey.Left),
+      FixedKey("\u001bOH", TerminalKey.Home),
+      FixedKey("\u001bOF", TerminalKey.End),
+      FixedKey("\u001b[E", TerminalKey.Clear),
+      FixedKey("\u001bOE", TerminalKey.Clear),
+      FixedKey("\u001b[1~", TerminalKey.Home),
+      FixedKey("\u001b[2~", TerminalKey.Insert),
+      FixedKey("\u001b[3~", TerminalKey.Delete),
+      FixedKey("\u001b[4~", TerminalKey.End),
+      FixedKey("\u001b[5~", TerminalKey.PageUp),
+      FixedKey("\u001b[6~", TerminalKey.PageDown),
+      FixedKey("\u001b[7~", TerminalKey.Home),
+      FixedKey("\u001b[8~", TerminalKey.End),
+      FixedKey("\u001b[[5~", TerminalKey.PageUp),
+      FixedKey("\u001b[[6~", TerminalKey.PageDown),
+      FixedKey("\u001b[Z", TerminalKey.Tab, Shift),
+      FixedKey("\u001b[a", TerminalKey.Up, Shift),
+      FixedKey("\u001b[b", TerminalKey.Down, Shift),
+      FixedKey("\u001b[c", TerminalKey.Right, Shift),
+      FixedKey("\u001b[d", TerminalKey.Left, Shift),
+      FixedKey("\u001b[e", TerminalKey.Clear, Shift),
+      FixedKey("\u001bOa", TerminalKey.Up, Ctrl),
+      FixedKey("\u001bOb", TerminalKey.Down, Ctrl),
+      FixedKey("\u001bOc", TerminalKey.Right, Ctrl),
+      FixedKey("\u001bOd", TerminalKey.Left, Ctrl),
+      FixedKey("\u001bOe", TerminalKey.Clear, Ctrl),
+      FixedKey("\u001b[2$", TerminalKey.Insert, Shift),
+      FixedKey("\u001b[3$", TerminalKey.Delete, Shift),
+      FixedKey("\u001b[5$", TerminalKey.PageUp, Shift),
+      FixedKey("\u001b[6$", TerminalKey.PageDown, Shift),
+      FixedKey("\u001b[7$", TerminalKey.Home, Shift),
+      FixedKey("\u001b[8$", TerminalKey.End, Shift),
+      FixedKey("\u001b[2^", TerminalKey.Insert, Ctrl),
+      FixedKey("\u001b[3^", TerminalKey.Delete, Ctrl),
+      FixedKey("\u001b[5^", TerminalKey.PageUp, Ctrl),
+      FixedKey("\u001b[6^", TerminalKey.PageDown, Ctrl),
+      FixedKey("\u001b[7^", TerminalKey.Home, Ctrl),
+      FixedKey("\u001b[8^", TerminalKey.End, Ctrl),
+      FixedKey("\u001bB", TerminalKey.Left, Alt),
+      FixedKey("\u001bF", TerminalKey.Right, Alt),
+      FixedKey("\u001bb", TerminalKey.Left, Alt),
+      FixedKey("\u001bf", TerminalKey.Right, Alt),
+      FixedKey("\u001bp", TerminalKey.Up, Alt),
+      FixedKey("\u001bn", TerminalKey.Down, Alt),
+      FixedKey("\u001bOP", TerminalKey.Function(1)),
+      FixedKey("\u001bOQ", TerminalKey.Function(2)),
+      FixedKey("\u001bOR", TerminalKey.Function(3)),
+      FixedKey("\u001bOS", TerminalKey.Function(4)),
+      FixedKey("\u001b[11~", TerminalKey.Function(1)),
+      FixedKey("\u001b[12~", TerminalKey.Function(2)),
+      FixedKey("\u001b[13~", TerminalKey.Function(3)),
+      FixedKey("\u001b[14~", TerminalKey.Function(4)),
+      FixedKey("\u001b[15~", TerminalKey.Function(5)),
+      FixedKey("\u001b[17~", TerminalKey.Function(6)),
+      FixedKey("\u001b[18~", TerminalKey.Function(7)),
+      FixedKey("\u001b[19~", TerminalKey.Function(8)),
+      FixedKey("\u001b[20~", TerminalKey.Function(9)),
+      FixedKey("\u001b[21~", TerminalKey.Function(10)),
+      FixedKey("\u001b[23~", TerminalKey.Function(11)),
+      FixedKey("\u001b[24~", TerminalKey.Function(12)),
+      FixedKey("\u001b[[A", TerminalKey.Function(1)),
+      FixedKey("\u001b[[B", TerminalKey.Function(2)),
+      FixedKey("\u001b[[C", TerminalKey.Function(3)),
+      FixedKey("\u001b[[D", TerminalKey.Function(4)),
+      FixedKey("\u001b[[E", TerminalKey.Function(5))
+    ) ++ fixedControlKeys ++ fixedAltControlKeys
+    val result  = entries.iterator.map(entry => entry.sequence -> entry).toMap
+    require(result.size === entries.size, "fixed key sequences must be unique")
+    result
   private val ModifiedCsi         = "\u001b\\[1;(\\d+)(?::\\d+)?([ABCDHFPQRS])".r
   private val ModifiedFunc        = "\u001b\\[(\\d+);(\\d+)(?::\\d+)?~".r
   private val CsiU                = "\u001b\\[(\\d+)(?::(\\d*))?(?::(\\d+))?(?:;(\\d+))?(?::(\\d+))?u".r
@@ -119,7 +123,7 @@ object TerminalInputParser:
 
   private[terminal] def parseTyped(bytes: Array[Byte]): Option[TerminalInput] =
     val data = String(bytes, java.nio.charset.StandardCharsets.UTF_8)
-    fixedKeys.find(_.sequence === data).map(entry =>
+    fixedKeysBySequence.get(data).map(entry =>
       key(entry.terminalKey, entry.modifiers)
     ).orElse(
       parseMouse(data)
@@ -155,24 +159,22 @@ object TerminalInputParser:
     case _                                            => None
 
   private def parseModifiedUnsafe(data: String): Option[TerminalInput] = data match
-    case ModifiedCsi(_, "R")                                  =>
+    case ModifiedCsi(_, "R")                               =>
       // CSI row ; col R is also the terminal cursor-position report. Keep the ambiguous bytes raw
       // so a TUI with an outstanding DSR query can correlate them; F3 remains available through
       // the unambiguous SS3, legacy-tilde, and bare CSI encodings.
       None
-    case ModifiedCsi(modText, code)                           =>
+    case ModifiedCsi(modText, code)                        =>
       modifiedCsiKey(code).map(key(_, decodeModifiers(modText.toInt - 1)))
-    case ModifiedFunc(numText, modText)                       =>
+    case ModifiedFunc(numText, modText)                    =>
       functionKey(numText.toInt).map(key(_, decodeModifiers(modText.toInt - 1)))
-    case ModifyOtherKeys(modText, cpText)                     =>
+    case ModifyOtherKeys(modText, cpText)                  =>
       Some(key(codePointKey(cpText.toInt), decodeModifiers(modText.toInt - 1)))
-    case CsiU(cpText, _shifted, baseText, modText, eventText) =>
-      val modifiers  = Option(modText).fold(KeyModifiers.empty)(m => decodeModifiers(m.toInt - 1))
-      val eventType  = Option(eventText).flatMap(decodeEventType).getOrElse(KeyEventType.Press)
-      val codePoint  = csiUCodePoint(cpText.toInt, Option(baseText))
-      val normalized = normalizeShiftedLetter(codePoint, modifiers)
-      Some(key(codePointKey(normalized), modifiers, eventType))
-    case _                                                    => None
+    case CsiU(cpText, _shifted, _base, modText, eventText) =>
+      val modifiers = Option(modText).fold(KeyModifiers.empty)(m => decodeModifiers(m.toInt - 1))
+      val eventType = Option(eventText).flatMap(decodeEventType).getOrElse(KeyEventType.Press)
+      Some(key(codePointKey(cpText.toInt), modifiers, eventType))
+    case _                                                 => None
 
   private def parsePrintable(data: String): Option[TerminalInput] =
     if data.startsWith("\u001b") && data.length > 1 then
@@ -279,13 +281,6 @@ object TerminalInputParser:
     case 57426          => TerminalKey.Delete
     case cp if cp >= 32 => TerminalKey.Character(new String(Character.toChars(cp)))
     case cp             => TerminalKey.Unknown(s"U+$cp")
-
-  private def csiUCodePoint(codePoint: Int, base: Option[String]): Int =
-    base.flatMap(value => scala.util.Try(value.toInt).toOption).filter(_ > 0).getOrElse(codePoint)
-
-  private def normalizeShiftedLetter(codePoint: Int, modifiers: KeyModifiers): Int =
-    if modifiers.shift && codePoint >= 'A'.toInt && codePoint <= 'Z'.toInt then codePoint + 32
-    else codePoint
 
   private def decodeEventType(value: String): Option[KeyEventType] = value match
     case "1" => Some(KeyEventType.Press)

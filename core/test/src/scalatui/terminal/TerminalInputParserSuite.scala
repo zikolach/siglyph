@@ -232,6 +232,18 @@ class TerminalInputParserSuite extends munit.FunSuite:
       Vector(TerminalInput.Key(TerminalKey.Character("c"), KeyModifiers(ctrl = true)))
     )
 
+  test(
+    "CSI-u preserves the primary printable code point independently of modifiers and alternates"
+  ):
+    assertEquals(
+      parse("\u001b[65;2u"),
+      Vector(TerminalInput.Key(TerminalKey.Character("A"), KeyModifiers(shift = true)))
+    )
+    assertEquals(
+      parse("\u001b[937:65:97;2u"),
+      Vector(TerminalInput.Key(TerminalKey.Character("Ω"), KeyModifiers(shift = true)))
+    )
+
   test("parses split UTF-8 scalars at every boundary"):
     val bytes = "🙂".getBytes(java.nio.charset.StandardCharsets.UTF_8)
     (1 until bytes.length).foreach { split =>
