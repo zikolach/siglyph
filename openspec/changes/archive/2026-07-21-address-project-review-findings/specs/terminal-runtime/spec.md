@@ -3,11 +3,11 @@
 ### Requirement: Height-aware resize redraws
 The TUI runtime SHALL track both terminal width and terminal height changes across renders and SHALL repaint after dimension changes according to the active screen mode and configured normal-screen resize clear policy. Existing callers that do not configure the policy SHALL retain full-clear behavior.
 
-#### Scenario: Default normal-screen width resize redraws with full clear
+#### Scenario: Normal-screen width resize redraws with full clear
 - **WHEN** terminal width changes after a previous render in normal-screen mode with default options
 - **THEN** the TUI emits synchronized output with autowrap disabled, clears the viewport and scrollback with `CSI 2 J`, `CSI H`, and `CSI 3 J`, and writes the recomputed frame without entering alternate screen
 
-#### Scenario: Default normal-screen height resize redraws with full clear
+#### Scenario: Normal-screen height resize redraws with full clear
 - **WHEN** terminal height changes after a previous render in normal-screen mode with default options
 - **THEN** the TUI emits synchronized output with autowrap disabled, clears the viewport and scrollback with `CSI 2 J`, `CSI H`, and `CSI 3 J`, and writes the recomputed frame without entering alternate screen
 
@@ -65,7 +65,7 @@ The terminal input model and shared parser SHALL support the typed key events ne
 ### Requirement: Terminal cell-size query support
 Each TUI runtime SHALL support terminal cell-size query response parsing for image capability decisions and SHALL retain the resulting valid dimensions in state owned by that runtime session rather than process-global mutable state.
 
-#### Scenario: Cell-size response is parsed for one session
+#### Scenario: Cell-size response is parsed
 - **WHEN** a terminal sends a valid cell-size response containing pixel height and pixel width for a terminal cell
 - **THEN** that runtime session exposes the positive dimensions to components rendered in that session as width and height
 
