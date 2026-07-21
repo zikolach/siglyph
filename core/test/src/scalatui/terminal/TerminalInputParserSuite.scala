@@ -11,6 +11,122 @@ class TerminalInputParserSuite extends munit.FunSuite:
     assertEquals(parse("\u001b[A"), Vector(TerminalInput.Key(TerminalKey.Up)))
     assertEquals(parse("ä"), Vector(TerminalInput.Key(TerminalKey.Character("ä"))))
 
+  test("parses the legacy F1 through F12 sequence matrix"):
+    val sequences = Vector(
+      "\u001bOP",
+      "\u001bOQ",
+      "\u001bOR",
+      "\u001bOS",
+      "\u001b[15~",
+      "\u001b[17~",
+      "\u001b[18~",
+      "\u001b[19~",
+      "\u001b[20~",
+      "\u001b[21~",
+      "\u001b[23~",
+      "\u001b[24~"
+    )
+    sequences.zipWithIndex.foreach { (sequence, index) =>
+      assertEquals(parse(sequence), Vector(TerminalInput.Key(TerminalKey.Function(index + 1))))
+    }
+    assertEquals(parse("\u001b[[A"), Vector(TerminalInput.Key(TerminalKey.Function(1))))
+    assertEquals(parse("\u001b[13~"), Vector(TerminalInput.Key(TerminalKey.Function(3))))
+
+  test("parses SS3 and legacy navigation variants with modifiers"):
+    val cases = Vector(
+      "\u001bOA"  -> TerminalInput.Key(TerminalKey.Up),
+      "\u001bOB"  -> TerminalInput.Key(TerminalKey.Down),
+      "\u001bOC"  -> TerminalInput.Key(TerminalKey.Right),
+      "\u001bOD"  -> TerminalInput.Key(TerminalKey.Left),
+      "\u001b[a"  -> TerminalInput.Key(TerminalKey.Up, KeyModifiers(shift = true)),
+      "\u001bOd"  -> TerminalInput.Key(TerminalKey.Left, KeyModifiers(ctrl = true)),
+      "\u001b[2$" -> TerminalInput.Key(TerminalKey.Insert, KeyModifiers(shift = true)),
+      "\u001b[7^" -> TerminalInput.Key(TerminalKey.Home, KeyModifiers(ctrl = true)),
+      "\u001bp"   -> TerminalInput.Key(TerminalKey.Up, KeyModifiers(alt = true)),
+      "\u001b[E"  -> TerminalInput.Key(TerminalKey.Clear)
+    )
+    cases.foreach { (sequence, expected) => assertEquals(parse(sequence), Vector(expected)) }
+
+  test("parses modified function and modified Enter sequences"):
+    assertEquals(
+      parse("\u001b[1;2P"),
+      Vector(TerminalInput.Key(TerminalKey.Function(1), KeyModifiers(shift = true)))
+    )
+    assertEquals(
+      parse("\u001b[24;5~"),
+      Vector(TerminalInput.Key(TerminalKey.Function(12), KeyModifiers(ctrl = true)))
+    )
+    assertEquals(
+      parse("\u001b[13;3~"),
+      Vector(TerminalInput.Key(TerminalKey.Enter, KeyModifiers(alt = true)))
+    )
+
+  test("preserves ambiguous modified F3 or cursor-position reports as raw input"):
+    val value  = "\u001b[1;4R"
+    val events = parse(value)
+
+    assertEquals(events.head, TerminalInput.RawStart(TerminalRawKind.Csi))
+    assertEquals(events.last, TerminalInput.RawEnd(TerminalRawTermination.Complete))
+    assertEquals(
+      events.collect { case TerminalInput.RawChunk(chunk) => chunk.toArray }.flatten.toVector,
+      value.getBytes(java.nio.charset.StandardCharsets.UTF_8).toVector
+    )
+
+  test("normalizes Kitty keypad functional codepoints"):
+    val cases = Vector(
+      57399 -> TerminalKey.Character("0"),
+      57408 -> TerminalKey.Character("9"),
+      57409 -> TerminalKey.Character("."),
+      57413 -> TerminalKey.Character("+"),
+      57414 -> TerminalKey.Enter,
+      57416 -> TerminalKey.Character(","),
+      57417 -> TerminalKey.Left,
+      57420 -> TerminalKey.Down,
+      57421 -> TerminalKey.PageUp,
+      57424 -> TerminalKey.End,
+      57425 -> TerminalKey.Insert,
+      57426 -> TerminalKey.Delete
+    )
+    cases.foreach { (codePoint, expected) =>
+      assertEquals(parse(s"\u001b[${codePoint}u"), Vector(TerminalInput.Key(expected)))
+    }
+
+  test("parses portable legacy control and Alt-control bytes"):
+    val ctrl = KeyModifiers(ctrl = true)
+    assertEquals(parse("\u0000"), Vector(TerminalInput.Key(TerminalKey.Character(" "), ctrl)))
+    assertEquals(parse("\u0007"), Vector(TerminalInput.Key(TerminalKey.Character("g"), ctrl)))
+    assertEquals(parse("\u001a"), Vector(TerminalInput.Key(TerminalKey.Character("z"), ctrl)))
+    assertEquals(parse("\u001c"), Vector(TerminalInput.Key(TerminalKey.Character("\\"), ctrl)))
+    assertEquals(
+      parse("\u001b\u0003"),
+      Vector(TerminalInput.Key(
+        TerminalKey.Character("c"),
+        KeyModifiers(ctrl = true, alt = true)
+      ))
+    )
+    assertEquals(
+      parse("\u001b\u001b"),
+      Vector(TerminalInput.Key(TerminalKey.Escape, KeyModifiers(alt = true)))
+    )
+
+  test("fixed keyboard sequences parse at every byte boundary"):
+    val cases = Vector(
+      "\u001bOP"   -> TerminalInput.Key(TerminalKey.Function(1)),
+      "\u001b[24~" -> TerminalInput.Key(TerminalKey.Function(12)),
+      "\u001bOA"   -> TerminalInput.Key(TerminalKey.Up),
+      "\u001b[[5~" -> TerminalInput.Key(TerminalKey.PageUp),
+      "\u001b[2$"  -> TerminalInput.Key(TerminalKey.Insert, KeyModifiers(shift = true))
+    )
+    cases.foreach { (sequence, expected) =>
+      val bytes = sequence.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+      (1 until bytes.length).foreach { split =>
+        val buffer = TerminalInputBuffer()
+        val events = buffer.process(TerminalInputChunk(bytes.take(split))) ++
+          buffer.process(TerminalInputChunk(bytes.drop(split)))
+        assertEquals(events, Vector(expected), s"$sequence split at $split")
+      }
+    }
+
   test("parses SGR mouse press release wheel and modifiers"):
     assertEquals(
       parse("\u001b[<0;3;2M"),
@@ -114,6 +230,18 @@ class TerminalInputParserSuite extends munit.FunSuite:
     assertEquals(
       parse("\u0003"),
       Vector(TerminalInput.Key(TerminalKey.Character("c"), KeyModifiers(ctrl = true)))
+    )
+
+  test(
+    "CSI-u preserves the primary printable code point independently of modifiers and alternates"
+  ):
+    assertEquals(
+      parse("\u001b[65;2u"),
+      Vector(TerminalInput.Key(TerminalKey.Character("A"), KeyModifiers(shift = true)))
+    )
+    assertEquals(
+      parse("\u001b[937:65:97;2u"),
+      Vector(TerminalInput.Key(TerminalKey.Character("Ω"), KeyModifiers(shift = true)))
     )
 
   test("parses split UTF-8 scalars at every boundary"):

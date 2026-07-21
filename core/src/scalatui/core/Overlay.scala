@@ -1,5 +1,7 @@
 package scalatui.core
 
+import scalatui.terminal.ImageCellDimensions
+
 /** Anchor point used when an overlay does not specify an absolute or percentage position. */
 enum OverlayAnchor derives CanEqual:
   case Center
@@ -99,6 +101,14 @@ trait OverlayHost:
 
 /** Runtime services that components can use without depending on terminal backends. */
 trait TUIContext:
+  /**
+   * Terminal cell dimensions owned by this runtime session.
+   *
+   * The concrete default preserves source compatibility for standalone contexts and supplies the
+   * deterministic image-layout fallback used before a terminal reports its cell geometry.
+   */
+  def imageCellDimensions: ImageCellDimensions = ImageCellDimensions()
+
   /** Queue a coalesced render intent. Force intent is preserved when requests merge. */
   def requestRender(force: Boolean = false): Unit
 

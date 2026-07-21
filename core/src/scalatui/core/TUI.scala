@@ -5,6 +5,7 @@ import scalatui.syntax.Equality.*
 import scalatui.syntax.Containment.*
 import scalatui.terminal.{
   KeyEventType,
+  ImageCellDimensions,
   RgbColor,
   Terminal,
   TerminalColorProtocol,
@@ -55,11 +56,20 @@ enum TUIScreenMode derives CanEqual:
  * @param mouseInput
  *   Enable opt-in terminal mouse reporting for coordinate-aware mouse input. Disabled by default
  *   because terminal mouse reporting can affect normal text selection.
+ * @param normalResizeClearPolicy
+ *   Normal-screen dimension-change policy. The default clears viewport and scrollback for legacy
+ *   redraw behavior; preserving scrollback clears and homes only the active viewport. Alternate
+ *   screen redraw behavior is unchanged.
+ * @param diagnosticObserver
+ *   Optional instance-scoped observer for redacted structured runtime metadata. Observer failures
+ *   are contained and permanently disable that observer without preventing terminal cleanup.
  */
 final case class TUIOptions(
     hardwareCursorPositioning: Boolean = false,
     screenMode: TUIScreenMode = TUIScreenMode.Normal,
-    mouseInput: Boolean = false
+    mouseInput: Boolean = false,
+    normalResizeClearPolicy: NormalResizeClearPolicy = NormalResizeClearPolicy.ClearScrollback,
+    diagnosticObserver: Option[TUIDiagnosticObserver] = None
 ) derives CanEqual
 
 /**
@@ -73,6 +83,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   private val root                            = Container()
   private val lifecycleLock                   = Object()
   private val terminalWriteLock               = Object()
+  private val diagnosticLock                  = Object()
   private val overlayStack                    = ArrayBuffer.empty[TUI.OverlayEntry]
   private val pendingIngress                  = scala.collection.mutable.ArrayDeque.empty[TUI.Ingress]
   private var replayContinuation              = Option.empty[TUI.ReplayContinuation]
@@ -124,9 +135,14 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   private val terminalColorSchemeListeners            = ArrayBuffer.empty[TerminalColorScheme => Unit]
   private var terminalColorSchemeNotificationsEnabled = false
   private val inputListeners                          = ArrayBuffer.empty[TerminalInput => InputResult]
+  private var currentImageCellDimensions              = TerminalImageProtocol.DefaultCellDimensions
+  @volatile private var diagnosticObserver            = options.diagnosticObserver
 
   var handlesControlC: Boolean = true
   var exitsOnEscape: Boolean   = false
+
+  override def imageCellDimensions: ImageCellDimensions =
+    lifecycleLock.synchronized(currentImageCellDimensions)
 
   def addChild(component: Component): Unit =
     publishStructural { () =>
@@ -248,10 +264,11 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     }
     if publish then
       scheduleControlOutput(supported = true) {
-        writeTerminal(terminal.write(
+        writeTerminalData(
           if enabled then TerminalColorProtocol.EnableColorSchemeNotifications
-          else TerminalColorProtocol.DisableColorSchemeNotifications
-        ))
+          else TerminalColorProtocol.DisableColorSchemeNotifications,
+          TUIDiagnosticWriteKind.Control
+        )
       }
 
   override def setFocus(component: Component | Null): Unit =
@@ -329,6 +346,10 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         true
     }
     if shouldStart then
+      emitDiagnostic(TUIDiagnosticEvent.Lifecycle(
+        TUIDiagnosticLifecycleState.Starting,
+        options.screenMode
+      ))
       try
         Terminal.setMouseReporting(terminal, options.mouseInput)
         writeTerminal(terminal.start(
@@ -338,18 +359,33 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         if startupMayContinue then
           enterAlternateScreenIfConfigured()
         if startupMayContinue && terminalColorSchemeNotificationsEnabled then
-          writeTerminal(terminal.write(TerminalColorProtocol.EnableColorSchemeNotifications))
+          writeTerminalData(
+            TerminalColorProtocol.EnableColorSchemeNotifications,
+            TUIDiagnosticWriteKind.Control
+          )
         if startupMayContinue then
-          TerminalImageProtocol.resetCellDimensions()
+          lifecycleLock.synchronized {
+            currentImageCellDimensions = TerminalImageProtocol.DefaultCellDimensions
+          }
           writeTerminal(terminal.hideCursor())
-          writeTerminal(terminal.write(TerminalImageProtocol.QueryCellDimensions))
+          writeTerminalData(
+            TerminalImageProtocol.QueryCellDimensions,
+            TUIDiagnosticWriteKind.Protocol
+          )
           if !options.mouseInput then
             requestRenderInternal(force = true, clear = isAlternateScreenMode)
-        lifecycleLock.synchronized {
+        val enteredRunning = lifecycleLock.synchronized {
           startupOwner = false
           if lifecycleState === TUI.LifecycleState.Starting then
             lifecycleState = TUI.LifecycleState.Running
+            true
+          else false
         }
+        if enteredRunning then
+          emitDiagnostic(TUIDiagnosticEvent.Lifecycle(
+            TUIDiagnosticLifecycleState.Running,
+            options.screenMode
+          ))
         if options.mouseInput && lifecycleLock.synchronized(
             lifecycleState === TUI.LifecycleState.Running
           )
@@ -390,14 +426,19 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
    * owner completes single-owner cleanup. Repeated calls do not duplicate restoration.
    */
   def stop(): Unit =
-    val own = lifecycleLock.synchronized {
+    val (own, transitioned) = lifecycleLock.synchronized {
       lifecycleState match
         case TUI.LifecycleState.Stopped | TUI.LifecycleState.Stopping |
-            TUI.LifecycleState.Cleaning => false
+            TUI.LifecycleState.Cleaning => false -> false
         case _ =>
           transitionToStoppingLocked()
-          !startupOwner && !drainOwned && queryWriteReservations === 0
+          (!startupOwner && !drainOwned && queryWriteReservations === 0) -> true
     }
+    if transitioned then
+      emitDiagnostic(TUIDiagnosticEvent.Lifecycle(
+        TUIDiagnosticLifecycleState.Stopping,
+        options.screenMode
+      ))
     if own then finishDeferredCleanupIfNeeded(propagateCleanupFailure = true)
 
   override def requestRender(force: Boolean = false): Unit =
@@ -493,7 +534,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
       request: String
   ): Unit =
     try
-      writeTerminal(terminal.write(request))
+      writeTerminalData(request, TUIDiagnosticWriteKind.Protocol)
       lifecycleLock.synchronized {
         getFlight() match
           case Some(flight) if flight.id === flightId =>
@@ -626,20 +667,15 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         data
       )
     then
-      val previousDimensions = TerminalImageProtocol.cellDimensions
+      val previousDimensions = currentImageCellDimensions
       TUI.IngressClassification.Publish(
         TUI.Ingress.Protocol(Vector.empty, Vector.empty),
         Vector.empty,
         () =>
           rawCorrelation = None
           TerminalImageProtocol.parseCellSizeResponse(data).foreach { dimensions =>
-            TerminalImageProtocol.setCellDimensions(
-              dimensions.widthPx,
-              dimensions.heightPx
-            ).foreach {
-              updatedDimensions =>
-                if updatedDimensions !== previousDimensions then renderRequested = true
-            }
+            currentImageCellDimensions = dimensions
+            if dimensions !== previousDimensions then renderRequested = true
           }
       )
     else if termination === TerminalRawTermination.Complete && TerminalColorProtocol.isOsc11BackgroundColorResponse(
@@ -760,12 +796,22 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     }
 
   private def publishResize(): Unit =
-    lifecycleLock.synchronized {
+    val diagnostic = lifecycleLock.synchronized {
       resizeGeneration += 1
       if lifecycleState === TUI.LifecycleState.Running then
         renderRequested = true
         forceRenderRequested = true
         clearRequested = true
+        Some(resizeGeneration)
+      else None
+    }
+    diagnostic.foreach { generation =>
+      emitDiagnostic(TUIDiagnosticEvent.Resize(
+        positiveDimension(terminal.columns),
+        positiveDimension(terminal.rows),
+        generation,
+        options.screenMode
+      ))
     }
     drainOrReturn()
 
@@ -811,6 +857,10 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
           case TUI.Work.Control(action)             => action()
           case TUI.Work.Render(force, clear)        => renderNow(force, clear)
           case TUI.Work.Cleanup                     =>
+            emitDiagnostic(TUIDiagnosticEvent.Lifecycle(
+              TUIDiagnosticLifecycleState.Cleaning,
+              options.screenMode
+            ))
             deferredCleanupFailure = cleanup()
           case TUI.Work.Done                        => continue = false
       completed = true
@@ -983,6 +1033,43 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     }
 
   private def writeTerminal(action: => Unit): Unit = terminalWriteLock.synchronized(action)
+
+  private def writeTerminalData(value: String, kind: TUIDiagnosticWriteKind): Unit =
+    writeTerminal(terminal.write(value))
+    emitWriteDiagnostic(kind, value)
+
+  private def emitRedrawDiagnostic(
+      kind: TUIDiagnosticRedrawKind,
+      columns: Int,
+      rows: Int,
+      frameRows: Int,
+      firstRow: Int,
+      clearReason: Option[TUIDiagnosticClearReason]
+  ): Unit =
+    emitDiagnostic(TUIDiagnosticEvent.Redraw(
+      kind,
+      columns,
+      rows,
+      frameRows,
+      firstRow,
+      clearReason,
+      options.screenMode
+    ))
+
+  private def emitWriteDiagnostic(kind: TUIDiagnosticWriteKind, value: String): Unit =
+    emitDiagnostic(TUIDiagnosticEvent.Write(
+      kind,
+      value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+    ))
+
+  private def emitDiagnostic(event: => TUIDiagnosticEvent): Unit =
+    if diagnosticObserver.nonEmpty then
+      diagnosticLock.synchronized {
+        diagnosticObserver.foreach { observer =>
+          try observer.onEvent(event)
+          catch case _: Throwable => diagnosticObserver = None
+        }
+      }
 
   private def startupMayContinue: Boolean = lifecycleLock.synchronized {
     lifecycleState === TUI.LifecycleState.Starting
@@ -1301,7 +1388,10 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     attempt(parkCursorBelowContentIfNeeded())
     if terminalColorSchemeNotificationsEnabled then
       attempt(
-        writeTerminal(terminal.write(TerminalColorProtocol.DisableColorSchemeNotifications))
+        writeTerminalData(
+          TerminalColorProtocol.DisableColorSchemeNotifications,
+          TUIDiagnosticWriteKind.Cleanup
+        )
       )
     attempt(writeTerminal(Terminal.drainInput(terminal)))
     attempt(restoreAutoWrapIfNeeded())
@@ -1328,6 +1418,10 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
       cleanupOwned = false
       lifecycleLock.notifyAll()
     }
+    emitDiagnostic(TUIDiagnosticEvent.Lifecycle(
+      TUIDiagnosticLifecycleState.Stopped,
+      options.screenMode
+    ))
     failure
 
   private def isCtrl(input: TerminalInput, char: String): Boolean = input match
@@ -1358,12 +1452,42 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
       val widthChanged  = (previousWidth !== 0) && (previousWidth !== width)
       val heightChanged = (previousHeight !== 0) && (previousHeight !== height)
       if previousFrame.isEmpty || force then
-        fullRender(frame, width, height, clear = clear)
+        val clearReason = Option.when(clear) {
+          if previousFrame.isEmpty then TUIDiagnosticClearReason.Initial
+          else TUIDiagnosticClearReason.Resize
+        }
+        emitRedrawDiagnostic(
+          TUIDiagnosticRedrawKind.Full,
+          width,
+          height,
+          frame.lines.length,
+          firstRow = 0,
+          clearReason
+        )
+        fullRender(frame, width, height, clearReason)
       else if widthChanged || heightChanged then
-        fullRender(frame, width, height, clear = true)
+        val clearReason = Some(TUIDiagnosticClearReason.Resize)
+        emitRedrawDiagnostic(
+          TUIDiagnosticRedrawKind.Full,
+          width,
+          height,
+          frame.lines.length,
+          firstRow = 0,
+          clearReason
+        )
+        fullRender(frame, width, height, clearReason)
       else
         val firstChanged = firstChangedRow(previousFrame.get, frame)
-        if firstChanged >= 0 then partialRender(frame, firstChanged)
+        if firstChanged >= 0 then
+          emitRedrawDiagnostic(
+            TUIDiagnosticRedrawKind.Partial,
+            width,
+            height,
+            frame.lines.length,
+            firstChanged,
+            clearReason = None
+          )
+          partialRender(frame, firstChanged)
         else positionHardwareCursorOnly(frame.position)
         previousFrame = Some(frame)
         previousWidth = width
@@ -1375,12 +1499,13 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
       frame: TUI.PreparedFrame,
       width: Int,
       height: Int,
-      clear: Boolean
+      clearReason: Option[TUIDiagnosticClearReason]
   ): Unit =
+    val clear                = clearReason.nonEmpty
     val startRowBeforeRender = if clear then Some(0) else latestFrameStartRow
     val builder              = StringBuilder()
     appendRenderStart(builder)
-    if clear then builder.append(clearSequence)
+    if clear then builder.append(clearSequence(clearReason.get))
     else
       previousFrame.foreach { _ =>
         appendVerticalMove(builder, fromRow = cursorRow, toRow = 0)
@@ -1473,6 +1598,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     autoWrapRestoreNeeded = true
     writeTerminal(terminal.write(buffer))
     autoWrapRestoreNeeded = false
+    emitWriteDiagnostic(TUIDiagnosticWriteKind.Render, buffer)
 
   private def parkCursorBelowContentIfNeeded(): Unit =
     if previousFrame.exists(_.lines.nonEmpty) && !alternateScreenEntered then
@@ -1483,20 +1609,27 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         toRow = math.max(0, previousFrame.fold(0)(_.lines.length) - 1)
       )
       builder.append("\r\n")
-      writeTerminal(terminal.write(builder.result()))
+      writeTerminalData(builder.result(), TUIDiagnosticWriteKind.Cleanup)
 
   private def enterAlternateScreenIfConfigured(): Unit =
     if isAlternateScreenMode && !alternateScreenEntered then
-      writeTerminal(terminal.write(AlternateScreenEnter))
+      writeTerminalData(AlternateScreenEnter, TUIDiagnosticWriteKind.Control)
       alternateScreenEntered = true
 
   private def exitAlternateScreenIfNeeded(): Unit =
     if alternateScreenEntered then
-      try writeTerminal(terminal.write(AlternateScreenExit))
+      try writeTerminalData(AlternateScreenExit, TUIDiagnosticWriteKind.Cleanup)
       finally alternateScreenEntered = false
 
-  private def clearSequence: String =
-    if alternateScreenEntered then AlternateScreenClear else NormalScreenClear
+  private def clearSequence(reason: TUIDiagnosticClearReason): String =
+    if alternateScreenEntered then AlternateScreenClear
+    else
+      (reason, options.normalResizeClearPolicy) match
+        case (
+              TUIDiagnosticClearReason.Resize,
+              NormalResizeClearPolicy.PreserveScrollback
+            ) => NormalScreenViewportClear
+        case _ => NormalScreenClear
 
   private def isAlternateScreenMode: Boolean = options.screenMode match
     case TUIScreenMode.Alternate => true
@@ -1505,7 +1638,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   private def restoreAutoWrapIfNeeded(): Unit =
     if autoWrapRestoreNeeded then
       autoWrapRestoreNeeded = false
-      writeTerminal(terminal.write(AutoWrapOn))
+      writeTerminalData(AutoWrapOn, TUIDiagnosticWriteKind.Cleanup)
 
   private def appendRenderStart(builder: StringBuilder): Unit =
     builder.append(SyncStart)
@@ -1527,7 +1660,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         builder.append("\r")
         appendMoveRight(builder, target.column)
         if builder.nonEmpty then
-          writeTerminal(terminal.write(builder.result()))
+          writeTerminalData(builder.result(), TUIDiagnosticWriteKind.Control)
           cursorRow = target.row
       }
 
@@ -1758,22 +1891,24 @@ object TUI:
       sanitized: String
   ) derives CanEqual
 
-  val SyncStart: String            = "\u001b[?2026h"
-  val SyncEnd: String              = "\u001b[?2026l"
-  val AutoWrapOff: String          = "\u001b[?7l"
-  val AutoWrapOn: String           = "\u001b[?7h"
-  val AlternateScreenEnter: String = "\u001b[?1049h"
-  val AlternateScreenExit: String  = "\u001b[?1049l"
-  val NormalScreenClear: String    = "\u001b[2J\u001b[H\u001b[3J"
-  val AlternateScreenClear: String = "\u001b[2J\u001b[H"
-  val LineReset: String            = "\u001b[0m\u001b]8;;\u0007"
+  val SyncStart: String                 = "\u001b[?2026h"
+  val SyncEnd: String                   = "\u001b[?2026l"
+  val AutoWrapOff: String               = "\u001b[?7l"
+  val AutoWrapOn: String                = "\u001b[?7h"
+  val AlternateScreenEnter: String      = "\u001b[?1049h"
+  val AlternateScreenExit: String       = "\u001b[?1049l"
+  val NormalScreenClear: String         = "\u001b[2J\u001b[H\u001b[3J"
+  val NormalScreenViewportClear: String = "\u001b[2J\u001b[H"
+  val AlternateScreenClear: String      = NormalScreenViewportClear
+  val LineReset: String                 = "\u001b[0m\u001b]8;;\u0007"
 
-private val SyncStart            = TUI.SyncStart
-private val SyncEnd              = TUI.SyncEnd
-private val AutoWrapOff          = TUI.AutoWrapOff
-private val AutoWrapOn           = TUI.AutoWrapOn
-private val AlternateScreenEnter = TUI.AlternateScreenEnter
-private val AlternateScreenExit  = TUI.AlternateScreenExit
-private val NormalScreenClear    = TUI.NormalScreenClear
-private val AlternateScreenClear = TUI.AlternateScreenClear
-private val LineReset            = TUI.LineReset
+private val SyncStart                 = TUI.SyncStart
+private val SyncEnd                   = TUI.SyncEnd
+private val AutoWrapOff               = TUI.AutoWrapOff
+private val AutoWrapOn                = TUI.AutoWrapOn
+private val AlternateScreenEnter      = TUI.AlternateScreenEnter
+private val AlternateScreenExit       = TUI.AlternateScreenExit
+private val NormalScreenClear         = TUI.NormalScreenClear
+private val NormalScreenViewportClear = TUI.NormalScreenViewportClear
+private val AlternateScreenClear      = TUI.AlternateScreenClear
+private val LineReset                 = TUI.LineReset

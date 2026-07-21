@@ -41,9 +41,7 @@ final class TruncatedText(
     else
       val horizontal     = " ".repeat(math.max(0, paddingX))
       val availableWidth = math.max(1, width - math.max(0, paddingX) * 2)
-      val firstLine      =
-        val newlineIndex = content.indexOf('\n')
-        if newlineIndex < 0 then content else content.substring(0, newlineIndex)
+      val firstLine      = content.takeWhile(ch => (ch !== '\r') && (ch !== '\n'))
       val displayText    = Ansi.truncateToWidth(firstLine, availableWidth, "")
       val padded         = horizontal + displayText + horizontal
       if Ansi.visibleWidth(padded) === width then padded

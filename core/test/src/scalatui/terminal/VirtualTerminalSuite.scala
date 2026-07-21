@@ -105,3 +105,36 @@ class VirtualTerminalSuite extends munit.FunSuite:
     assert(inputThread.get() ne caller, "cursor position report was delivered on the write caller")
     assertEquals(inlineCallbacks.get(), 0)
     terminal.stop()
+
+  test("modeled viewport advances by grapheme display width"):
+    val terminal = VirtualTerminal(6, 2)
+
+    terminal.write("e\u0301界🙂")
+
+    assertEquals(terminal.screenLines, Vector("e\u0301界🙂", ""))
+    assertEquals(terminal.cursorPosition, (0, 5))
+
+  test("modeled viewport applies DEC autowrap and scrolling"):
+    val terminal = VirtualTerminal(4, 2)
+
+    terminal.write("abcd")
+    assertEquals(terminal.cursorPosition, (0, 3))
+    terminal.write("e")
+    assertEquals(terminal.screenLines, Vector("abcd", "e"))
+    assertEquals(terminal.cursorPosition, (1, 1))
+
+    terminal.write("\u001b[?7l\u001b[1;4HXY")
+    assertEquals(terminal.isAutowrapEnabled, false)
+    assertEquals(terminal.screenLines, Vector("abcY", "e"))
+    assertEquals(terminal.cursorPosition, (0, 3))
+
+  test("modeled viewport supports cursor addressing and erase operations"):
+    val terminal = VirtualTerminal(6, 3)
+
+    terminal.write("abcdef\u001b[2;1Hghijkl\u001b[3;1Hmnopqr")
+    terminal.write("\u001b[2;3H\u001b[K")
+    assertEquals(terminal.screenLines, Vector("abcdef", "gh", "mnopqr"))
+
+    terminal.write("\u001b[2;2H\u001b[J")
+    assertEquals(terminal.screenLines, Vector("abcdef", "g", ""))
+    assertEquals(terminal.cursorPosition, (1, 1))

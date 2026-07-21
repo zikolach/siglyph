@@ -2,10 +2,10 @@
 
 The first milestone intentionally stopped at the core renderer, terminal abstraction, virtual terminal, and MVP components (`Text`, `Box`, `Spacer`, `SelectList`, `Input`). The project has since added the main `pi-tui`-style runtime and component behaviors: multiline editing, overlays, loaders, Markdown, image protocol helpers, JVM and Scala Native interactive backends, resize-safe rendering, and hardware cursor marker support.
 
-The remaining post-MVP work is now tracked as parity hardening rather than foundational bring-up. Active OpenSpec changes for the next batches are:
-
-- `openspec/changes/close-pi-tui-parity-gaps/`
-- `openspec/changes/siglyph-extras/`
+The remaining post-MVP work is tracked as parity hardening rather than foundational bring-up. The
+completed component-surface work and current behavioral gaps are recorded in the version-pinned
+[`pi-tui` compatibility matrix](pi-tui-compatibility.md); completed OpenSpec batches live under
+`openspec/changes/archive/` rather than being listed here as active work.
 
 ## Components
 

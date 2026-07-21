@@ -4,11 +4,13 @@ import scalatui.ansi.Ansi
 import scalatui.core.{
   Component,
   ComponentRender,
+  ContextualComponent,
   CursorPlacement,
   LayoutBounds,
   LayoutNode,
   RenderedFrame,
-  TerminalControlPlacement
+  TerminalControlPlacement,
+  TUIContext
 }
 
 import scala.collection.mutable.ArrayBuffer
@@ -21,18 +23,35 @@ import scala.collection.mutable.ArrayBuffer
  * outer padding or rows.
  */
 final class Box(paddingX: Int = 1, paddingY: Int = 0, style: String => String = identity)
-    extends Component:
+    extends Component,
+      ContextualComponent:
   private val childrenBuffer    = ArrayBuffer.empty[Component]
   private val horizontalPadding = math.max(0, paddingX)
   private val verticalPadding   = math.max(0, paddingY)
+  private var context           = Option.empty[TUIContext]
 
-  def addChild(component: Component): Unit       = childrenBuffer += component
+  def addChild(component: Component): Unit       =
+    val attach = !childrenBuffer.exists(_ eq component)
+    childrenBuffer += component
+    if attach then context.foreach(value => propagateContext(component, Some(value)))
   def removeChild(component: Component): Boolean =
     val index = childrenBuffer.indexOf(component)
     if index >= 0 then
       childrenBuffer.remove(index)
+      if context.nonEmpty && !childrenBuffer.exists(_ eq component) then
+        propagateContext(component, None)
       true
     else false
+
+  /** Remove all children and detach their runtime context once per component identity. */
+  def clear(): Unit =
+    if context.nonEmpty then foreachDistinctChild(propagateContext(_, None))
+    childrenBuffer.clear()
+
+  override def tuiContext_=(value: Option[TUIContext]): Unit =
+    if !sameContext(context, value) then
+      context = value
+      foreachDistinctChild(propagateContext(_, value))
 
   override def invalidate(): Unit = childrenBuffer.foreach(_.invalidate())
 
@@ -86,3 +105,21 @@ final class Box(paddingX: Int = 1, paddingY: Int = 0, style: String => String = 
         childNodes.result()
       )
     )
+
+  private def foreachDistinctChild(action: Component => Unit): Unit =
+    childrenBuffer.indices.foreach { index =>
+      val component = childrenBuffer(index)
+      if childrenBuffer.take(index).forall(existing => !(existing eq component)) then
+        action(component)
+    }
+
+  private def propagateContext(component: Component, value: Option[TUIContext]): Unit =
+    component match
+      case contextual: ContextualComponent => contextual.tuiContext_=(value)
+      case _                               => ()
+
+  private def sameContext(left: Option[TUIContext], right: Option[TUIContext]): Boolean =
+    (left, right) match
+      case (None, None)                      => true
+      case (Some(a), Some(b))                => a eq b
+      case (None, Some(_)) | (Some(_), None) => false

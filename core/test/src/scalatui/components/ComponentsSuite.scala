@@ -22,6 +22,24 @@ class ComponentsSuite extends munit.FunSuite:
     assert(lines.forall(Ansi.visibleWidth(_) <= 8), lines.toString)
     assertEquals(lines.headOption.exists(_.startsWith(" ")), true)
 
+  test("text renders CRLF, CR, and LF as equivalent logical rows"):
+    Vector("one\ntwo", "one\r\ntwo", "one\rtwo").foreach { value =>
+      val lines = Text(value, paddingX = 0).render(8).lines
+      assertEquals(lines.map(line => Ansi.strip(line).stripTrailing()), Vector("one", "two"))
+    }
+
+  test("text preserves empty, wrapped, wide, and ANSI-spanning logical rows"):
+    val red   = "\u001b[31m"
+    val lines = Text(red + "abcd\n\n界x", paddingX = 0).render(2).lines
+    assertEquals(
+      lines.map(line => Ansi.strip(line).stripTrailing()),
+      Vector("ab", "cd", "", "界", "x")
+    )
+    assert(
+      lines.filter(line => Ansi.strip(line).trim.nonEmpty).forall(_.contains(Ansi.Reset)),
+      lines.toString
+    )
+
   test("spacer renders empty lines"):
     assertEquals(Spacer(2).render(10).lines, Vector("", ""))
 

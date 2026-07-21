@@ -26,7 +26,6 @@ import scalatui.terminal.{
   TerminalColorProtocol,
   TerminalColorScheme,
   TerminalCursorProtocol,
-  TerminalImageProtocol,
   TerminalInputDrainSupport,
   TerminalInput,
   TerminalKey,
@@ -1774,22 +1773,7 @@ class TUISuite extends munit.FunSuite:
 
     TestInputStreams.parse("\u001b[6;12;24t").foreach(terminal.sendInput)
     assertEquals(delivered, Vector.empty)
-    assertEquals(TerminalImageProtocol.cellDimensions, ImageCellDimensions(24, 12))
-
-  test("valid cell-size reply triggers repaint"):
-    val terminal  = VirtualTerminal(20, 5)
-    val component = new Component:
-      override def render(width: Int): ComponentRender =
-        val dimensions = TerminalImageProtocol.cellDimensions
-        ComponentRender.text(s"${dimensions.widthPx}x${dimensions.heightPx}")
-    val tui       = TUI(terminal)
-    tui.addChild(component)
-    tui.start()
-    terminal.clearWrites()
-
-    TestInputStreams.parse("\u001b[6;10;20t").foreach(terminal.sendInput)
-
-    assert(terminal.output.contains("20x10"), terminal.output)
+    assertEquals(tui.imageCellDimensions, ImageCellDimensions(24, 12))
 
   test("cell-size reply does not block following input"):
     val terminal  = VirtualTerminal(20, 5)

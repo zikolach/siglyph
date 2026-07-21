@@ -219,8 +219,11 @@ object TerminalInputBuffer:
     else if value.length === 1 then None
     else
       value(1) match
-        case 0x5b                           => value.indices.drop(2).find(index =>
-            unsigned(value(index)) >= 0x40 && unsigned(value(index)) <= 0x7e
+        case 0x5b                           =>
+          val bodyStart = if value.length > 2 && unsigned(value(2)) === 0x5b then 3 else 2
+          value.indices.drop(bodyStart).find(index =>
+            val byte = unsigned(value(index))
+            (byte >= 0x40 && byte <= 0x7e) || byte === 0x24
           ).map(_ + 1)
         case 0x4f                           => Option.when(value.length >= 3)(3)
         case 0x5d | 0x50 | 0x5f             => terminatedLength(value)

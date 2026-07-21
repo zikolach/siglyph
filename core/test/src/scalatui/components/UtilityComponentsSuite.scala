@@ -123,6 +123,12 @@ class UtilityComponentsSuite extends munit.FunSuite:
     assert(!Ansi.strip(lines.mkString("\n")).contains("world"))
     assert(lines.forall(Ansi.visibleWidth(_) <= 8), lines.toString)
 
+  test("truncated text recognizes CR and CRLF logical line endings"):
+    Vector("hello\rworld", "hello\r\nworld").foreach { value =>
+      val line = TruncatedText(value, paddingX = 0).render(10).lines.head
+      assertEquals(Ansi.strip(line).trim, "hello")
+    }
+
   test("truncated text truncates ANSI and Unicode content within narrow widths"):
     val text = TruncatedText("\u001b[31mabcdef\u001b[0m🙂")
 
@@ -581,8 +587,10 @@ class UtilityComponentsSuite extends munit.FunSuite:
     assert(Ansi.strip(loader.render(20).lines.last).contains("x"))
 
   test("cancellable loader handles escape and exposes cancellation token"):
-    val loader = CancellableLoader()
-    var calls  = 0
+    val loader  = CancellableLoader()
+    var calls   = 0
+    val context = CountingContext()
+    loader.tuiContext_=(Some(context))
     loader.onCancel = () => calls += 1
 
     assertEquals(loader.cancelled, false)
@@ -602,6 +610,24 @@ class UtilityComponentsSuite extends munit.FunSuite:
     )
     assertEquals(loader.cancel(), false)
     assertEquals(calls, 1)
+    assertEquals(context.renderRequests.get(), 1)
+
+  test("cancellable loader commits cancellation before propagating callback failure"):
+    val loader  = CancellableLoader()
+    val context = CountingContext()
+    var calls   = 0
+    loader.tuiContext_=(Some(context))
+    loader.onCancel = () =>
+      calls += 1
+      throw RuntimeException("cancel failed")
+
+    val failure = intercept[RuntimeException](loader.cancel())
+
+    assertEquals(failure.getMessage, "cancel failed")
+    assertEquals(loader.cancelled, true)
+    assertEquals(loader.cancel(), false)
+    assertEquals(calls, 1)
+    assertEquals(context.renderRequests.get(), 0)
 
   test("cancellable loader ignores non-cancel input and keeps inherited rendering width-safe"):
     val loader = CancellableLoader(LoaderOptions(
@@ -615,3 +641,18 @@ class UtilityComponentsSuite extends munit.FunSuite:
     )
     assertEquals(loader.cancelled, false)
     assert(loader.render(8).lines.forall(Ansi.visibleWidth(_) <= 8))
+
+  private final class CountingContext extends scalatui.core.TUIContext:
+    val renderRequests = java.util.concurrent.atomic.AtomicInteger(0)
+
+    override def requestRender(force: Boolean): Unit                       = renderRequests.incrementAndGet()
+    override def flushRender(): Unit                                       = ()
+    override def requestExit(): Unit                                       = ()
+    override def setFocus(component: scalatui.core.Component | Null): Unit = ()
+    override val overlays: scalatui.core.OverlayHost                       = new scalatui.core.OverlayHost:
+      override def showOverlay(
+          component: scalatui.core.Component,
+          options: scalatui.core.OverlayOptions
+      ): scalatui.core.OverlayHandle = throw UnsupportedOperationException()
+      override def hideOverlay(): Unit = ()
+      override def hasOverlay: Boolean = false

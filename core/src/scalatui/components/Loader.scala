@@ -5,6 +5,8 @@ import scalatui.core.{Component, ComponentRender, ContextualComponent, InputResu
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{TerminalInput, TerminalKey}
 
+import java.util.concurrent.atomic.AtomicBoolean
+
 /**
  * Indicator frames and interval metadata for [[Loader]].
  *
@@ -147,27 +149,30 @@ class Loader(initialOptions: LoaderOptions = LoaderOptions()) extends Component,
  * Dependency-free cancellation token exposed by [[CancellableLoader]].
  *
  * The token is a small Scala substitute for JavaScript `AbortSignal`: it only reports cancellation
- * state and does not own callbacks, futures, or effect-runtime semantics.
+ * state and does not own callbacks, futures, or effect-runtime semantics. Its atomic state gives
+ * JVM threads and Scala Native workers cross-execution-context visibility. Exactly one caller can
+ * make the transition from active to cancelled.
  */
 final class CancellationToken private[components] ():
-  private var cancelledState = false
+  private val cancelledState = AtomicBoolean(false)
 
-  def isCancelled: Boolean = cancelledState
+  /** Return the atomically visible cancellation state. */
+  def isCancelled: Boolean = cancelledState.get()
 
-  def cancelled: Boolean = cancelledState
+  /** Alias for [[isCancelled]]. */
+  def cancelled: Boolean = isCancelled
 
   private[components] def cancel(): Boolean =
-    if cancelledState then false
-    else
-      cancelledState = true
-      true
+    cancelledState.compareAndSet(false, true)
 
 /**
  * Loader variant that can be cancelled with Escape or explicit [[cancel()]].
  *
  * Cancellation is idempotent. `onCancel` is invoked at most once, cancellation state is exposed
- * through [[token]], and cancellation requests render when attached to a runtime. No background
- * work or external cancellation runtime is introduced.
+ * through [[token]], and the winning cancellation requests render when attached to a runtime. The
+ * callback runs synchronously on the winning caller; an exception is propagated after the atomic
+ * cancelled state is committed and retains the existing behavior of preventing the later render
+ * request. No background work or external cancellation runtime is introduced.
  */
 final class CancellableLoader(options: LoaderOptions = LoaderOptions()) extends Loader(options):
   private val cancellationToken = CancellationToken()
@@ -180,6 +185,12 @@ final class CancellableLoader(options: LoaderOptions = LoaderOptions()) extends 
 
   def aborted: Boolean = cancelled
 
+  /**
+   * Atomically cancel this loader.
+   *
+   * @return
+   *   true only for the caller that wins the cancellation transition
+   */
   def cancel(): Boolean =
     if cancellationToken.cancel() then
       onCancel()

@@ -97,7 +97,7 @@ final class ExpandableSection(
       style: String => String
   ): Vector[String] =
     val horizontal = " ".repeat(paddingX)
-    Ansi.wrapTextWithAnsi(content, innerWidth).map { line =>
+    Ansi.wrapLogicalLinesWithAnsi(content, innerWidth).map { line =>
       val padded = horizontal + Ansi.padRight(line, innerWidth) + horizontal
       Ansi.truncateToWidth(style(padded), width, "")
     }

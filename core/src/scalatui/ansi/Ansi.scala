@@ -240,28 +240,47 @@ object Ansi:
   def wrapTextWithAnsi(value: String, width: Int): Vector[String] =
     if width <= 0 then Vector("")
     else if value.isEmpty then Vector("")
+    else wrapTextWithAnsi(value, width, AnsiState())
+
+  /**
+   * Normalize CRLF, CR, and LF into structural rows, then wrap each row by display width.
+   *
+   * Supported SGR and OSC 8 state is carried between logical rows through the same bounded replay
+   * used by ordinary wrapping. Other C0 controls remain inert visible text because each logical row
+   * still passes through the ordinary ANSI scanner.
+   */
+  def wrapLogicalLinesWithAnsi(value: String, width: Int): Vector[String] =
+    val logicalLines = value.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1).toVector
+    if width <= 0 then Vector.fill(logicalLines.length)("")
     else
-      val result        = Vector.newBuilder[String]
-      val current       = new StringBuilder
-      var currentWidth  = 0
-      var close         = ""
-      def flush(): Unit =
-        if current.nonEmpty then
-          current.append(close)
-          result += current.result()
-          current.clear()
-          currentWidth = 0
-      foreachRawGraphemeUnit(value) { unit =>
-        val unitWidth = Unicode.graphemeWidth(unit.printable)
-        if currentWidth > 0 && currentWidth + unitWidth > width then flush()
-        if unitWidth <= width then
-          if current.isEmpty then current.append(unit.replayBefore)
-          current.append(unit.raw)
-          currentWidth += unitWidth
-          close = unit.closeAfter
+      val state = AnsiState()
+      logicalLines.flatMap { line =>
+        val wrapped = wrapTextWithAnsi(line, width, state)
+        if wrapped.isEmpty then Vector("") else wrapped
       }
-      flush()
-      result.result()
+
+  private def wrapTextWithAnsi(value: String, width: Int, state: AnsiState): Vector[String] =
+    val result        = Vector.newBuilder[String]
+    val current       = new StringBuilder
+    var currentWidth  = 0
+    var close         = ""
+    def flush(): Unit =
+      if current.nonEmpty then
+        current.append(close)
+        result += current.result()
+        current.clear()
+        currentWidth = 0
+    foreachRawGraphemeUnit(value, state) { unit =>
+      val unitWidth = Unicode.graphemeWidth(unit.printable)
+      if currentWidth > 0 && currentWidth + unitWidth > width then flush()
+      if unitWidth <= width then
+        if current.isEmpty then current.append(unit.replayBefore)
+        current.append(unit.raw)
+        currentWidth += unitWidth
+        close = unit.closeAfter
+    }
+    flush()
+    result.result()
 
   /** Shared visible conversion for untrusted terminal metadata. */
   private[scalatui] def visibleControlText(value: String): String =
@@ -611,8 +630,13 @@ object Ansi:
   private def inByte(value: Int): Boolean = value >= 0 && value <= 255
 
   private def foreachRawGraphemeUnit(value: String)(consume: RawGraphemeUnit => Unit): Unit =
+    foreachRawGraphemeUnit(value, AnsiState())(consume)
+
+  private def foreachRawGraphemeUnit(
+      value: String,
+      state: AnsiState
+  )(consume: RawGraphemeUnit => Unit): Unit =
     val engine             = GraphemeBoundaryEngine()
-    val state              = AnsiState()
     val raw                = new StringBuilder
     val printable          = new StringBuilder
     var pendingStart       = -1

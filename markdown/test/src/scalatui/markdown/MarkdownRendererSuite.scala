@@ -326,3 +326,97 @@ class MarkdownRendererSuite extends munit.FunSuite:
     assertEquals(lines.head, "          ")
     assert(lines.exists(_.contains("# Hi")), lines.mkString("\n"))
     assert(lines.forall(line => Ansi.visibleWidth(line) <= 10), lines.mkString("\n"))
+
+  test("Markdown component reuses one successful parse for an identical render"):
+    var parses    = 0
+    val renderer  = BasicMarkdownRenderer(new MarkdownParser:
+      override def parse(markdown: String): Either[String, Vector[MarkdownBlock]] =
+        parses += 1
+        Right(Vector(MarkdownBlock.Paragraph(markdown))))
+    val component = Markdown("cached", renderer)
+
+    val first  = component.render(20)
+    val second = component.render(20)
+
+    assert(first eq second)
+    assertEquals(parses, 1)
+
+  test("Markdown text width and padding changes invalidate cached output"):
+    val renderer  = CountingRenderer()
+    val component = Markdown("first", renderer)
+
+    component.render(20)
+    component.text = "second"
+    assert(component.render(20).lines.exists(_.contains("second")))
+    component.render(19)
+    component.setPaddingX(1)
+    component.render(19)
+    component.setPaddingY(1)
+    val padded = component.render(19)
+
+    assertEquals(renderer.calls, 5)
+    assertEquals(padded.lines.head, " ".repeat(19))
+
+  test("Markdown renderer generation and explicit invalidation prevent stale custom output"):
+    val renderer  = StatefulRenderer()
+    val component = Markdown("value", renderer)
+
+    assertEquals(component.render(20).lines, Vector("first:value"))
+    renderer.prefix = "stale"
+    assertEquals(component.render(20).lines, Vector("first:value"))
+    renderer.generation += 1
+    assertEquals(component.render(20).lines, Vector("stale:value"))
+    renderer.prefix = "invalidated"
+    component.invalidate()
+    assertEquals(component.render(20).lines, Vector("invalidated:value"))
+    assertEquals(renderer.calls, 3)
+
+  test("Markdown caches parser fallback but never caches renderer failures"):
+    var fallbackParses    = 0
+    val fallback          = BasicMarkdownRenderer(new MarkdownParser:
+      override def parse(markdown: String): Either[String, Vector[MarkdownBlock]] =
+        fallbackParses += 1
+        Left("unsupported"))
+    val fallbackComponent = Markdown("plain fallback", fallback)
+
+    fallbackComponent.render(8)
+    fallbackComponent.render(8)
+
+    assertEquals(fallbackParses, 1)
+
+    var attempts = 0
+    val failing  = Markdown(
+      "retry",
+      new MarkdownRenderer:
+        override def render(markdown: String, width: Int): Vector[String] =
+          attempts += 1
+          throw RuntimeException("fatal render")
+    )
+    intercept[RuntimeException](failing.render(10))
+    intercept[RuntimeException](failing.render(10))
+    assertEquals(attempts, 2)
+
+  test("Markdown cache retains only the most recent geometry"):
+    val renderer  = CountingRenderer()
+    val component = Markdown("bounded", renderer)
+
+    component.render(10)
+    component.render(11)
+    component.render(10)
+
+    assertEquals(renderer.calls, 3)
+
+  private final class CountingRenderer extends MarkdownRenderer:
+    var calls                                                         = 0
+    override def render(markdown: String, width: Int): Vector[String] =
+      calls += 1
+      Vector(markdown)
+
+  private final class StatefulRenderer extends MarkdownRenderer:
+    var generation                                                    = 0L
+    var prefix                                                        = "first"
+    var calls                                                         = 0
+    override def cacheGeneration: Long                                = generation
+    override def render(markdown: String, width: Int): Vector[String] =
+      calls += 1
+      Vector(s"$prefix:$markdown")

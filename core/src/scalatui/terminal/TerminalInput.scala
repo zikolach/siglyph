@@ -129,6 +129,7 @@ object TerminalKey:
   case object Escape    extends TerminalKey
   case object Tab       extends TerminalKey
   case object Backspace extends TerminalKey
+  case object Clear     extends TerminalKey
 
   /** Insert key from standard terminal insert-key escape sequences. */
   case object Insert                        extends TerminalKey

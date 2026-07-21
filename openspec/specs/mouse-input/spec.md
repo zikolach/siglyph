@@ -3,7 +3,6 @@
 ## Purpose
 Defines opt-in typed terminal mouse input, committed-frame coordinate routing, overlay precedence,
 and focus-preserving delivery to mouse-capable components.
-
 ## Requirements
 ### Requirement: Public typed mouse input
 The library SHALL expose typed mouse input as `TerminalInput.Mouse(...)` with terminal-cell coordinates, action, button or wheel direction, and modifier state.
@@ -42,8 +41,12 @@ The public mouse action model SHALL define the complete action set as `Press(but
 - **WHEN** an SGR mouse report contains a button code that is valid SGR syntax but has no named button mapping
 - **THEN** the emitted mouse event uses `Other(code)` with the button identity code after modifier, motion, and wheel flags are removed
 
+#### Scenario: Extended button does not alias a primary button
+- **WHEN** an SGR press or release report contains an extended button identity such as 128 together with any supported modifier flags
+- **THEN** the emitted action contains `Other(128)` and the extended identity is not mapped to `Left`, `Middle`, or `Right`
+
 ### Requirement: Coordinate-aware mouse routing
-The TUI runtime SHALL route mouse events by coordinates using the latest retained rendered bounds tree and the visible terminal origin of the current TUI frame.
+The TUI runtime SHALL route mouse events by coordinates using the retained bounds tree for the latest successfully committed visual frame and the visible terminal origin of that frame.
 
 #### Scenario: Deepest child under pointer receives mouse
 - **WHEN** a mouse event falls inside a nested child component that opts into mouse handling
@@ -64,6 +67,10 @@ The TUI runtime SHALL route mouse events by coordinates using the latest retaine
 #### Scenario: Initial render scrolling is accounted for
 - **WHEN** the first rendered frame scrolls the terminal viewport while preserving scrollback
 - **THEN** the runtime maps mouse coordinates to the retained frame rows that remain visible after scrolling
+
+#### Scenario: Resize-invalidated candidate does not replace routing geometry
+- **WHEN** terminal dimensions or the resize generation change while a candidate frame is rendering
+- **THEN** mouse input received before the forced replacement render is routed against the previously committed frame rather than the rejected candidate
 
 ### Requirement: Overlay-aware mouse routing
 The TUI runtime SHALL route mouse events through visible overlays before base components, using topmost visual order first.

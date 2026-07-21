@@ -10,6 +10,21 @@ class TerminalInputBufferSuite extends munit.FunSuite:
     assertEquals(buffer.process(chunk("\u001b[")), Vector.empty)
     assertEquals(buffer.process(chunk("A")), Vector(TerminalInput.Key(TerminalKey.Up)))
 
+  test("buffers double-bracket function and rxvt dollar sequences"):
+    val function = TerminalInputBuffer()
+    assertEquals(function.process(chunk("\u001b[[")), Vector.empty)
+    assertEquals(
+      function.process(chunk("A")),
+      Vector(TerminalInput.Key(TerminalKey.Function(1)))
+    )
+
+    val shiftedInsert = TerminalInputBuffer()
+    assertEquals(shiftedInsert.process(chunk("\u001b[2")), Vector.empty)
+    assertEquals(
+      shiftedInsert.process(chunk("$")),
+      Vector(TerminalInput.Key(TerminalKey.Insert, KeyModifiers(shift = true)))
+    )
+
   test("buffers split SGR mouse report"):
     val buffer = TerminalInputBuffer()
     assertEquals(buffer.process(chunk("\u001b[<64;")), Vector.empty)

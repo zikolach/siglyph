@@ -17,7 +17,10 @@ enum ImageCellDimensionsSource derives CanEqual:
   /** Use caller-supplied [[ImageRenderOptions.cellDimensions]] exactly. */
   case Fixed
 
-  /** Use the last valid runtime terminal cell-size reply, or fallback dimensions before a reply. */
+  /**
+   * Let a high-level runtime-aware component resolve terminal cell dimensions. Low-level protocol
+   * helpers use the supplied `cellDimensions` fallback because they have no TUI session context.
+   */
   case Runtime
 
 /**
@@ -25,8 +28,8 @@ enum ImageCellDimensionsSource derives CanEqual:
  *
  * Low-level protocol sizing is deterministic by default: `cellDimensionsSource` defaults to
  * [[ImageCellDimensionsSource.Fixed]] and uses `cellDimensions` exactly. Use
- * [[ImageCellDimensionsSource.Runtime]] only when sizing should read the runtime cell-size cache
- * maintained by [[TerminalImageProtocol]].
+ * [[ImageCellDimensionsSource.Runtime]] only when a high-level component attached to a TUI should
+ * resolve the owning session's dimensions. Direct low-level calls still use `cellDimensions`.
  */
 final case class ImageRenderOptions(
     mimeType: String = "image/png",
@@ -69,14 +72,23 @@ final case class ImageRenderResult(
  * writes remain outside this component-output contract.
  */
 object TerminalImageProtocol:
-  private val defaultCellDimensions   = ImageCellDimensions(widthPx = 9, heightPx = 18)
+  /** Deterministic geometry used before a TUI session receives a valid cell-size reply. */
+  val DefaultCellDimensions: ImageCellDimensions = ImageCellDimensions(widthPx = 9, heightPx = 18)
+
+  private val defaultCellDimensions   = DefaultCellDimensions
   private val defaultCellSizeResponse = "^\u001b\\[6;(\\d+);(\\d+)t$".r
   private var currentCellDimensions   = defaultCellDimensions
 
   /** Query terminal for terminal cell dimensions in pixels. */
   val QueryCellDimensions: String = "\u001b[16t"
 
-  /** Last known terminal cell dimensions used for image layout decisions. */
+  /**
+   * Legacy process-global dimensions. New code should use
+   * [[scalatui.core.TUIContext.imageCellDimensions]] or pass fixed dimensions to
+   * [[ImageRenderOptions]]. TUI and high-level image rendering no longer read this compatibility
+   * bridge.
+   */
+  @deprecated("Use TUIContext.imageCellDimensions or ImageRenderOptions.cellDimensions", "0.1.0")
   def cellDimensions: ImageCellDimensions = synchronized(currentCellDimensions)
 
   /** Parse a terminal cell-size report into validated pixel dimensions. */
@@ -92,9 +104,10 @@ object TerminalImageProtocol:
   def isCellSizeResponse(data: String): Boolean = defaultCellSizeResponse.matches(data)
 
   /**
-   * Update cached terminal cell dimensions for image layout, returning the normalized value when
-   * valid.
+   * Update the legacy process-global compatibility value. New runtime code should keep dimensions
+   * on its owning TUI context instead.
    */
+  @deprecated("Keep runtime dimensions on the owning TUIContext", "0.1.0")
   def setCellDimensions(widthPx: Int, heightPx: Int): Option[ImageCellDimensions] =
     Option.when(widthPx > 0 && heightPx > 0) {
       val updated = ImageCellDimensions(widthPx, heightPx)
@@ -102,7 +115,8 @@ object TerminalImageProtocol:
       updated
     }
 
-  /** Reset cached dimensions to the built-in deterministic fallback. */
+  /** Reset only the legacy process-global compatibility value. */
+  @deprecated("Keep runtime dimensions on the owning TUIContext", "0.1.0")
   def resetCellDimensions(): Unit = synchronized { currentCellDimensions = defaultCellDimensions }
 
   private val imageIdAllocator = KittyImageIdAllocator()
@@ -156,9 +170,7 @@ object TerminalImageProtocol:
     )
 
   private def effectiveCellDimensions(options: ImageRenderOptions): ImageCellDimensions =
-    options.cellDimensionsSource match
-      case ImageCellDimensionsSource.Fixed   => options.cellDimensions
-      case ImageCellDimensionsSource.Runtime => cellDimensions
+    options.cellDimensions
 
   private def positiveInt(value: String): Option[Int] = value.toIntOption.filter(_ > 0)
 

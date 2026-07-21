@@ -93,6 +93,8 @@ private final class DemoRoot(tui: TUI, tagTriggerSource: TriggerCompletionSource
         ),
         pathProvider = Some(FileSystemPathCompletionProvider(FileSystemPathCompletionOptions(
           baseDirectory = workspaceRoot,
+          currentDirectory = Some(workspaceRoot),
+          containmentRoots = Vector(workspaceRoot),
           maxResults = 40,
           includeHidden = false,
           directoriesFirst = false

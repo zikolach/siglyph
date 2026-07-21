@@ -2,7 +2,30 @@ package scalatui.ansi
 
 import scalatui.unicode.Unicode
 
+import scala.concurrent.duration.*
+
 class AnsiSuite extends munit.FunSuite:
+  override def munitTimeout: Duration = 90.seconds
+
+  test("logical line wrapping normalizes line endings and preserves empty rows"):
+    val expected = Vector("ab", "", "界", "")
+    Vector("ab\n\n界\n", "ab\r\n\r\n界\r\n", "ab\r\r界\r").foreach { value =>
+      assertEquals(Ansi.wrapLogicalLinesWithAnsi(value, 4).map(Ansi.strip), expected)
+    }
+
+  test("logical line wrapping carries bounded ANSI state across rows"):
+    val red   = "\u001b[31m"
+    val open  = "\u001b]8;;https://example.com\u001b\\"
+    val close = "\u001b]8;;\u001b\\"
+    val lines = Ansi.wrapLogicalLinesWithAnsi(red + open + "ab\r\n界c" + close, 2)
+
+    assertEquals(lines.map(Ansi.strip), Vector("ab", "界", "c"))
+    assert(lines.forall(_.endsWith(close + Ansi.Reset)), lines.toString)
+
+  test("logical line wrapping keeps non-line C0 controls inert"):
+    val lines = Ansi.wrapLogicalLinesWithAnsi("a\tb\nc", 20)
+    assertEquals(lines.map(Ansi.strip), Vector("a\\u0009b", "c"))
+
   test("visible width ignores ANSI escapes"):
     assertEquals(Ansi.visibleWidth("\u001b[31mhello\u001b[0m"), 5)
 

@@ -1,7 +1,13 @@
 package scalatui.image
 
 import scalatui.ansi.Ansi
-import scalatui.core.{Component, ComponentRender, TerminalControlPlacement}
+import scalatui.core.{
+  Component,
+  ComponentRender,
+  ContextualComponent,
+  TerminalControlPlacement,
+  TUIContext
+}
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{
   Base64ImagePayload,
@@ -262,8 +268,12 @@ final class Image(
       cellDimensionsSource = ImageCellDimensionsSource.Runtime
     ),
     theme: ImageTheme = ImageTheme()
-) extends Component:
-  private var imageId = options.imageId
+) extends Component,
+      ContextualComponent:
+  private var imageId    = options.imageId
+  private var tuiContext = Option.empty[TUIContext]
+
+  override def tuiContext_=(value: Option[TUIContext]): Unit = tuiContext = value
 
   /** Protocol image id used for Kitty render/reuse flows, if one has been allocated. */
   def currentImageId: Option[Int] = imageId
@@ -299,7 +309,9 @@ final class Image(
       case ImageCellDimensionsSource.Fixed   => currentOptions
       case ImageCellDimensionsSource.Runtime =>
         currentOptions.copy(
-          cellDimensions = TerminalImageProtocol.cellDimensions,
+          cellDimensions = tuiContext.map(_.imageCellDimensions).getOrElse(
+            currentOptions.cellDimensions
+          ),
           cellDimensionsSource = ImageCellDimensionsSource.Fixed
         )
 
