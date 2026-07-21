@@ -7,6 +7,8 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-21
+
 ### Added
 
 - Added opt-in typed SGR mouse input with coordinate-aware component and overlay
@@ -27,6 +29,9 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ### Fixed
 
+- Fixed coordinate-aware mouse routing through padded nested boxes, prevented
+  resize-invalidated render candidates from publishing uncommitted geometry,
+  and preserved extended SGR mouse-button identities. #46
 - Fixed multiline text rendering for LF, CRLF, and CR boundaries, made loader
   cancellation thread-safe and idempotent, and prevented concurrent TUI image
   sessions from sharing mutable terminal geometry. #49
@@ -252,7 +257,8 @@ and this project uses semantic versioning while it remains pre-1.0.
 - GitHub Actions CI, jar packaging, GitHub Packages publishing, and GitHub
   release artifacts.
 
-[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/zikolach/siglyph/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/zikolach/siglyph/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/zikolach/siglyph/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/zikolach/siglyph/compare/v0.3.0...v0.4.0
