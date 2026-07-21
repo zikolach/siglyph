@@ -2,9 +2,7 @@
 
 Small single-file demos intended for `scala-cli`.
 
-The released examples use Maven Central `0.6.0` artifacts. The mouse example uses local
-`0.6.0-SNAPSHOT` artifacts to exercise unreleased mouse-input APIs; run
-`./scripts/publish-local-snapshot.sh` from the repository root before running it.
+The released examples use Maven Central `0.7.0` artifacts.
 
 Run from this repository:
 
@@ -85,7 +83,7 @@ Validation has the same lexical contract on JVM and Scala Native. It accepts sta
 
 `mouse.scala` demonstrates opt-in mouse reporting with `TUIOptions(mouseInput = true)`, typed `TerminalInput.Mouse` logging, coordinate-routed mouse events in a custom component, and wheel scrolling over `SelectList` and `Editor`. While the demo runs, terminal wheel scrollback is captured by mouse reporting; unhandled wheel events are logged but cannot be passed back to the terminal reliably.
 
-To run an example against local sources instead of the published local snapshot, pass the source roots to Scala CLI:
+To run an example against local sources instead of the published release, pass the source roots to Scala CLI:
 
 ```bash
 scala-cli run --workspace /tmp/siglyph-mouse-demo \
