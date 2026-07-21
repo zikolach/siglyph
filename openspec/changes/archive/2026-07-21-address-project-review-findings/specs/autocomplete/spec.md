@@ -19,7 +19,7 @@ The autocomplete capability SHALL provide an optional path completion helper tha
 - **WHEN** a request uses `~/` or an absolute path
 - **THEN** the helper accepts it only when the corresponding option is enabled and the canonical candidate is inside an explicitly allowed root
 
-#### Scenario: Path helper returns bounded ordered results
+#### Scenario: Path helper returns bounded results
 - **WHEN** a path completion request encounters more candidates than the configured scan or result bound
 - **THEN** the helper respects both bounds, sorts the candidate set it evaluated with the documented stable ordering, and returns no more than the configured result maximum
 

@@ -12,6 +12,24 @@ and this project uses semantic versioning while it remains pre-1.0.
 - Added opt-in typed SGR mouse input with coordinate-aware component and overlay
   routing, retained layout bounds, and wheel scrolling for editors, autocomplete
   suggestions, select lists, and settings lists. #19
+- Added session-scoped, redaction-safe terminal diagnostics and an opt-in
+  preserve-scrollback resize policy while retaining the existing full-clear
+  default. #49
+- Added bounded recursive attachment completion, expanded typed function and
+  modified-key decoding, focused PTY conformance coverage, macOS CI, and a
+  version-pinned `pi-tui` compatibility matrix. #49
+
+### Changed
+
+- Changed runtime image sizing to use TUI-session-owned cell dimensions, made
+  Markdown render caching sensitive to every behavior-affecting input, and
+  documented explicit containment policies for filesystem completion. #49
+
+### Fixed
+
+- Fixed multiline text rendering for LF, CRLF, and CR boundaries, made loader
+  cancellation thread-safe and idempotent, and prevented concurrent TUI image
+  sessions from sharing mutable terminal geometry. #49
 
 ## [0.6.0] - 2026-07-18
 

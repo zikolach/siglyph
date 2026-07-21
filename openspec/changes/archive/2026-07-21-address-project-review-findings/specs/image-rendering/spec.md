@@ -3,7 +3,7 @@
 ### Requirement: Cell-size-aware image sizing
 Image sizing that opts into runtime terminal cell dimensions SHALL use valid dimensions from the TUI session currently attached to the image and SHALL fall back to deterministic default cell dimensions when unavailable. Runtime-derived dimensions SHALL NOT be read from or written to process-global mutable image geometry. Image sizing with fixed `ImageRenderOptions.cellDimensions` SHALL use those fixed dimensions exactly. The high-level `Image` component SHALL opt into attached-session sizing by default.
 
-#### Scenario: Valid session cell dimensions affect image rows
+#### Scenario: Valid cell dimensions affect image rows
 - **WHEN** an image attached to a running TUI receives valid terminal cell pixel dimensions from that session
 - **THEN** calculated image cell rows preserve image aspect ratio using that session's dimensions
 
