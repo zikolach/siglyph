@@ -7,6 +7,12 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- Restored source-compatible `Markdown(...)` constructor application for callers
+  outside `scalatui.markdown` after the render cache introduced in `0.7.0`
+  accidentally shadowed the public class with a private companion.
+
 ## [0.7.0] - 2026-07-21
 
 ### Added
