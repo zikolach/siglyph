@@ -414,7 +414,7 @@ final class Markdown(
   private var currentText     = initialText
   private var currentPaddingX = paddingX
   private var currentPaddingY = paddingY
-  private var cachedRender    = Option.empty[Markdown.RenderCache]
+  private var cachedRender    = Option.empty[MarkdownRenderCache.Entry]
 
   def text: String = currentText
 
@@ -452,7 +452,7 @@ final class Markdown(
           ) => cache.render
       case _ =>
         val rendered = ComponentRender.text(renderLines(safeWidth, horizontal, vertical))
-        cachedRender = Some(Markdown.RenderCache(
+        cachedRender = Some(MarkdownRenderCache.Entry(
           currentText,
           safeWidth,
           horizontal,
@@ -472,8 +472,8 @@ final class Markdown(
     val blank        = " ".repeat(safeWidth)
     Vector.fill(paddingY)(blank) ++ content ++ Vector.fill(paddingY)(blank)
 
-private object Markdown:
-  final case class RenderCache(
+private object MarkdownRenderCache:
+  final case class Entry(
       text: String,
       width: Int,
       paddingX: Int,
