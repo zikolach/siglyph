@@ -7,11 +7,13 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-07-22
+
 ### Fixed
 
 - Restored source-compatible `Markdown(...)` constructor application for callers
   outside `scalatui.markdown` after the render cache introduced in `0.7.0`
-  accidentally shadowed the public class with a private companion.
+  accidentally shadowed the public class with a private companion. #52
 
 ## [0.7.0] - 2026-07-21
 
@@ -263,7 +265,8 @@ and this project uses semantic versioning while it remains pre-1.0.
 - GitHub Actions CI, jar packaging, GitHub Packages publishing, and GitHub
   release artifacts.
 
-[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/zikolach/siglyph/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/zikolach/siglyph/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/zikolach/siglyph/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/zikolach/siglyph/compare/v0.4.0...v0.5.0
