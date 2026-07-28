@@ -1,107 +1,184 @@
 ## Context
 
-Siglyph 0.6 introduced closed `ComponentRender` output so ordinary application strings cannot acquire terminal-control or hardware-cursor authority. Typed controls are currently encoded only while `TUI` assembles a retained frame, and Kitty controls remain owned by that frame so replacement and shutdown can emit deterministic cleanup.
+Siglyph 0.6 introduced closed `ComponentRender` output so ordinary application strings cannot acquire terminal-control or hardware-cursor authority. Typed controls are encoded only while `TUI` assembles owned output, and Kitty controls in the retained frame remain cleanup-owned by that frame.
 
-That ownership is correct for live widgets but does not cover normal-screen conversational and build interfaces that keep one editable/status frame at the bottom while committing completed rich output to shell scrollback. Direct `Terminal.write` remains application authority, but the typed image API intentionally exposes no raw encoder. A consumer therefore cannot append an `Image` or another typed-control component without either duplicating protocol encoding or keeping all historical output in the retained live frame.
+That ownership is correct for live widgets but does not cover normal-screen conversational and build interfaces that keep one editable/status frame at the bottom while committing completed rich output to shell scrollback. Direct `Terminal.write` remains application authority, but the typed image API intentionally exposes no raw encoder.
 
-The API must preserve the typed-control trust boundary, normal-screen scrollback, current TUI context and dimensions, callback/render serialization, and active-frame lifecycle. It must work in shared core on JVM and Scala Native and add no dependency.
+The current runtime already provides a synchronous single-owner work drain, a private typed-control encoder, retained frame state, structured diagnostics, mouse frame-origin tracking, and shared JVM/Scala Native sources. It also has constraints this design must preserve:
+
+- `flushRender()` drains synchronously only when uncontended; reentrant and concurrent calls are non-waiting.
+- Normal-screen resize clears scrollback by default unless `PreserveScrollback` is selected.
+- Component-provided `TerminalCapabilities` remain separate from the session-owned image cell dimensions exposed by `TUIContext`.
+- Resize can invalidate a render candidate after rendering and before publication.
+- Kitty image IDs may be caller-configured and retained cleanup deletes by semantic image ID.
 
 ## Goals / Non-Goals
 
 **Goals:**
-- Add one TUI-owned operation for appending a component once above the current normal-screen live frame.
-- Render with the owning session's width, capabilities, cell dimensions, and component context.
+- Append one detached component above the current normal-screen live frame.
+- Preserve the established flush, callback, lifecycle, focus, overlay, mouse, and terminal-write contracts.
 - Validate and encode typed controls only at the final TUI output boundary.
-- Serialize append work with every existing runtime work category and include it in `flushRender` completion.
-- Keep appended controls outside retained-frame replacement and shutdown cleanup ownership.
-- Preserve active children, overlays, hardware cursor placement, input delivery, resize behavior, and terminal restoration.
-- Provide redaction-safe lifecycle diagnostics and shared JVM/Native behavior.
+- Serialize append work with every existing runtime work category.
+- Keep append-only controls outside retained replacement and shutdown cleanup.
+- Keep append ownership metadata bounded and retain no component, text, payload, filename, geometry, or replay history.
+- Work in shared core on JVM and Scala Native without a runtime dependency.
 
 **Non-Goals:**
-- Adding a public raw `TerminalRenderControl` encoder or arbitrary trusted escape-string API.
+- Exposing a public raw `TerminalRenderControl` encoder or arbitrary trusted escape writer.
 - Turning `TUI` into a transcript store, replay log, persistence layer, or virtualized scrollback model.
 - Making appended output interactive, focusable, removable, or addressable after publication.
-- Supporting append-only output in alternate-screen mode.
-- Guaranteeing terminal-emulator persistence beyond what normal-screen Kitty, iTerm2, and shell scrollback provide.
-- Making terminal writes transactionally atomic after bytes reach an operating-system/backend boundary.
+- Appending before a live frame exists, in alternate-screen mode, or while the normal resize policy can clear scrollback.
+- Guaranteeing Kitty/iTerm2 persistence beyond documented terminal-emulator behavior.
+- Transactional rollback after bytes reach a backend boundary.
+- Making `TUI` detect terminal capabilities on behalf of an `Image`; capabilities remain component configuration.
+- Protecting append-only Kitty IDs across a fully stopped TUI lifecycle, process restart, or unrelated terminal application.
 
 ## Decisions
 
-### 1. Add append work to the TUI runtime rather than the terminal backend
+### 1. Use callback-completed append work and preserve `flushRender`
 
-Expose a normal-screen operation such as `TUI.appendToScrollback(component: Component): Unit`. The operation publishes a dedicated append work item through the same runtime ingress/drain ownership used by structural actions, input, queries, controls, rendering, and cleanup. External callers can use the existing `flushRender()` boundary when they must await all accepted work.
+Expose an operation shaped like:
 
-The terminal backend remains a byte transport and gains no component or protocol knowledge.
+```scala
+def appendToScrollback(
+    component: Component,
+    onComplete: AppendResult => Unit = _ => ()
+): Unit
+```
 
-Alternative: expose `TerminalRenderControlEncoder` or add `Terminal.writeControl`. Rejected because it moves frame geometry, validation, protocol authority, synchronization, and cleanup decisions outside the TUI owner.
+The public result model is shaped as:
 
-Alternative: return a blocking append result. Rejected because an append can be requested reentrantly from a TUI callback; a mandatory synchronous result would either deadlock the drain owner or require a second execution model. The existing queued-work plus `flushRender` contract already handles external acknowledgment.
+```scala
+enum AppendResult:
+  case Published(rowCount: Int, controlCount: Int)
+  case Rejected(reason: AppendRejection)
+  case Failed(cause: Throwable)
 
-### 2. Render the component exactly once inside the owning context
+enum AppendRejection:
+  case LifecycleUnavailable(state: TUIDiagnosticLifecycleState)
+  case AlternateScreen
+  case ScrollbackClearingResizePolicy
+  case NoCommittedFrame
+  case AttachedComponent
+  case StoppedBeforeClaim
+```
 
-When append work is claimed, the TUI supplies its current `TUIContext`, current positive terminal width, session-owned image cell dimensions, and the insertion origin to contextual/origin-aware components. It renders the component once, validates the complete `ComponentRender`, sanitizes ordinary lines through the normal renderer, and prepares typed controls before emitting bytes.
+A result callback is invoked exactly once. Rejection may complete synchronously; accepted work completes on the runtime drain after publication succeeds, fails, or is rejected by shutdown before claim. Completion may occur before the method returns, matching existing callback APIs. `Failed(cause)` is delivered only to the application-owned callback; diagnostics classify and redact that failure without retaining its message.
 
-Append-only output has no lasting focus or input ownership. A render containing cursor placements is rejected explicitly rather than silently dropping structured cursor authority or moving the live hardware cursor.
+The method remains safe from runtime callbacks: it queues follow-up work and never recursively drains. `flushRender()` is unchanged. An uncontended append normally completes before the publishing call or a following uncontended flush returns, but a reentrant or concurrent `flushRender()` remains non-waiting. Applications that require acknowledgment use `onComplete`, not `flushRender()`.
 
-The TUI detaches temporary context after planning even when rendering or validation fails. Component rendering failures follow the normal runtime-failure and terminal-cleanup path.
+Append-result callback failures follow existing application-callback failure handling and cannot prevent terminal restoration.
 
-Alternative: accept a pre-rendered `ComponentRender`. Rejected because callers would have to guess the current width, cell dimensions, origin, and context outside runtime serialization.
+Alternative: make append blocking or change `flushRender()` to wait. Rejected because it conflicts with the promoted non-waiting contended-flush contract and can invert application locks.
 
-### 3. Plan append output and active-frame restoration as one owned operation
+### 2. Admit only an append-compatible lifecycle
 
-The append planner treats the currently visible retained frame and the one-shot component as separate ownership domains. It prepares all geometry and typed controls before the first append byte is written, then:
+Append requests are accepted only when all of these are true at publication:
 
-1. moves/clears only the replaceable live-frame area needed for insertion;
-2. emits the validated append-only lines and typed controls at column one;
-3. reserves the complete append height in normal-screen output;
-4. redraws or repositions the retained live frame below the appended output; and
-5. restores the retained frame's selected hardware cursor and committed geometry.
+- lifecycle state is `Running`;
+- `TUIScreenMode.Normal` is active;
+- `NormalResizeClearPolicy.PreserveScrollback` is configured; and
+- a retained live frame has already been committed.
 
-The output planner must preserve active overlays and retained controls rather than classifying their positional redraw as removal. Concurrent resize or structural work is ordered before or after the append by the existing single runtime owner; no second terminal lock or side channel is added.
+Other requests complete with a typed rejection and emit no append bytes. Pending accepted append work that has not been claimed when stop wins is rejected in publication order and its callback is completed before final shutdown completion.
 
-Alternative: temporarily add and then remove the component as a normal child. Rejected because removal invokes retained-frame cleanup, which can delete the newly appended Kitty image from scrollback.
+Requiring `PreserveScrollback` avoids promising append persistence while the runtime is configured to emit `CSI 3 J` on resize. The initial normal-screen clear occurs before any append can be admitted because a committed live frame is required.
 
-Alternative: keep historical components as children forever. Rejected because live-frame rendering and diff cost would grow with append history and would turn retained UI state into an unbounded transcript.
+### 3. Render a detached component in a restricted one-shot context
 
-### 4. Transfer appended controls out of retained cleanup ownership
+The passed component is a one-shot render input. It must not be an active retained child, retained descendant known to the latest layout, or overlay component of the same TUI. Detectable reuse is rejected before attachment. The public contract requires callers to supply a detached component; the TUI never installs it in retained children, focus, overlays, or mouse layout.
 
-Controls emitted by successful append work are not stored in `previousFrame`, retained child state, or shutdown cleanup collections. Later frame replacement, child removal, resize, and TUI shutdown therefore cannot emit cleanup for those append-only controls.
+A contextual component receives a restricted append context that exposes the owning session's current `imageCellDimensions`. Operations that would mutate retained runtime ownership—focus, overlays, exit, nested flush, or render scheduling—fail the append before publication. This permits `Image` sizing without allowing one-shot rendering to acquire lasting UI authority.
 
-Controls already owned by the retained live frame keep their existing replacement and shutdown cleanup behavior. If planning fails, no appended control becomes published or owned. If a backend write fails after publication begins, the runtime reports its normal failure and restores terminal lifecycle state without claiming rollback of bytes already accepted by the backend.
+Terminal capabilities remain component-provided, as they are today. The TUI does not infer or replace an `Image` component's configured `TerminalCapabilities`.
 
-No append handle or later numeric image-id cleanup API is returned. Removing append-only output is deliberately outside the contract.
+Context attachment and detachment use `try/finally`; detachment is attempted on every success, retry, rejection, and failure. Cursor placements are rejected because append-only output cannot own the retained hardware cursor.
 
-### 5. Restrict the operation to a running normal-screen lifecycle
+### 4. Retry only unpublished candidates when resize invalidates geometry
 
-Append requests are accepted only while a TUI with `TUIScreenMode.Normal` is running or while its runtime owner is processing accepted running-state work. Requests before startup, during/after stopping, or in alternate-screen mode fail explicitly and emit no append bytes.
+When append work reaches the head of its FIFO, the runtime claims the resize generation, width, height, retained frame, and session dimensions. It renders and validates a candidate without writing terminal bytes, then rechecks generation and dimensions.
 
-This keeps alternate-screen frame replacement deterministic and avoids ambiguous behavior for output that has no shell scrollback destination.
+If geometry changed, the candidate is discarded and the same append remains ahead of later appends until it can be planned against a stable claimed geometry or shutdown rejects it. A component may therefore render more than once, consistent with normal retained rendering. Exactly one candidate is published and exactly one result callback completes.
 
-### 6. Keep diagnostics structural and redaction-safe
+Alternative: promise exactly one render attempt. Rejected because terminal dimensions can change concurrently while component code runs, and stale one-shot output cannot be repaired after publication.
 
-When a diagnostic observer is configured, append work reports bounded event kind, outcome, row/control counts, screen mode, and failure category. Diagnostics never retain component lines, payloads, filenames, control bytes, or terminal write contents.
+### 5. Plan append output and retained-frame restoration as one owned write
+
+After all validation and identity planning succeeds, one synchronized output buffer:
+
+1. moves from the current retained-frame cursor to frame row zero;
+2. clears only the replaceable live-frame region;
+3. relocates retained Kitty controls using existing cleanup/retransmission semantics;
+4. emits append-only lines and controls at column one;
+5. terminates and reserves the complete append height;
+6. redraws the unchanged prepared retained frame below the append;
+7. restores its selected hardware cursor and logical `cursorRow`; and
+8. updates `latestFrameStartRow` for terminal scrolling so coordinate-aware mouse routing still targets the retained layout.
+
+The semantic `previousFrame`, retained layouts, children, overlays, focus, and input target remain unchanged. Only the live frame's physical terminal origin changes. Empty append renders publish no terminal bytes and complete successfully with zero rows and controls.
+
+Multiple appends remain FIFO. A resize or other runtime category is ordered by the existing single owner; no second lock, output thread, or backend side channel is added.
+
+### 6. Remap and bound append-owned Kitty identities
+
+Append rendering rejects `KittyCleanup` controls. Such a control is destructive rather than append-only and could delete retained or historical output.
+
+Every appended `KittyImage` control is internally copied to a fresh runtime-allocated ID before encoding. The original component ID is not transferred, so reusing the component later cannot target the append placement. Internal construction remains `private[scalatui]`; no raw encoder or new public control constructor is exposed.
+
+After successful publication, the TUI records only the remapped IDs in an append-ownership ledger. The ledger:
+
+- contains at most 4096 IDs per TUI lifecycle;
+- stores no payload, filename, component, text, placement, geometry, or output bytes;
+- is never used for replacement or shutdown cleanup; and
+- is cleared only when that TUI lifecycle is fully stopped.
+
+An append needing more IDs than remaining capacity fails before publication. Before retained-frame publication, a manually configured retained Kitty ID that collides with the ledger is rejected before output. IDs allocated through the shared allocator remain naturally unique; the collision check protects caller-configured IDs.
+
+This bounded ledger is ownership metadata, not a transcript. It is necessary because Kitty delete-by-image-ID can remove every placement sharing that ID.
+
+### 7. Preserve typed authority and failure atomicity
+
+The complete append render is validated before publication. Ordinary lines use the existing sanitization and line-reset path. Typed controls use the private exhaustive encoder. Validation rejects out-of-bounds controls, duplicate input Kitty IDs, cursor placements, Kitty cleanup controls, retained-ID collisions, and ledger overflow before append bytes are written.
+
+Rendering, context, validation, or planning failure records the normal runtime failure, completes the append with `Failed`, and enters normal cleanup. No append bytes are published. If the single backend write fails after accepting a prefix, the operation reports failure and restores terminal lifecycle state without claiming rollback.
+
+Successfully appended controls are absent from `previousFrame`, replacement cleanup, resize retransmission, and shutdown cleanup. Existing retained controls keep current lifecycle behavior.
+
+### 8. Keep diagnostics structural and redaction-safe
+
+Append diagnostics report bounded event kind, outcome/failure category, row count, control count, screen mode, and resize generation. They never retain component lines, exception messages, payloads, filenames, control bytes, remapped IDs, or terminal write contents.
+
+The application-owned completion callback may receive the operation failure according to the public result model; diagnostic redaction remains independent.
+
+### 9. Test portable semantics and separate emulator claims
+
+Shared JVM/Native tests use an extended `VirtualTerminal` model to assert exact append ordering, row reservation, retained-frame restoration, mouse origin, cursor state, validation atomicity, resize retry, callback cardinality, Kitty remapping/ledger limits, and cleanup ownership.
+
+Automated JVM PTY tests assert emitted byte order, lack of forbidden cleanup, and terminal lifecycle restoration. A raw PTY is not a terminal emulator and cannot prove Kitty/iTerm2 scrollback persistence. Real Kitty and iTerm2 persistence remains documented manual smoke coverage on supported emulators.
 
 ## Risks / Trade-offs
 
-- **[Live-frame relocation can corrupt normal-screen output]** → Build the append and redraw plan under the single runtime owner and add virtual-terminal plus PTY assertions for exact frame ordering, cursor position, and row reservation.
-- **[Kitty cleanup removes append-only images]** → Keep appended controls out of retained replacement/shutdown cleanup and test later render, resize, child removal, and stop paths.
-- **[Append rendering races terminal resize]** → Claim current geometry only inside ordered runtime work and render exactly once for that claimed state.
-- **[Component emits invalid controls or cursor metadata]** → Validate before publication, reject cursor placements explicitly, and publish no append bytes for planning failures.
-- **[Terminal write fails after partial backend acceptance]** → Reuse runtime failure and lifecycle cleanup semantics; do not promise byte rollback or report append success.
-- **[Consumers use append output as unbounded retained state]** → Keep the API one-shot and non-addressable; the TUI stores no append history.
-- **[JVM and Native behavior diverges]** → Implement planning and control encoding in shared core and run the same virtual-terminal contract on both platforms.
+- **Live-frame relocation can corrupt output** → one fully planned synchronized write plus virtual-terminal and PTY sequence assertions.
+- **Default resize clearing contradicts persistence** → reject append unless `PreserveScrollback` is configured.
+- **Kitty ID reuse deletes history** → fresh remapping, bounded ownership ledger, retained collision validation, and cleanup-control rejection.
+- **Resize invalidates one-shot geometry** → discard and retry only before publication; publish one candidate.
+- **One-shot context mutates retained UI** → detached-component contract and restricted append context.
+- **Mouse routes to the old physical frame** → update frame-origin accounting in the append commit.
+- **Backend accepts only a prefix** → fail and restore lifecycle without rollback claims.
+- **Terminal emulators differ** → automate protocol invariants and keep emulator persistence a manual compatibility check.
 
 ## Migration Plan
 
-1. Add failing shared tests for one-shot text and typed-control append semantics, state rejection, validation atomicity, serialization, retained-frame restoration, and cleanup ownership.
-2. Introduce the append work model and public normal-screen operation in shared core.
-3. Integrate append planning with retained-frame origin, cursor, overlay, resize, diagnostic, and cleanup state.
-4. Add image-component coverage for Kitty and iTerm2 plus JVM PTY scrollback smoke validation.
-5. Run JVM, Scala Native, terminal conformance, formatting, lint, and strict OpenSpec validation.
-6. Publish the capability in the next Siglyph release and document downstream migration from direct protocol writes.
+1. Add failing shared tests for result callbacks, admission, text output, typed controls, identity ownership, resize retry, frame restoration, mouse origin, and cleanup.
+2. Introduce append result/rejection values and the dedicated FIFO work category in shared core.
+3. Add the restricted append context and detached-component checks.
+4. Implement pre-publication rendering, validation, Kitty remapping, and the bounded ownership ledger.
+5. Implement the synchronized append/redraw planner and committed frame-origin updates.
+6. Add diagnostics, JVM PTY sequence coverage, manual emulator smoke documentation, public API docs, examples, and changelog entries.
+7. Run JVM, Scala Native, terminal conformance, formatting, lint, and strict OpenSpec validation.
 
-Rollback removes the public append operation and its work category before release. It must not expose the private control encoder as a fallback.
+Rollback removes the public append operation and work category before release. It must not expose the private control encoder as a fallback.
 
 ## Open Questions
 
-None. The operation is intentionally normal-screen-only, one-shot, typed, non-interactive, and non-removable.
+None. The operation is intentionally callback-completed, normal-screen-only, preserve-scrollback-only, one-shot, typed, non-interactive, non-removable, and bounded for Kitty ownership.

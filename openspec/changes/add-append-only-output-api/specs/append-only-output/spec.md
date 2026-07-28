@@ -1,119 +1,205 @@
 ## ADDED Requirements
 
-### Requirement: TUI appends typed components to normal-screen scrollback
-Siglyph SHALL provide a TUI-owned operation that renders one component as append-only normal-screen output above the retained live frame.
+### Requirement: TUI exposes callback-completed append-only output
+Siglyph SHALL provide a TUI-owned operation that accepts one detached component for append-only normal-screen output and completes an application callback exactly once with a typed result.
 
 #### Scenario: Text component is appended
-- **WHEN** a caller appends a text-only component while a normal-screen TUI is running
-- **THEN** the TUI SHALL render the component once at the current terminal width and append its sanitized lines above the retained live frame
+- **WHEN** a caller submits a detached text-only component during an append-compatible lifecycle
+- **THEN** the TUI SHALL publish its sanitized lines above the retained live frame and complete the callback with the published row and control counts
 
-#### Scenario: Contextual component is appended
-- **WHEN** an appended component requires `TUIContext` or its terminal-relative render origin
-- **THEN** the TUI SHALL supply the owning session's current context, image cell dimensions, and insertion origin while producing the one-shot render
+#### Scenario: Empty component is appended
+- **WHEN** a valid appended component returns no lines, controls, or cursor placements
+- **THEN** the TUI SHALL publish no terminal bytes and complete successfully with zero rows and controls
 
-#### Scenario: Appended rows are reserved
-- **WHEN** a valid appended component produces one or more rows
-- **THEN** the TUI SHALL reserve those rows in normal-screen output before restoring the retained live frame so later live rendering does not overwrite the appended content
+#### Scenario: Completion occurs before method return
+- **WHEN** synchronous lifecycle rejection or uncontended draining completes the operation immediately
+- **THEN** the callback MAY run before the append method returns and SHALL still run exactly once
 
-#### Scenario: Append work is flushed
-- **WHEN** a caller accepts append work and then invokes the TUI's existing render-flush completion boundary outside a runtime callback
-- **THEN** that boundary SHALL not complete until the accepted append and required live-frame restoration have completed or the runtime has failed
+#### Scenario: Flush is uncontended
+- **WHEN** no runtime owner is active after append publication and a caller invokes `flushRender()`
+- **THEN** existing synchronous uncontended draining SHALL remain unchanged
+
+#### Scenario: Flush is contended or reentrant
+- **WHEN** another runtime owner is active or append is requested from a runtime callback
+- **THEN** `flushRender()` SHALL remain non-waiting and the append callback SHALL be the authoritative operation-completion boundary
+
+### Requirement: Append admission preserves normal-screen scrollback policy
+Siglyph SHALL admit append-only output only while a normal-screen TUI with scrollback-preserving resize policy is running and has a committed retained frame.
+
+#### Scenario: Running compatible TUI accepts append
+- **WHEN** `TUIScreenMode.Normal`, `NormalResizeClearPolicy.PreserveScrollback`, `Running`, and a committed retained frame all apply
+- **THEN** the append SHALL enter the runtime FIFO
+
+#### Scenario: Default resize policy is incompatible
+- **WHEN** append is requested while `NormalResizeClearPolicy.ClearScrollback` is configured
+- **THEN** the TUI SHALL reject it explicitly because a later resize may clear appended history and SHALL emit no append bytes
+
+#### Scenario: Alternate-screen append is requested
+- **WHEN** append is requested from a TUI using alternate-screen mode
+- **THEN** the TUI SHALL reject it explicitly and SHALL emit no append bytes
+
+#### Scenario: Append is requested before startup or initial frame
+- **WHEN** append is requested before `Running` or before the first retained frame is committed
+- **THEN** the TUI SHALL reject it explicitly and SHALL emit no append bytes
+
+#### Scenario: Append is requested during or after shutdown
+- **WHEN** append is requested in `Stopping`, `Cleaning`, or `Stopped`
+- **THEN** the TUI SHALL reject it explicitly and SHALL emit no append bytes
+
+#### Scenario: Stop wins before append claim
+- **WHEN** stop begins after append admission but before that append is claimed
+- **THEN** the append SHALL publish nothing, complete once with a stopping rejection in accepted order, and not postpone terminal restoration indefinitely
+
+### Requirement: Append rendering is detached, restricted, and geometry-safe
+Siglyph SHALL render append-only components outside retained component ownership using current session dimensions and a restricted one-shot context.
+
+#### Scenario: Detached contextual component is appended
+- **WHEN** a detached contextual component is claimed
+- **THEN** it SHALL receive a restricted context exposing the owning session's current image cell dimensions and SHALL be detached in `finally` on every outcome
+
+#### Scenario: Component capabilities remain caller-configured
+- **WHEN** an appended `Image` or another component uses `TerminalCapabilities`
+- **THEN** it SHALL use the capabilities configured on that component while the TUI supplies only session-owned context such as image cell dimensions
+
+#### Scenario: Attached component is submitted
+- **WHEN** the submitted component is detectable as a retained child, retained descendant, or overlay component of the same TUI
+- **THEN** append SHALL reject it before changing context or publishing output
+
+#### Scenario: One-shot component requests retained authority
+- **WHEN** context attachment or rendering tries to change focus, overlays, exit state, nested flush state, or retained render scheduling
+- **THEN** the restricted context SHALL fail the append before publication rather than granting lasting UI ownership
+
+#### Scenario: Resize invalidates an unpublished candidate
+- **WHEN** resize generation or terminal dimensions change between append render and commit
+- **THEN** the TUI SHALL discard that candidate, keep the append ahead of later appends, and retry without publishing stale bytes
+
+#### Scenario: Resize causes multiple render attempts
+- **WHEN** one or more unpublished candidates are invalidated by resize
+- **THEN** the component MAY render more than once, exactly one candidate SHALL be published, and the completion callback SHALL run exactly once
 
 ### Requirement: Append-only output preserves typed terminal authority
-Siglyph SHALL validate and encode append-only `ComponentRender` controls only through the existing TUI-owned terminal output boundary.
+Siglyph SHALL validate and encode append-only `ComponentRender` controls only through the existing private TUI-owned terminal output boundary.
 
 #### Scenario: Typed image control is appended
-- **WHEN** an appended component returns a valid Kitty or iTerm2 terminal control and matching reserved geometry
-- **THEN** the TUI SHALL encode that typed control at the component's validated placement without requiring or exposing raw protocol bytes to the caller
+- **WHEN** an appended component returns a valid Kitty or iTerm2 image control with matching reserved geometry
+- **THEN** the TUI SHALL encode it at its validated placement without exposing raw protocol bytes to the caller
 
 #### Scenario: Ordinary text resembles a terminal protocol
-- **WHEN** appended ordinary lines contain bytes resembling an image, cursor, CSI, OSC, APC, DCS, C0, DEL, or C1 protocol
-- **THEN** the TUI SHALL apply the existing trusted-output sanitization rules and SHALL NOT infer typed terminal authority from the text
+- **WHEN** appended lines contain image, cursor, CSI, OSC, APC, DCS, C0, DEL, or C1-looking data
+- **THEN** existing trusted-output sanitization SHALL apply and no typed authority SHALL be inferred from those strings
 
 #### Scenario: Render geometry is invalid
-- **WHEN** an appended render contains a control outside its rows or width, a duplicate active Kitty image id, or another `ComponentRender` validation failure
-- **THEN** the TUI SHALL publish none of that append operation's lines or controls and SHALL fail through bounded runtime diagnostics
+- **WHEN** an appended render contains an out-of-bounds control, duplicate input Kitty ID, or another `ComponentRender` validation error
+- **THEN** the TUI SHALL publish none of that append operation's lines or controls and SHALL enter normal runtime failure handling
 
-#### Scenario: Appended render contains a cursor placement
+#### Scenario: Appended render contains cursor placement
 - **WHEN** an appended render contains one or more structured cursor placements
-- **THEN** the TUI SHALL reject the append before publication rather than dropping cursor metadata or transferring hardware-cursor ownership away from the retained live frame
+- **THEN** the TUI SHALL fail before publication rather than dropping metadata or transferring hardware-cursor ownership
+
+#### Scenario: Appended render contains Kitty cleanup
+- **WHEN** an appended render contains a Kitty cleanup control
+- **THEN** the TUI SHALL fail before publication because destructive cleanup is not append-only output
 
 #### Scenario: Public raw encoder remains unavailable
 - **WHEN** append-only typed output is supported
-- **THEN** Siglyph SHALL NOT make its raw `TerminalRenderControl` encoder or an arbitrary trusted escape-string writer public as part of this capability
+- **THEN** Siglyph SHALL NOT make its raw control encoder, arbitrary trusted escape writer, or unrestricted control constructor public
 
-### Requirement: Append operations are serialized with TUI runtime work
-Siglyph SHALL serialize append-only output, active-frame restoration, and terminal writes with existing input, structural, query, control, render, resize, and cleanup work.
+### Requirement: Append operations preserve the retained live frame
+Siglyph SHALL serialize append publication and physical live-frame relocation as one runtime-owned synchronized write while retaining the frame's semantic ownership.
 
-#### Scenario: Append races a retained-frame render
-- **WHEN** append work and a retained-frame render are requested concurrently
-- **THEN** the TUI runtime owner SHALL order both operations and SHALL produce complete appended output followed by one valid retained live frame
+#### Scenario: Append publishes above live frame
+- **WHEN** a valid append is committed
+- **THEN** the TUI SHALL clear only the replaceable live-frame region, publish complete append rows, reserve their height, and redraw one retained live frame below them
 
-#### Scenario: Append races terminal resize
-- **WHEN** terminal dimensions change while append work is pending
-- **THEN** the runtime owner SHALL order resize and append work, render the appended component against one claimed current geometry, and leave one live frame using the final processed geometry
+#### Scenario: Retained state survives relocation
+- **WHEN** append output relocates the live frame
+- **THEN** retained children, overlays, layout trees, focus, input target, typed controls, and semantic `previousFrame` content SHALL remain unchanged
 
-#### Scenario: Append is requested from a runtime callback
-- **WHEN** input or another application callback requests append-only output while the TUI work drain is active
-- **THEN** the operation SHALL enqueue follow-up work without recursive rendering, callback deadlock, a second terminal lock, or terminal writes outside runtime ownership
+#### Scenario: Hardware cursor is restored
+- **WHEN** the retained frame has a selected structured cursor
+- **THEN** append commit SHALL restore that cursor relative to the relocated live frame and update the runtime's logical cursor row
 
-#### Scenario: Multiple append requests are accepted
-- **WHEN** multiple append operations are accepted concurrently
-- **THEN** the TUI SHALL publish each complete append in accepted runtime order without interleaving their lines or controls
+#### Scenario: Mouse frame origin is restored
+- **WHEN** mouse frame-origin tracking is active and append output scrolls or relocates the live frame
+- **THEN** the TUI SHALL update the visible retained-frame origin so coordinate-aware routing continues to target the same retained layout
+
+#### Scenario: Append races retained work
+- **WHEN** append, input callback, structural mutation, overlay action, terminal query/control, retained render, or resize work are concurrently ready
+- **THEN** the existing single runtime owner SHALL order complete work units without recursive drain, second terminal lock, or interleaved append bytes
+
+#### Scenario: Multiple appends are accepted
+- **WHEN** multiple append operations are admitted concurrently
+- **THEN** each SHALL remain FIFO relative to other appends and publish as one complete operation before the next append
+
+### Requirement: Append-only Kitty identities are remapped and bounded
+Siglyph SHALL isolate successful append-only Kitty controls from retained cleanup by remapping their image IDs and retaining a bounded structural ownership ledger.
+
+#### Scenario: Kitty image is appended
+- **WHEN** a valid append contains a Kitty image control
+- **THEN** the TUI SHALL replace its semantic image ID with a fresh runtime-owned ID before encoding while preserving payload and geometry
+
+#### Scenario: Same component is later rendered elsewhere
+- **WHEN** a component or its original Kitty ID is reused after successful append
+- **THEN** that original ID SHALL NOT identify or delete the remapped append-only placement
+
+#### Scenario: Later retained frame uses an append-owned ID
+- **WHEN** a caller-configured retained Kitty control collides with an append-owned remapped ID
+- **THEN** retained-frame validation SHALL fail before terminal output rather than replacing or deleting append-only output
+
+#### Scenario: Append identity ledger reaches capacity
+- **WHEN** an append would increase append-owned Kitty IDs beyond 4096 in one TUI lifecycle
+- **THEN** the append SHALL fail before publication while text-only and iTerm2 append capacity remain unaffected
+
+#### Scenario: Ownership ledger remains redacted and structural
+- **WHEN** append-owned Kitty IDs are retained
+- **THEN** the ledger SHALL retain no component, payload, filename, application text, placement, geometry, or encoded output
+
+#### Scenario: Live frame changes after Kitty append
+- **WHEN** the retained frame later renders, resizes, removes a child, or stops
+- **THEN** replacement, retransmission, and shutdown cleanup SHALL NOT target append-owned IDs
+
+#### Scenario: Retained Kitty control remains cleanup-owned
+- **WHEN** a Kitty image belongs to an ordinary retained component and does not collide with the append ledger
+- **THEN** existing retained replacement and shutdown cleanup behavior SHALL remain unchanged
+
+### Requirement: Append failures and diagnostics are explicit and redaction-safe
+Siglyph SHALL complete append outcomes exactly once and keep diagnostic observations bounded and free of application content.
+
+#### Scenario: Planning fails before publication
+- **WHEN** rendering, restricted-context use, detachment, validation, identity planning, or output planning fails before the terminal write
+- **THEN** no append bytes SHALL be published, the callback SHALL complete with failure, and normal fail-fast runtime cleanup SHALL begin
 
 #### Scenario: Terminal write fails
-- **WHEN** the backend fails after an append publication has begun
-- **THEN** the TUI SHALL follow existing runtime failure and terminal lifecycle cleanup semantics and SHALL NOT report successful or rolled-back append output
-
-### Requirement: Append-only controls leave retained-frame cleanup ownership
-Siglyph SHALL treat successfully appended terminal controls as one-shot normal-screen output that is not owned by later retained-frame replacement or TUI shutdown cleanup.
-
-#### Scenario: Live frame changes after image append
-- **WHEN** a Kitty image control has been appended successfully and the retained live frame later changes
-- **THEN** retained-frame replacement SHALL NOT emit cleanup for the appended image id
-
-#### Scenario: Terminal resizes after image append
-- **WHEN** a resize causes the retained live frame to redraw after typed output was appended
-- **THEN** the TUI SHALL preserve append-only control ownership semantics and SHALL NOT retransmit, move, or delete the appended control as retained-frame content
-
-#### Scenario: TUI stops after image append
-- **WHEN** a normal-screen TUI stops after successfully appending a typed control
-- **THEN** shutdown SHALL restore owned terminal lifecycle state without emitting retained-frame cleanup for the append-only control
-
-#### Scenario: Retained image remains cleanup-owned
-- **WHEN** an image control belongs to an ordinary retained component rather than append-only output
-- **THEN** existing replacement and shutdown cleanup behavior SHALL remain unchanged for that retained control
-
-#### Scenario: Append planning fails
-- **WHEN** append rendering or validation fails before publication
-- **THEN** no append-only control identity SHALL be transferred and the retained frame SHALL remain the only cleanup-owned output
-
-### Requirement: Append-only output is lifecycle- and mode-bounded
-Siglyph SHALL accept append-only component output only during a running normal-screen TUI lifecycle.
-
-#### Scenario: Alternate-screen append is requested
-- **WHEN** append-only output is requested from a TUI using alternate-screen mode
-- **THEN** the TUI SHALL reject the request explicitly and SHALL emit no append output
-
-#### Scenario: Append is requested before startup
-- **WHEN** append-only output is requested before the TUI enters its running lifecycle
-- **THEN** the TUI SHALL reject the request explicitly and SHALL emit no append output
-
-#### Scenario: Append races shutdown
-- **WHEN** shutdown has begun before pending append work is claimed
-- **THEN** the TUI SHALL reject the append, publish none of its output, and complete normal terminal restoration
+- **WHEN** the backend throws after append publication has begun
+- **THEN** the callback SHALL report failure, normal terminal restoration SHALL run, and Siglyph SHALL NOT report success or rollback of bytes already accepted by the backend
 
 #### Scenario: Append diagnostics are observed
 - **WHEN** a configured diagnostic observer receives append lifecycle events
-- **THEN** events SHALL contain only bounded structural metadata such as outcome, row count, control count, screen mode, and failure category and SHALL NOT retain application lines, payloads, filenames, protocol bytes, or terminal write contents
+- **THEN** events SHALL contain only bounded outcome/failure category, row count, control count, screen mode, and resize generation
+
+#### Scenario: Diagnostic content is redacted
+- **WHEN** append diagnostics represent success, rejection, or failure
+- **THEN** they SHALL NOT retain component lines, exception messages, payloads, filenames, control bytes, remapped image IDs, or terminal write contents
+
+#### Scenario: Completion callback throws
+- **WHEN** an append completion callback throws
+- **THEN** existing application-callback failure handling SHALL record the failure and still complete terminal restoration without invoking that callback twice
 
 ### Requirement: Append-only output is portable across supported runtimes
-Siglyph SHALL implement append planning, typed-control validation, ownership transfer, and work serialization in shared core for JVM and Scala Native terminal backends.
+Siglyph SHALL implement append admission, planning, validation, identity ownership, serialization, and completion in shared core for JVM and Scala Native.
 
 #### Scenario: JVM backend appends typed output
-- **WHEN** a supported JVM terminal backend executes append-only component work
-- **THEN** it SHALL satisfy the shared ordering, validation, row reservation, typed-control, and cleanup contracts
+- **WHEN** a supported JVM terminal backend executes append-only work
+- **THEN** it SHALL satisfy the shared ordering, validation, row reservation, result, typed-control, frame-restoration, and cleanup contracts
 
 #### Scenario: Scala Native backend appends typed output
-- **WHEN** a supported Scala Native terminal backend executes append-only component work
-- **THEN** it SHALL satisfy the same shared ordering, validation, row reservation, typed-control, and cleanup contracts without a separate semantic implementation
+- **WHEN** a supported Scala Native backend executes append-only work
+- **THEN** it SHALL satisfy the same semantic contracts without a separate platform implementation
+
+#### Scenario: Automated PTY validation runs
+- **WHEN** JVM PTY tests exercise append output
+- **THEN** they SHALL verify emitted byte ordering, forbidden-cleanup absence, and terminal lifecycle restoration without claiming to emulate Kitty or iTerm2 scrollback
+
+#### Scenario: Emulator persistence is checked
+- **WHEN** release validation claims real Kitty or iTerm2 scrollback persistence
+- **THEN** that claim SHALL come from documented manual smoke coverage in those terminal emulators
