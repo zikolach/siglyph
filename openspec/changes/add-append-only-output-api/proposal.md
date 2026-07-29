@@ -9,9 +9,11 @@ Normal-screen terminal applications often need to append rich output above a con
 - Admit append work only for a running normal-screen TUI configured with `NormalResizeClearPolicy.PreserveScrollback` and an already committed live frame.
 - Render with the current terminal width, session-owned image cell dimensions, a restricted one-shot `TUIContext`, and component-provided terminal capabilities. A resize may discard and retry an unpublished candidate; exactly one candidate is published.
 - Serialize append operations with input callbacks, structural changes, active-frame rendering, resize handling, terminal writes, queries, controls, and cleanup through the existing TUI runtime owner.
+- Bound append admission to 64 accepted incomplete operations; excess requests receive typed capacity rejection without retaining their component or payload.
 - Validate and sanitize the complete `ComponentRender` before output. Reject cursor placements and Kitty cleanup controls, and keep raw terminal-control encoders private.
-- Remap appended Kitty image IDs to fresh runtime-owned IDs and retain only a bounded ownership ledger so later retained-frame cleanup cannot delete append-only output.
+- Remap appended Kitty image IDs to fresh runtime-owned IDs that exclude retained, ledger, and same-append IDs, and retain only a bounded ownership ledger so later retained-frame cleanup cannot delete append-only output.
 - Place append output above the active live frame, reserve its rows, redraw the retained frame, restore its hardware cursor, and update mouse frame-origin accounting without changing focus, overlays, or retained layout ownership.
+- Reject append while the retained frame contains iTerm2 inline controls because that protocol has no reliable relocation cleanup; appended iTerm2 output itself remains supported.
 - Keep successfully appended controls outside retained-frame replacement, resize retransmission, and shutdown cleanup ownership.
 - Provide typed admission/completion failures and redaction-safe diagnostics. Pre-publication failures emit no append bytes; backend-write failures use normal runtime failure and terminal restoration without claiming rollback.
 - Add shared JVM/Scala Native contract tests, automated PTY byte-order and restoration tests, and documented manual Kitty/iTerm2 emulator smoke coverage.
@@ -24,7 +26,8 @@ Normal-screen terminal applications often need to append rich output above a con
 
 ### Modified Capabilities
 
-None.
+- `component-rendering`: Extend deterministic ordinary-work fairness from five to six categories by adding bounded FIFO append work.
+- `terminal-runtime`: Retain exactly-once append callbacks across stop and finite Cleaning cutoffs while discarding unclaimed append bodies and rejected component references.
 
 ## Impact
 

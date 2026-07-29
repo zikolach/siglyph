@@ -50,6 +50,46 @@ Siglyph SHALL admit append-only output only while a normal-screen TUI with scrol
 - **WHEN** stop begins after append admission but before that append is claimed
 - **THEN** the append SHALL publish nothing, complete once with a stopping rejection in accepted order, and not postpone terminal restoration indefinitely
 
+#### Scenario: Stop wins after append claim
+- **WHEN** stop begins after append claim but before the synchronized publication boundary
+- **THEN** the TUI SHALL publish no append bytes and complete once with `StoppedBeforePublication` after active component code returns and before cleanup
+
+#### Scenario: Retained frame contains iTerm2 inline control
+- **WHEN** append is requested or claimed while the committed retained frame contains an iTerm2 inline image control
+- **THEN** the TUI SHALL reject it with `RetainedITerm2Control` before rendering the append component or emitting output because that retained placement cannot be reliably erased and relocated
+
+### Requirement: Pending append retention is bounded
+Siglyph SHALL admit at most 64 accepted incomplete append operations per TUI and SHALL complete excess requests exactly once through the serialized callback owner without retaining their components or payloads.
+
+#### Scenario: Pending append queue reaches capacity
+- **WHILE** 64 accepted append operations remain incomplete
+- **WHEN** another caller requests append
+- **THEN** the TUI SHALL complete it exactly once with `QueueCapacityExceeded` without enqueueing or retaining its component
+
+#### Scenario: Claim and resize retry retain capacity
+- **WHEN** the owner claims an append or requeues it after resize invalidation
+- **THEN** that incomplete operation SHALL continue occupying one of the 64 slots until its exactly-once completion
+
+#### Scenario: Completion releases capacity
+- **WHEN** an accepted append completes with publication, rejection, or failure
+- **THEN** its capacity slot SHALL be released exactly once and a later compatible request MAY be admitted
+
+#### Scenario: Concurrent capacity race
+- **WHEN** concurrent callers contend for the final pending slot
+- **THEN** exactly one request SHALL acquire that slot and every rejected request SHALL receive exactly one typed capacity completion
+
+#### Scenario: External capacity callback remains serialized
+- **WHEN** capacity rejection occurs on an external caller while another application callback owns the drain
+- **THEN** only a minimal completion record SHALL use existing 4096-slot bounded ingress and its lifecycle-aware backpressure, without retaining the rejected component or running concurrently
+
+#### Scenario: Owner capacity rejection does not self-block
+- **WHEN** append called by the active owner is rejected for capacity
+- **THEN** its callback SHALL run synchronously outside runtime locks without recursively draining or waiting for an ingress slot
+
+#### Scenario: Stop discards pending append bodies
+- **WHEN** stop or runtime failure wins while accepted append operations remain unclaimed
+- **THEN** their component and payload references SHALL be released while only the bounded records needed for ordered completion remain retained
+
 ### Requirement: Append rendering is detached, restricted, and geometry-safe
 Siglyph SHALL render append-only components outside retained component ownership using current session dimensions and a restricted one-shot context.
 
@@ -69,6 +109,22 @@ Siglyph SHALL render append-only components outside retained component ownership
 - **WHEN** context attachment or rendering tries to change focus, overlays, exit state, nested flush state, or retained render scheduling
 - **THEN** the restricted context SHALL fail the append before publication rather than granting lasting UI ownership
 
+#### Scenario: Component catches forbidden-context exception
+- **WHEN** a component catches an exception from a forbidden restricted-context operation and returns a render
+- **THEN** the context SHALL retain an operation-scoped thread-safe violation latch and the TUI SHALL fail the append before publication
+
+#### Scenario: Revoked earlier-attempt context is used during retry
+- **WHEN** asynchronous component code uses a revoked context from an invalidated render attempt while the same append is retrying
+- **THEN** the shared operation latch SHALL record the violation and the later candidate SHALL fail before publication
+
+#### Scenario: Restricted context is revoked before detachment
+- **WHEN** an append render attempt reaches component detachment
+- **THEN** the TUI SHALL permanently revoke the restricted context before invoking `tuiContext_=(None)` so every later context method throws without runtime side effects
+
+#### Scenario: Context detachment throws
+- **WHEN** `tuiContext_=(None)` throws after the restricted context is revoked
+- **THEN** the append SHALL fail before publication, normal fail-fast cleanup SHALL begin, and the context SHALL remain revoked
+
 #### Scenario: Resize invalidates an unpublished candidate
 - **WHEN** resize generation or terminal dimensions change between append render and commit
 - **THEN** the TUI SHALL discard that candidate, keep the append ahead of later appends, and retry without publishing stale bytes
@@ -77,12 +133,20 @@ Siglyph SHALL render append-only components outside retained component ownership
 - **WHEN** one or more unpublished candidates are invalidated by resize
 - **THEN** the component MAY render more than once, exactly one candidate SHALL be published, and the completion callback SHALL run exactly once
 
+#### Scenario: Resize retry yields fairly
+- **WHEN** geometry invalidates an unpublished append candidate
+- **THEN** the TUI SHALL requeue that append ahead of later appends and return to ordinary work selection rather than rerendering it in an owner-local loop
+
 ### Requirement: Append-only output preserves typed terminal authority
 Siglyph SHALL validate and encode append-only `ComponentRender` controls only through the existing private TUI-owned terminal output boundary.
 
 #### Scenario: Typed image control is appended
 - **WHEN** an appended component returns a valid Kitty or iTerm2 image control with matching reserved geometry
 - **THEN** the TUI SHALL encode it at its validated placement without exposing raw protocol bytes to the caller
+
+#### Scenario: Appended iTerm2 control remains one-shot
+- **WHEN** an append component returns a valid iTerm2 image control and the retained frame contains no iTerm2 control
+- **THEN** the TUI SHALL permit the one-shot append even though a retained iTerm2 control would make frame relocation incompatible
 
 #### Scenario: Ordinary text resembles a terminal protocol
 - **WHEN** appended lines contain image, cursor, CSI, OSC, APC, DCS, C0, DEL, or C1-looking data
@@ -131,12 +195,25 @@ Siglyph SHALL serialize append publication and physical live-frame relocation as
 - **WHEN** multiple append operations are admitted concurrently
 - **THEN** each SHALL remain FIFO relative to other appends and publish as one complete operation before the next append
 
+#### Scenario: Append participates in ordinary fairness
+- **WHILE** Append and the other ordinary work categories remain continuously ready
+- **WHEN** the owner selects ordinary work
+- **THEN** append SHALL be selected through the same six-category cycle and SHALL neither starve nor bypass another continuously ready category
+
 ### Requirement: Append-only Kitty identities are remapped and bounded
 Siglyph SHALL isolate successful append-only Kitty controls from retained cleanup by remapping their image IDs and retaining a bounded structural ownership ledger.
 
 #### Scenario: Kitty image is appended
 - **WHEN** a valid append contains a Kitty image control
 - **THEN** the TUI SHALL replace its semantic image ID with a fresh runtime-owned ID before encoding while preserving payload and geometry
+
+#### Scenario: Allocator candidate collides with manually retained ID
+- **WHEN** the next runtime allocator candidate equals an active Kitty ID in the claimed retained frame, including a caller-configured ID
+- **THEN** append planning SHALL skip that candidate and select an ID absent from the retained frame, append ledger, and current append
+
+#### Scenario: One append remaps multiple Kitty images
+- **WHEN** one append contains multiple valid Kitty image controls
+- **THEN** every remapped ID SHALL also exclude IDs selected earlier in that append
 
 #### Scenario: Same component is later rendered elsewhere
 - **WHEN** a component or its original Kitty ID is reused after successful append
@@ -203,3 +280,7 @@ Siglyph SHALL implement append admission, planning, validation, identity ownersh
 #### Scenario: Emulator persistence is checked
 - **WHEN** release validation claims real Kitty or iTerm2 scrollback persistence
 - **THEN** that claim SHALL come from documented manual smoke coverage in those terminal emulators
+
+#### Scenario: Retained iTerm2 incompatibility is smoke-tested
+- **WHEN** manual iTerm2 smoke coverage requests append while the live frame retains an iTerm2 inline control
+- **THEN** it SHALL confirm typed rejection occurs without relocating or otherwise disturbing the visible retained frame
