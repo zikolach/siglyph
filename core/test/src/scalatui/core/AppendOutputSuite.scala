@@ -46,6 +46,15 @@ class AppendOutputSuite extends munit.FunSuite:
     override def clearFromCursor(): Unit                                           = delegate.clearFromCursor()
     override def clearScreen(): Unit                                               = delegate.clearScreen()
 
+  private def awaitWaiting(thread: Thread, description: String): Unit =
+    val deadline = System.currentTimeMillis() + 5000L
+    while (thread.getState !== Thread.State.WAITING) && System.currentTimeMillis() < deadline do
+      Thread.`yield`()
+    assert(
+      thread.getState === Thread.State.WAITING,
+      s"$description did not enter its waiting state before the deadline"
+    )
+
   private def running(
       terminal: VirtualTerminal = VirtualTerminal(20, 8),
       component: Component = Line("live"),
@@ -254,10 +263,7 @@ class AppendOutputSuite extends munit.FunSuite:
     )
     overflow.start()
     assert(overflowStarted.await(1, TimeUnit.SECONDS), "capacity publisher did not start")
-    assert(
-      !overflowDone.await(100, TimeUnit.MILLISECONDS),
-      "capacity rejection did not backpressure on full ingress"
-    )
+    awaitWaiting(overflow, "capacity rejection publisher")
     release.countDown()
     owner.join(5000)
     assert(overflowDone.await(5, TimeUnit.SECONDS), "capacity publisher did not finish")
