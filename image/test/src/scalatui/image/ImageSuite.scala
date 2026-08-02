@@ -2,7 +2,15 @@ package scalatui.image
 
 import scalatui.ansi.Ansi
 import scalatui.components.Box
-import scalatui.core.{Component, Container, OverlayOptions, TUI}
+import scalatui.core.{
+  AppendResult,
+  Component,
+  Container,
+  NormalResizeClearPolicy,
+  OverlayOptions,
+  TUI,
+  TUIOptions
+}
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{
   Base64ImagePayload,
@@ -139,6 +147,29 @@ class ImageSuite extends munit.FunSuite:
 
     assertEquals(direct.render(1).lines.length, 2)
     assertEquals(nested.render(1).lines.length, 2)
+
+  test("detached append image uses owning TUI cell dimensions and component capabilities"):
+    val retained = new Component:
+      override def render(width: Int): scalatui.core.ComponentRender =
+        scalatui.core.ComponentRender.text("live")
+    val image    = runtimeImage()
+    val terminal = VirtualTerminal(10, 10)
+    val tui      = TUI(
+      terminal,
+      TUIOptions(normalResizeClearPolicy = NormalResizeClearPolicy.PreserveScrollback)
+    )
+    tui.addChild(retained)
+    tui.start()
+    sendCellDimensions(terminal, "\u001b[6;10;20t")
+    terminal.clearWrites()
+    var result   = Option.empty[AppendResult]
+
+    tui.appendToScrollback(image, value => result = Some(value))
+
+    assertEquals(result, Some(AppendResult.Published(2, 1)))
+    assert(terminal.output.contains("\u001b_Ga=T"), terminal.output)
+    assertEquals(image.render(1).lines.length, 1)
+    tui.stop()
 
   test("runtime image sizing follows overlay context and returns to fallback after detach"):
     val overlayImage = runtimeImage()

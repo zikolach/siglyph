@@ -146,6 +146,34 @@ alternative that clears only the viewport on normal-screen resize. It may leave 
 stale rows, so full clearing remains the default. Instance-scoped, redacted lifecycle/write/resize
 diagnostics are also opt-in; see [`docs/runtime-diagnostics.md`](docs/runtime-diagnostics.md).
 
+The same opt-in policy enables typed append-only output above the retained live frame:
+
+```scala
+import scalatui.components.Text
+import scalatui.core.{AppendResult, NormalResizeClearPolicy, TUI, TUIOptions}
+
+val tui = TUI(terminal, TUIOptions(
+  normalResizeClearPolicy = NormalResizeClearPolicy.PreserveScrollback
+))
+
+tui.appendToScrollback(Text("completed output", paddingX = 0)) {
+  case AppendResult.Published(rows, controls) =>
+    println(s"published $rows rows and $controls controls")
+  case AppendResult.Rejected(reason) =>
+    System.err.println(s"append rejected: $reason")
+  case AppendResult.Failed(cause) =>
+    System.err.println(s"append failed: ${cause.getClass.getSimpleName}")
+}
+```
+
+`appendToScrollback` accepts one detached, one-shot component only after a normal-screen live frame
+has been committed. It validates and encodes typed controls through the TUI-owned output boundary,
+redraws the retained frame below the appended rows, and invokes its callback exactly once. At most
+64 operations may remain incomplete. Cursor placements and Kitty cleanup are rejected. Kitty image
+IDs are remapped so retained cleanup cannot remove historical output. A retained iTerm2 image makes
+append incompatible because iTerm2 provides no reliable relocation cleanup; one-shot appended
+iTerm2 images remain supported. Real image persistence depends on the terminal emulator.
+
 Applications that need a full-screen terminal experience can opt into alternate-screen mode:
 
 ```scala

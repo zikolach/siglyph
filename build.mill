@@ -33,7 +33,27 @@ trait SiglyphPublishModule extends SiglyphModule with PublishModule {
   def pomSettings = siglyphPomSettings
 }
 
-trait SiglyphNativePublishModule extends ScalaNativeModule with PublishModule {
+trait SiglyphNativeToolchain extends ScalaNativeModule {
+  override def nativeClang = Task.Input {
+    Task.env.get("SIGLYPH_NATIVE_CLANG")
+      .filter(_.nonEmpty)
+      .map(path => PathRef(os.Path(path)))
+      .getOrElse(PathRef(os.Path(
+        os.proc("sh", "-c", "command -v clang").call().out.text().trim
+      )))
+  }
+
+  override def nativeClangPP = Task.Input {
+    Task.env.get("SIGLYPH_NATIVE_CLANGPP")
+      .filter(_.nonEmpty)
+      .map(path => PathRef(os.Path(path)))
+      .getOrElse(PathRef(os.Path(
+        os.proc("sh", "-c", "command -v clang++").call().out.text().trim
+      )))
+  }
+}
+
+trait SiglyphNativePublishModule extends SiglyphNativeToolchain with PublishModule {
   def scalaVersion       = "3.7.4"
   def scalaNativeVersion = "0.5.12"
   def publishVersion     = Task.Input { siglyphVersion(Task.env) }
@@ -124,7 +144,7 @@ object coreNative extends SiglyphNativePublishModule {
   def artifactName = "siglyph-core"
   def sources      = Task.Sources(workspaceRoot / "core" / "src")
 
-  object test extends ScalaNativeTests {
+  object test extends ScalaNativeTests with SiglyphNativeToolchain {
     def sources       = Task.Sources(workspaceRoot / "core" / "test" / "src")
     def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
     def testFramework = "munit.Framework"
@@ -135,7 +155,7 @@ object terminalNative extends SiglyphNativePublishModule {
   def artifactName = "siglyph-terminal-native"
   def moduleDeps   = Seq(coreNative)
 
-  object test extends ScalaNativeTests {
+  object test extends ScalaNativeTests with SiglyphNativeToolchain {
     def sources       = Task.Sources(workspaceRoot / "terminalNative" / "test" / "src")
     def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
     def testFramework = "munit.Framework"
@@ -157,7 +177,7 @@ object markdownNative extends SiglyphNativePublishModule {
   def moduleDeps   = Seq(coreNative)
   def sources      = Task.Sources(workspaceRoot / "markdown" / "src")
 
-  object test extends ScalaNativeTests {
+  object test extends ScalaNativeTests with SiglyphNativeToolchain {
     def sources       = Task.Sources(workspaceRoot / "markdown" / "test" / "src")
     def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
     def testFramework = "munit.Framework"
@@ -179,7 +199,7 @@ object imageNative extends SiglyphNativePublishModule {
   def moduleDeps   = Seq(coreNative)
   def sources      = Task.Sources(workspaceRoot / "image" / "src")
 
-  object test extends ScalaNativeTests {
+  object test extends ScalaNativeTests with SiglyphNativeToolchain {
     def sources       = Task.Sources(workspaceRoot / "image" / "test" / "src")
     def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
     def testFramework = "munit.Framework"
@@ -201,7 +221,7 @@ object extrasNative extends SiglyphNativePublishModule {
   def moduleDeps   = Seq(coreNative)
   def sources      = Task.Sources(workspaceRoot / "extras" / "src")
 
-  object test extends ScalaNativeTests {
+  object test extends ScalaNativeTests with SiglyphNativeToolchain {
     def sources       = Task.Sources(workspaceRoot / "extras" / "test" / "src")
     def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
     def testFramework = "munit.Framework"
@@ -229,13 +249,13 @@ object interactiveDemo extends SiglyphModule {
   }
 }
 
-object interactiveDemoNative extends ScalaNativeModule {
+object interactiveDemoNative extends SiglyphNativeToolchain {
   def scalaVersion       = "3.7.4"
   def scalaNativeVersion = "0.5.12"
   def moduleDeps         = Seq(coreNative)
   def sources            = Task.Sources(workspaceRoot / "interactiveDemo" / "src")
 
-  object test extends ScalaNativeTests {
+  object test extends ScalaNativeTests with SiglyphNativeToolchain {
     def sources       = Task.Sources(workspaceRoot / "interactiveDemo" / "test" / "src")
     def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
     def testFramework = "munit.Framework"
@@ -246,7 +266,7 @@ object interactiveJvmDemo extends SiglyphModule {
   def moduleDeps = Seq(terminalJvm, interactiveDemo)
 }
 
-object interactiveNativeDemo extends ScalaNativeModule {
+object interactiveNativeDemo extends SiglyphNativeToolchain {
   def scalaVersion       = "3.7.4"
   def scalaNativeVersion = "0.5.12"
   def moduleDeps         = Seq(terminalNative, interactiveDemoNative)

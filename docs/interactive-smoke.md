@@ -51,12 +51,37 @@ Expected behavior:
 Autocomplete and select command defaults can be overridden via `EditorOptions.keybindings` (via `KeybindingManager`).
 See `docs/keybinding-defaults.md` for the complete default map, ambiguity notes, and unsupported terminal encodings.
 
+## Append-only image smoke checks
+
+Use a small normal-screen application configured with
+`NormalResizeClearPolicy.PreserveScrollback`, one retained text/input frame, and detached text,
+Kitty-image, and iTerm2-image components passed to `appendToScrollback`.
+
+- In Kitty, append text and a Kitty image, resize repeatedly, continue editing the retained frame,
+  and exit. Confirm appended rows remain in scrollback, the live frame redraws below them, and exit
+  restores cursor and terminal modes.
+- In iTerm2, append text and a one-shot iTerm2 image and perform the same resize/live-render/exit
+  checks. This is emulator smoke coverage; a raw PTY cannot prove image persistence.
+- Render an iTerm2 image in the retained live frame, then request append. Confirm the callback
+  returns `RetainedITerm2Control`, no append bytes are emitted, and the visible retained image/frame
+  is not relocated or disturbed.
+- Confirm cursor placements and Kitty cleanup controls fail before output and terminal state is
+  restored through normal fail-fast cleanup.
+
 ## Scala Native interactive demo
 
 Build:
 
 ```bash
 mill interactiveNativeDemo.nativeLink
+```
+
+Scala Native requires Clang 16 or newer for reliable multithreaded module initialization. When the
+system `clang` is older, point every Native module and test at a newer installation:
+
+```bash
+export SIGLYPH_NATIVE_CLANG=/path/to/llvm/bin/clang
+export SIGLYPH_NATIVE_CLANGPP=/path/to/llvm/bin/clang++
 ```
 
 Run the linked binary from Mill's output directory in an interactive terminal. Optional flags are passed after the binary path.

@@ -28,7 +28,7 @@ case "$(uname -s)" in
     script -q -e -c "SIGLYPH_PTY_TEST=1 mill --no-daemon $test_target" /dev/null
     ;;
   Darwin)
-    script -q -e /dev/null env SIGLYPH_PTY_TEST=1 mill --no-daemon \
+    script -q /dev/null env SIGLYPH_PTY_TEST=1 mill --no-daemon \
       terminalJvm.test.testOnly scalatui.terminal.jvm.SttyTerminalPtySuite
     ;;
   *)

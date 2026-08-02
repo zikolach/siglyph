@@ -28,6 +28,15 @@ enum TUIDiagnosticRedrawKind derives CanEqual:
 enum TUIDiagnosticClearReason derives CanEqual:
   case Initial, Resize
 
+/** Bounded append-only output outcome used by redacted diagnostics. */
+enum TUIDiagnosticAppendOutcome derives CanEqual:
+  case Published, Rejected, Failed
+
+/** Bounded append-only failure category that never retains exception text. */
+enum TUIDiagnosticAppendFailure derives CanEqual:
+  case Lifecycle, ScreenMode, ResizePolicy, FrameUnavailable, AttachedComponent, Capacity,
+    RetainedITerm2, Stopped, Context, Render, Validation, Identity, Planning, Write, Callback
+
 /**
  * Redacted, backend-independent terminal runtime diagnostics.
  *
@@ -48,6 +57,14 @@ enum TUIDiagnosticEvent derives CanEqual:
       screenMode: TUIScreenMode
   )
   case Write(kind: TUIDiagnosticWriteKind, byteCount: Int)
+  case Append(
+      outcome: TUIDiagnosticAppendOutcome,
+      failure: Option[TUIDiagnosticAppendFailure],
+      rowCount: Int,
+      controlCount: Int,
+      screenMode: TUIScreenMode,
+      resizeGeneration: Long
+  )
 
 /**
  * Opt-in observer for one TUI runtime's redacted diagnostic events.

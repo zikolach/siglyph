@@ -104,6 +104,16 @@ object TerminalRenderControl:
     require(imageId.forall(_ > 0), "Kitty cleanup image ID must be positive")
     new TerminalRenderControl(Details.KittyCleanup(imageId))
 
+  /** Copy a Kitty image control with a runtime-owned semantic ID. */
+  private[scalatui] def remapKittyImage(
+      control: TerminalRenderControl,
+      imageId: Int
+  ): TerminalRenderControl = control.details match
+    case kitty: Details.KittyImage =>
+      kittyImage(kitty.payload, imageId, kitty.widthCells, kitty.heightCells)
+    case _                         =>
+      throw IllegalArgumentException("Only Kitty image controls can be remapped")
+
   /** Return the typed cleanup required before an old control placement is replaced or removed. */
   private[scalatui] def cleanupForReplacement(
       control: TerminalRenderControl
