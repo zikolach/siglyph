@@ -1,7 +1,7 @@
 # Runtime diagnostics and resize clearing
 
 `TUIOptions.diagnosticObserver` enables structured diagnostics for one TUI instance. The observer
-receives lifecycle, resize, redraw, and terminal-write metadata in runtime order. Events expose
+receives lifecycle, resize, redraw, append-outcome, and terminal-write metadata in runtime order. Events expose
 only enums, terminal/frame geometry, resize generations, row indexes, and output byte counts. They
 do not include application text, image payloads, raw terminal-query replies, or output bytes.
 
@@ -16,3 +16,8 @@ full-clear sequence: clear the viewport, home the cursor, and clear scrollback. 
 This retains shell history where the terminal supports it, but a terminal with unusual viewport
 semantics may briefly show stale rows. Alternate-screen resize behavior is unchanged and never
 clears normal-screen scrollback.
+
+Append diagnostics expose only bounded outcome/failure categories, row and control counts, screen
+mode, and resize generation. They never retain component text, exception messages, image payloads,
+filenames, encoded controls, remapped image IDs, or terminal-write contents. The application-owned
+append callback separately receives its typed result.

@@ -58,8 +58,8 @@ enum TUIScreenMode derives CanEqual:
  *   because terminal mouse reporting can affect normal text selection.
  * @param normalResizeClearPolicy
  *   Normal-screen dimension-change policy. The default clears viewport and scrollback for legacy
- *   redraw behavior; preserving scrollback clears and homes only the active viewport. Alternate
- *   screen redraw behavior is unchanged.
+ *   redraw behavior; preserving scrollback clears and homes only the active viewport and is
+ *   required by [[TUI.appendToScrollback]]. Alternate-screen redraw behavior is unchanged.
  * @param diagnosticObserver
  *   Optional instance-scoped observer for redacted structured runtime metadata. Observer failures
  *   are contained and permanently disable that observer without preventing terminal cleanup.
@@ -80,16 +80,24 @@ final case class TUIOptions(
 final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     extends TUIContext,
       OverlayHost:
-  private val root                            = Container()
-  private val lifecycleLock                   = Object()
-  private val terminalWriteLock               = Object()
-  private val diagnosticLock                  = Object()
-  private val overlayStack                    = ArrayBuffer.empty[TUI.OverlayEntry]
-  private val pendingIngress                  = scala.collection.mutable.ArrayDeque.empty[TUI.Ingress]
-  private var replayContinuation              = Option.empty[TUI.ReplayContinuation]
-  private val retainedQueryCompletions        = ArrayBuffer.empty[TUI.QueryCompletion[?]]
-  private val postRestorationQueryCompletions = ArrayBuffer.empty[TUI.QueryCompletion[?]]
-  private var postRestorationCutoff           = false
+  private val root                             = Container()
+  private val lifecycleLock                    = Object()
+  private val terminalWriteLock                = Object()
+  private val diagnosticLock                   = Object()
+  private val overlayStack                     = ArrayBuffer.empty[TUI.OverlayEntry]
+  private val pendingIngress                   = scala.collection.mutable.ArrayDeque.empty[TUI.Ingress]
+  private var replayContinuation               = Option.empty[TUI.ReplayContinuation]
+  private val retainedQueryCompletions         = ArrayBuffer.empty[TUI.QueryCompletion[?]]
+  private val postRestorationQueryCompletions  = ArrayBuffer.empty[TUI.QueryCompletion[?]]
+  private val pendingAppendCompletions         = ArrayBuffer.empty[TUI.AppendCompletion]
+  private val retainedAppendCompletions        = ArrayBuffer.empty[TUI.AppendCompletion]
+  private val postRestorationAppendCompletions = ArrayBuffer.empty[TUI.AppendCompletion]
+  private val pendingAppends                   = ArrayBuffer.empty[TUI.AppendOperation]
+  private val appendOwnedKittyIds              = scala.collection.mutable.HashSet.empty[Int]
+  private var acceptedIncompleteAppends        = 0
+  private var nextAppendId                     = 0L
+  private var activeAppend                     = Option.empty[TUI.AppendOperation]
+  private var postRestorationCutoff            = false
 
   private val pendingActions                          = ArrayBuffer.empty[() => Unit]
   private val pendingControlOutput                    = ArrayBuffer.empty[() => Unit]
@@ -100,6 +108,8 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
   private var lifecycleState: TUI.LifecycleState      = TUI.LifecycleState.Stopped
   private var startupOwner                            = false
   private var drainOwned                              = false
+  private val drainOwnerMarker                        = new ThreadLocal[Boolean]:
+    override def initialValue(): Boolean = false
   private var lastOrdinaryCategory                    = TUI.OrdinaryCategory.Render
   private var cleanupOwned                            = false
   private var resizeGeneration                        = 0L
@@ -456,6 +466,121 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     }
 
   override def flushRender(): Unit = drainOrReturn()
+
+  /**
+   * Append one detached component above the retained normal-screen frame.
+   *
+   * Admission requires a running normal-screen TUI configured with
+   * [[NormalResizeClearPolicy.PreserveScrollback]] and a committed frame. The callback is invoked
+   * exactly once through the serialized runtime owner and may run before this method returns when
+   * draining is uncontended. Reentrant and concurrent [[flushRender]] calls remain non-waiting;
+   * applications use this callback as the operation-completion boundary.
+   */
+  def appendToScrollback(
+      component: Component,
+      onComplete: AppendResult => Unit = _ => ()
+  ): Unit =
+    val publication = lifecycleLock.synchronized {
+      nextAppendId += 1
+      val requestId = nextAppendId
+      appendAdmissionRejectionLocked(component) match
+        case Some(reason) =>
+          val completion = TUI.AppendCompletion(
+            onComplete,
+            AppendResult.Rejected(reason),
+            Some(requestId),
+            TUIDiagnosticAppendOutcome.Rejected,
+            Some(diagnosticFailure(reason)),
+            rowCount = 0,
+            controlCount = 0
+          )
+          if drainOwnerMarker.get() then
+            TUI.AppendPublication.Direct(completion)
+          else
+            while acceptsIngress && pendingIngress.length >= TUI.IngressCapacity do
+              lifecycleLock.wait()
+            if acceptsIngress then pendingIngress += TUI.Ingress.AppendCompletion(completion)
+            else queueAppendCompletionLocked(completion)
+            val own = !drainOwned && !startupOwner
+            if own then drainOwned = true
+            TUI.AppendPublication.Queued(own)
+        case None         =>
+          val operation = TUI.AppendOperation(
+            requestId,
+            component,
+            onComplete,
+            TUI.AppendViolationLatch()
+          )
+          pendingAppends += operation
+          acceptedIncompleteAppends += 1
+          TUI.AppendPublication.Queued(own = false)
+    }
+    publication match
+      case TUI.AppendPublication.Direct(completion) => processAppendCompletion(completion)
+      case TUI.AppendPublication.Queued(true)       => drainWork(propagateCleanupFailure = false)
+      case TUI.AppendPublication.Queued(false)      => drainOrReturn()
+  private def appendAdmissionRejectionLocked(component: Component): Option[AppendRejection] =
+    if lifecycleState !== TUI.LifecycleState.Running then
+      Some(AppendRejection.LifecycleUnavailable(diagnosticLifecycleState(lifecycleState)))
+    else if isAlternateScreenMode then Some(AppendRejection.AlternateScreen)
+    else if options.normalResizeClearPolicy !== NormalResizeClearPolicy.PreserveScrollback then
+      Some(AppendRejection.ScrollbackClearingResizePolicy)
+    else if previousFrame.isEmpty then Some(AppendRejection.NoCommittedFrame)
+    else if retainedFrameContainsITerm2(previousFrame.get) then
+      Some(AppendRejection.RetainedITerm2Control)
+    else if isAttachedForAppend(component) then Some(AppendRejection.AttachedComponent)
+    else if acceptedIncompleteAppends >= TUI.AppendCapacity then
+      Some(AppendRejection.QueueCapacityExceeded)
+    else None
+
+  private def diagnosticLifecycleState(
+      state: TUI.LifecycleState
+  ): TUIDiagnosticLifecycleState = state match
+    case TUI.LifecycleState.Starting => TUIDiagnosticLifecycleState.Starting
+    case TUI.LifecycleState.Running  => TUIDiagnosticLifecycleState.Running
+    case TUI.LifecycleState.Stopping => TUIDiagnosticLifecycleState.Stopping
+    case TUI.LifecycleState.Cleaning => TUIDiagnosticLifecycleState.Cleaning
+    case TUI.LifecycleState.Stopped  => TUIDiagnosticLifecycleState.Stopped
+
+  private def queueAppendCompletionLocked(completion: TUI.AppendCompletion): Unit =
+    lifecycleState match
+      case TUI.LifecycleState.Cleaning =>
+        if postRestorationCutoff then retainedAppendCompletions += completion
+        else postRestorationAppendCompletions += completion
+      case TUI.LifecycleState.Stopping =>
+        val index = completion.order.flatMap(order =>
+          retainedAppendCompletions.indexWhere(_.order.exists(_ > order)) match
+            case -1    => None
+            case value => Some(value)
+        )
+        index.fold(retainedAppendCompletions += completion)(
+          retainedAppendCompletions.insert(_, completion)
+        )
+      case _                           => pendingAppendCompletions += completion
+
+  private def queueAcceptedAppendCompletionLocked(completion: TUI.AppendCompletion): Unit =
+    if lifecycleState === TUI.LifecycleState.Stopping then
+      val index = retainedAppendCompletions.indexWhere(existing =>
+        existing.order.exists(_ > completion.order.get)
+      )
+      if index < 0 then retainedAppendCompletions += completion
+      else retainedAppendCompletions.insert(index, completion)
+    else queueAppendCompletionLocked(completion)
+
+  private def isAttachedForAppend(component: Component): Boolean =
+    committedChildren.exists(_.component eq component) ||
+      desiredChildren.exists(_.component eq component) ||
+      overlayStack.exists(_.component eq component) ||
+      latestBaseLayout.exists(layoutContainsComponent(_, component)) ||
+      latestOverlayLayouts.exists(layout => layoutContainsComponent(layout.node, component))
+
+  private def layoutContainsComponent(node: LayoutNode, component: Component): Boolean =
+    (node.component eq component) || node.children.exists(layoutContainsComponent(_, component))
+
+  private def retainedFrameContainsITerm2(frame: TUI.PreparedFrame): Boolean =
+    frame.controls.exists(_.control.details match
+      case _: scalatui.terminal.TerminalRenderControlDetails.ITerm2Image => true
+      case _                                                             => false)
 
   private def handleInput(input: TerminalInput): Unit =
     if isMouseInputDisabled(input) then ()
@@ -825,6 +950,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     if own then drainWork(propagateCleanupFailure)
 
   private def drainWork(propagateCleanupFailure: Boolean): Unit =
+    drainOwnerMarker.set(true)
     var continue               = true
     var completed              = false
     var deferredCleanupFailure = Option.empty[Throwable]
@@ -833,6 +959,10 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         val work = lifecycleLock.synchronized {
           if retainedQueryCompletions.nonEmpty then
             TUI.Work.QueryCompletion(retainedQueryCompletions.remove(0))
+          else if retainedAppendCompletions.nonEmpty then
+            TUI.Work.AppendCompletion(retainedAppendCompletions.remove(0))
+          else if pendingAppendCompletions.nonEmpty then
+            TUI.Work.AppendCompletion(pendingAppendCompletions.remove(0))
           else if lifecycleState === TUI.LifecycleState.Stopping then
             if pendingControlOutput.nonEmpty then
               TUI.Work.Control(pendingControlOutput.remove(0))
@@ -848,21 +978,23 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
             TUI.Work.Done
         }
         work match
-          case TUI.Work.Ingress(ingress)            => processIngress(ingress)
-          case TUI.Work.QueryCompletion(completion) => processQueryCompletion(completion)
-          case TUI.Work.Structural(claimed)         => applyStructural(claimed)
-          case TUI.Work.Action(action)              =>
+          case TUI.Work.Ingress(ingress)             => processIngress(ingress)
+          case TUI.Work.QueryCompletion(completion)  => processQueryCompletion(completion)
+          case TUI.Work.AppendCompletion(completion) => processAppendCompletion(completion)
+          case TUI.Work.Structural(claimed)          => applyStructural(claimed)
+          case TUI.Work.Action(action)               =>
             try action()
             catch case error: Throwable => recordFailure(error)
-          case TUI.Work.Control(action)             => action()
-          case TUI.Work.Render(force, clear)        => renderNow(force, clear)
-          case TUI.Work.Cleanup                     =>
+          case TUI.Work.Control(action)              => action()
+          case TUI.Work.Append(operation)            => processAppend(operation)
+          case TUI.Work.Render(force, clear)         => renderNow(force, clear)
+          case TUI.Work.Cleanup                      =>
             emitDiagnostic(TUIDiagnosticEvent.Lifecycle(
               TUIDiagnosticLifecycleState.Cleaning,
               options.screenMode
             ))
             deferredCleanupFailure = cleanup()
-          case TUI.Work.Done                        => continue = false
+          case TUI.Work.Done                         => continue = false
       completed = true
     catch
       case e: Throwable =>
@@ -871,12 +1003,17 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         finishDeferredCleanupIfNeeded()
     if completed then
       deferredCleanupFailure.foreach { error =>
-        if propagateCleanupFailure then throw error
+        if propagateCleanupFailure then
+          drainOwnerMarker.set(false)
+          throw error
         else recordFailure(error)
       }
+    drainOwnerMarker.set(false)
 
   private def processIngress(ingress: TUI.Ingress): Unit = ingress match
     case TUI.Ingress.Input(input)                         => handleInput(input)
+    case TUI.Ingress.AppendCompletion(completion)         =>
+      processAppendCompletion(completion)
     case TUI.Ingress.Protocol(completions, notifications) =>
       completions.foreach(processQueryCompletion)
       val running = lifecycleLock.synchronized {
@@ -898,6 +1035,265 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         lifecycleLock.synchronized {
           completion.subscriber.state = TUI.QuerySubscriberState.Completed
         }
+
+  private def processAppendCompletion(completion: TUI.AppendCompletion): Unit =
+    emitAppendDiagnostic(
+      completion.outcome,
+      completion.failure,
+      completion.rowCount,
+      completion.controlCount
+    )
+    try completion.callback(completion.result)
+    catch
+      case error: Throwable =>
+        emitAppendDiagnostic(
+          TUIDiagnosticAppendOutcome.Failed,
+          Some(TUIDiagnosticAppendFailure.Callback),
+          0,
+          0
+        )
+        recordFailure(error)
+
+  private def processAppend(operation: TUI.AppendOperation): Unit =
+    val width    = positiveDimension(terminal.columns)
+    val height   = positiveDimension(terminal.rows)
+    val snapshot = lifecycleLock.synchronized {
+      if lifecycleState !== TUI.LifecycleState.Running then
+        Left(AppendRejection.StoppedBeforePublication)
+      else
+        previousFrame match
+          case None                                                => Left(AppendRejection.NoCommittedFrame)
+          case Some(frame) if retainedFrameContainsITerm2(frame)   =>
+            Left(AppendRejection.RetainedITerm2Control)
+          case Some(_) if isAttachedForAppend(operation.component) =>
+            Left(AppendRejection.AttachedComponent)
+          case Some(frame)                                         => Right(TUI.AppendSnapshot(
+              resizeGeneration,
+              width,
+              height,
+              frame,
+              currentImageCellDimensions
+            ))
+    }
+    snapshot match
+      case Left(reason) => finishAppendRejected(operation, reason)
+      case Right(value) =>
+        var failureCategory = TUIDiagnosticAppendFailure.Render
+        try
+          operation.violation.failure.foreach(throw _)
+          val rendered  = renderAppendCandidate(operation, value)
+          failureCategory = TUIDiagnosticAppendFailure.Identity
+          val remapped  = remapAppendKittyControls(rendered, value.frame)
+          failureCategory = TUIDiagnosticAppendFailure.Planning
+          val candidate = prepareFrame(remapped, value.width)
+          val decision  = lifecycleLock.synchronized {
+            val currentWidth  = positiveDimension(terminal.columns)
+            val currentHeight = positiveDimension(terminal.rows)
+            if lifecycleState !== TUI.LifecycleState.Running then
+              TUI.AppendCommitDecision.Reject(AppendRejection.StoppedBeforePublication)
+            else if (resizeGeneration !== value.generation) ||
+              (currentWidth !== value.width) || (currentHeight !== value.height)
+            then
+              activeAppend = None
+              pendingAppends.prepend(operation)
+              TUI.AppendCommitDecision.Retry
+            else if previousFrame.exists(retainedFrameContainsITerm2) then
+              TUI.AppendCommitDecision.Reject(AppendRejection.RetainedITerm2Control)
+            else
+              operation.violation.claimPublication() match
+                case Some(error) => TUI.AppendCommitDecision.Fail(error)
+                case None        => TUI.AppendCommitDecision.Publish
+          }
+          decision match
+            case TUI.AppendCommitDecision.Retry          => ()
+            case TUI.AppendCommitDecision.Reject(reason) => finishAppendRejected(operation, reason)
+            case TUI.AppendCommitDecision.Fail(error)    => throw error
+            case TUI.AppendCommitDecision.Publish        =>
+              failureCategory = TUIDiagnosticAppendFailure.Write
+              publishAppend(candidate, value.frame, value.height)
+              val remappedIds = candidate.controls.flatMap(kittyImageId)
+              lifecycleLock.synchronized { appendOwnedKittyIds ++= remappedIds }
+              finishAppend(
+                operation,
+                AppendResult.Published(candidate.lines.length, candidate.controls.length),
+                TUIDiagnosticAppendOutcome.Published,
+                None,
+                candidate.lines.length,
+                candidate.controls.length
+              )
+        catch
+          case error: Throwable =>
+            val (cause, category) = error match
+              case classified: TUI.AppendClassifiedFailure =>
+                classified.original -> classified.category
+              case other                                   =>
+                other -> classifyAppendFailure(other, failureCategory)
+            finishAppend(
+              operation,
+              AppendResult.Failed(cause),
+              TUIDiagnosticAppendOutcome.Failed,
+              Some(category),
+              0,
+              0
+            )
+            recordFailure(cause)
+
+  private def renderAppendCandidate(
+      operation: TUI.AppendOperation,
+      snapshot: TUI.AppendSnapshot
+  ): ComponentRender =
+    operation.violation.failure.foreach(throw _)
+    operation.component match
+      case contextual: ContextualComponent =>
+        val context         = TUI.RestrictedAppendContext(snapshot.cellDimensions, operation.violation)
+        var result          = Option.empty[ComponentRender]
+        var failure         = Option.empty[Throwable]
+        var failureCategory = TUIDiagnosticAppendFailure.Context
+        try
+          contextual.tuiContext_=(Some(context))
+          failureCategory = TUIDiagnosticAppendFailure.Render
+          val rendered = operation.component.render(snapshot.width)
+          failureCategory = TUIDiagnosticAppendFailure.Validation
+          result = Some(rendered.validated(snapshot.width))
+        catch case error: Throwable => failure = Some(error)
+        finally
+          context.revoke()
+          try contextual.tuiContext_=(None)
+          catch
+            case detachFailure: Throwable => failure match
+                case Some(first) => first.addSuppressed(detachFailure)
+                case None        =>
+                  failure = Some(detachFailure)
+                  failureCategory = TUIDiagnosticAppendFailure.Context
+        failure.foreach(error => throw TUI.AppendClassifiedFailure(error, failureCategory))
+        operation.violation.failure.foreach(throw _)
+        try validateAppendMetadata(result.get)
+        catch
+          case error: Throwable =>
+            throw TUI.AppendClassifiedFailure(error, TUIDiagnosticAppendFailure.Validation)
+      case _                               =>
+        val rendered =
+          try operation.component.render(snapshot.width)
+          catch
+            case error: Throwable =>
+              throw TUI.AppendClassifiedFailure(error, TUIDiagnosticAppendFailure.Render)
+        val result   =
+          try rendered.validated(snapshot.width)
+          catch
+            case error: Throwable =>
+              throw TUI.AppendClassifiedFailure(error, TUIDiagnosticAppendFailure.Validation)
+        operation.violation.failure.foreach(throw _)
+        try validateAppendMetadata(result)
+        catch
+          case error: Throwable =>
+            throw TUI.AppendClassifiedFailure(error, TUIDiagnosticAppendFailure.Validation)
+
+  private def validateAppendMetadata(render: ComponentRender): ComponentRender =
+    if render.cursorPlacements.nonEmpty then
+      throw IllegalArgumentException("Append-only output cannot contain cursor placements")
+    if render.controls.exists(_.control.details match
+        case _: scalatui.terminal.TerminalRenderControlDetails.KittyCleanup => true
+        case _                                                              => false)
+    then throw IllegalArgumentException("Append-only output cannot contain Kitty cleanup controls")
+    render
+
+  private def remapAppendKittyControls(
+      render: ComponentRender,
+      retainedFrame: TUI.PreparedFrame
+  ): ComponentRender =
+    val kittyCount = render.controls.count(kittyImageId(_).nonEmpty)
+    if appendOwnedKittyIds.size + kittyCount > TUI.AppendKittyLedgerCapacity then
+      throw IllegalStateException("Append-only Kitty image ownership capacity exceeded")
+    val excluded   = scala.collection.mutable.HashSet.empty[Int]
+    excluded ++= appendOwnedKittyIds
+    excluded ++= retainedFrame.controls.flatMap(kittyImageId)
+    val controls   = render.controls.map { placement =>
+      placement.control.details match
+        case _: scalatui.terminal.TerminalRenderControlDetails.KittyImage =>
+          var imageId = TerminalImageProtocol.allocateImageId()
+          while excluded(imageId) do imageId = TerminalImageProtocol.allocateImageId()
+          excluded += imageId
+          placement.copy(control =
+            TerminalRenderControl.remapKittyImage(
+              placement.control,
+              imageId
+            )
+          )
+        case _                                                            => placement
+    }
+    render.copy(controls = controls)
+
+  private def finishAppendRejected(
+      operation: TUI.AppendOperation,
+      reason: AppendRejection
+  ): Unit =
+    finishAppend(
+      operation,
+      AppendResult.Rejected(reason),
+      TUIDiagnosticAppendOutcome.Rejected,
+      Some(diagnosticFailure(reason)),
+      0,
+      0
+    )
+
+  private def finishAppend(
+      operation: TUI.AppendOperation,
+      result: AppendResult,
+      outcome: TUIDiagnosticAppendOutcome,
+      failure: Option[TUIDiagnosticAppendFailure],
+      rowCount: Int,
+      controlCount: Int
+  ): Unit =
+    lifecycleLock.synchronized {
+      if activeAppend.exists(_.id === operation.id) then activeAppend = None
+      require(acceptedIncompleteAppends > 0)
+      acceptedIncompleteAppends -= 1
+      queueAcceptedAppendCompletionLocked(TUI.AppendCompletion(
+        operation.callback,
+        result,
+        Some(operation.id),
+        outcome,
+        failure,
+        rowCount,
+        controlCount
+      ))
+    }
+
+  private def classifyAppendFailure(
+      error: Throwable,
+      stage: TUIDiagnosticAppendFailure
+  ): TUIDiagnosticAppendFailure =
+    error match
+      case _: IllegalArgumentException   => TUIDiagnosticAppendFailure.Validation
+      case _: TUI.AppendContextViolation => TUIDiagnosticAppendFailure.Context
+      case _                             => stage
+
+  private def diagnosticFailure(reason: AppendRejection): TUIDiagnosticAppendFailure = reason match
+    case AppendRejection.LifecycleUnavailable(_)                                       => TUIDiagnosticAppendFailure.Lifecycle
+    case AppendRejection.AlternateScreen                                               => TUIDiagnosticAppendFailure.ScreenMode
+    case AppendRejection.ScrollbackClearingResizePolicy                                =>
+      TUIDiagnosticAppendFailure.ResizePolicy
+    case AppendRejection.NoCommittedFrame                                              => TUIDiagnosticAppendFailure.FrameUnavailable
+    case AppendRejection.AttachedComponent                                             => TUIDiagnosticAppendFailure.AttachedComponent
+    case AppendRejection.QueueCapacityExceeded                                         => TUIDiagnosticAppendFailure.Capacity
+    case AppendRejection.RetainedITerm2Control                                         => TUIDiagnosticAppendFailure.RetainedITerm2
+    case AppendRejection.StoppedBeforeClaim | AppendRejection.StoppedBeforePublication =>
+      TUIDiagnosticAppendFailure.Stopped
+
+  private def emitAppendDiagnostic(
+      outcome: TUIDiagnosticAppendOutcome,
+      failure: Option[TUIDiagnosticAppendFailure],
+      rowCount: Int,
+      controlCount: Int
+  ): Unit =
+    emitDiagnostic(TUIDiagnosticEvent.Append(
+      outcome,
+      failure,
+      rowCount,
+      controlCount,
+      options.screenMode,
+      lifecycleLock.synchronized(resizeGeneration)
+    ))
 
   private def scheduleControlOutput(supported: Boolean)(action: => Unit): Boolean =
     if !supported then false
@@ -958,7 +1354,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
 
   private def hasOrdinaryWorkLocked: Boolean =
     pendingStructural.nonEmpty || pendingActions.nonEmpty || pendingIngress.nonEmpty ||
-      pendingControlOutput.nonEmpty || renderRequested
+      pendingControlOutput.nonEmpty || pendingAppends.nonEmpty || renderRequested
 
   private def selectOrdinaryWorkLocked(): TUI.Work =
     val categories = TUI.OrdinaryCategory.values
@@ -981,6 +1377,10 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         TUI.Work.Ingress(ingress)
       case TUI.OrdinaryCategory.Control    =>
         TUI.Work.Control(pendingControlOutput.remove(0))
+      case TUI.OrdinaryCategory.Append     =>
+        val operation = pendingAppends.remove(0)
+        activeAppend = Some(operation)
+        TUI.Work.Append(operation)
       case TUI.OrdinaryCategory.Render     =>
         renderRequested = false
         val force = forceRenderRequested
@@ -994,6 +1394,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     case TUI.OrdinaryCategory.Action     => pendingActions.nonEmpty
     case TUI.OrdinaryCategory.Ingress    => pendingIngress.nonEmpty
     case TUI.OrdinaryCategory.Control    => pendingControlOutput.nonEmpty
+    case TUI.OrdinaryCategory.Append     => pendingAppends.nonEmpty
     case TUI.OrdinaryCategory.Render     => renderRequested
 
   private def claimStructuralLocked(
@@ -1091,9 +1492,27 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
 
   private def transitionToStoppingLocked(): Unit =
     lifecycleState = TUI.LifecycleState.Stopping
+    retainedAppendCompletions ++= pendingAppendCompletions
+    pendingAppendCompletions.clear()
+    pendingAppends.foreach { operation =>
+      require(acceptedIncompleteAppends > 0)
+      acceptedIncompleteAppends -= 1
+      queueAcceptedAppendCompletionLocked(TUI.AppendCompletion(
+        operation.callback,
+        AppendResult.Rejected(AppendRejection.StoppedBeforeClaim),
+        Some(operation.id),
+        TUIDiagnosticAppendOutcome.Rejected,
+        Some(TUIDiagnosticAppendFailure.Stopped),
+        rowCount = 0,
+        controlCount = 0
+      ))
+    }
+    pendingAppends.clear()
     pendingIngress.foreach {
-      case TUI.Ingress.Protocol(completions, _) => retainedQueryCompletions ++= completions
-      case _                                    => ()
+      case TUI.Ingress.Protocol(completions, _)     => retainedQueryCompletions ++= completions
+      case TUI.Ingress.AppendCompletion(completion) =>
+        queueAcceptedAppendCompletionLocked(completion)
+      case _                                        => ()
     }
     pendingIngress.clear()
     replayContinuation = None
@@ -1372,6 +1791,10 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     require(!startupOwner)
     require(queryWriteReservations === 0)
     require(retainedQueryCompletions.isEmpty)
+    require(retainedAppendCompletions.isEmpty)
+    require(pendingAppendCompletions.isEmpty)
+    require(pendingAppends.isEmpty)
+    require(activeAppend.isEmpty)
     require(pendingControlOutput.isEmpty)
     cleanupOwned = true
     postRestorationCutoff = false
@@ -1400,13 +1823,16 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     attempt(writeTerminal(terminal.stop()))
     attempt(Terminal.setMouseReporting(terminal, enabled = false))
 
-    val detachedCompletions = lifecycleLock.synchronized {
+    val (detachedQueryCompletions, detachedAppendCompletions) = lifecycleLock.synchronized {
       postRestorationCutoff = true
-      val detached = postRestorationQueryCompletions.toVector
+      val queries = postRestorationQueryCompletions.toVector
+      val appends = postRestorationAppendCompletions.toVector
       postRestorationQueryCompletions.clear()
-      detached
+      postRestorationAppendCompletions.clear()
+      queries -> appends
     }
-    detachedCompletions.foreach(processQueryCompletion)
+    detachedQueryCompletions.foreach(processQueryCompletion)
+    detachedAppendCompletions.foreach(processAppendCompletion)
     lifecycleLock.synchronized {
       backgroundColorFlight = None
       colorSchemeFlight = None
@@ -1414,6 +1840,12 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
       rawCorrelation = None
       pendingIngress.clear()
       replayContinuation = None
+      appendOwnedKittyIds.clear()
+      pendingAppendCompletions.clear()
+      postRestorationAppendCompletions.clear()
+      pendingAppends.clear()
+      activeAppend = None
+      acceptedIncompleteAppends = 0
       lifecycleState = TUI.LifecycleState.Stopped
       cleanupOwned = false
       lifecycleLock.notifyAll()
@@ -1436,6 +1868,7 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
     val baseFrame           = root.renderFrame(width)
     val (composed, layouts) = renderOverlays(baseFrame.render, width, height)
     val frame               = prepareFrame(composed.validated(width), width)
+    validateRetainedKittyOwnership(frame)
 
     val currentWidth      = positiveDimension(terminal.columns)
     val currentHeight     = positiveDimension(terminal.rows)
@@ -1494,6 +1927,40 @@ final class TUI(val terminal: Terminal, val options: TUIOptions = TUIOptions())
         previousHeight = height
       latestBaseLayout = Some(baseFrame.layout)
       latestOverlayLayouts = layouts
+
+  private def publishAppend(
+      appended: TUI.PreparedFrame,
+      retained: TUI.PreparedFrame,
+      terminalHeight: Int
+  ): Unit =
+    if appended.lines.nonEmpty then
+      val builder            = StringBuilder()
+      appendRenderStart(builder)
+      appendVerticalMove(builder, fromRow = cursorRow, toRow = 0)
+      builder.append("\r\u001b[J")
+      kittyLifecycleCleanup(Some(retained), retained, fromRow = 0).foreach { control =>
+        builder.append(TerminalRenderControlEncoder.encode(control))
+        builder.append("\r")
+      }
+      appendFrameContent(builder, appended, fromRow = 0, Vector.empty)
+      builder.append("\r\n")
+      val retainedPaintedRow = appendFrameContent(builder, retained, fromRow = 0, Vector.empty)
+      appendHardwareCursorMove(builder, retained, retainedPaintedRow)
+      appendRenderEnd(builder)
+      writeRenderBuffer(builder.result())
+      val totalRows          = appended.lines.length + retained.lines.length
+      latestFrameStartRow = latestFrameStartRow.map { start =>
+        val appendStart = scrolledFrameStart(start, 0, totalRows, terminalHeight)
+        appendStart + appended.lines.length
+      }
+      cursorRow = finalCursorRow(retained, retainedPaintedRow)
+
+  private def validateRetainedKittyOwnership(frame: TUI.PreparedFrame): Unit =
+    frame.controls.flatMap(kittyImageId).find(appendOwnedKittyIds).foreach { imageId =>
+      throw IllegalArgumentException(
+        s"Retained Kitty image ID $imageId collides with append-only ownership"
+      )
+    }
 
   private def fullRender(
       frame: TUI.PreparedFrame,
@@ -1790,20 +2257,25 @@ object TUI:
   private enum LifecycleState derives CanEqual:
     case Starting, Running, Stopping, Cleaning, Stopped
 
-  private val IngressCapacity = 4096
+  private val IngressCapacity           = 4096
+  private val AppendCapacity            = 64
+  private val AppendKittyLedgerCapacity = 4096
 
   private enum Work:
     case Ingress(ingress: TUI.Ingress)
     case QueryCompletion(completion: TUI.QueryCompletion[?])
+    case AppendCompletion(completion: TUI.AppendCompletion)
     case Structural(claimed: TUI.ClaimedStructural)
     case Action(action: () => Unit)
     case Control(action: () => Unit)
+    case Append(operation: TUI.AppendOperation)
     case Render(force: Boolean, clear: Boolean)
     case Cleanup
     case Done
 
   private enum Ingress:
     case Input(input: TerminalInput)
+    case AppendCompletion(completion: TUI.AppendCompletion)
     case Protocol(
         completions: Vector[TUI.QueryCompletion[?]],
         notifications: Vector[() => Unit]
@@ -1827,7 +2299,102 @@ object TUI:
     case Remove(component: Component, detach: Boolean)
 
   private enum OrdinaryCategory:
-    case Structural, Action, Ingress, Control, Render
+    case Structural, Action, Ingress, Control, Append, Render
+
+  private final case class AppendOperation(
+      id: Long,
+      component: Component,
+      callback: AppendResult => Unit,
+      violation: AppendViolationLatch
+  )
+
+  private final case class AppendSnapshot(
+      generation: Long,
+      width: Int,
+      height: Int,
+      frame: PreparedFrame,
+      cellDimensions: ImageCellDimensions
+  )
+
+  private final case class AppendCompletion(
+      callback: AppendResult => Unit,
+      result: AppendResult,
+      order: Option[Long],
+      outcome: TUIDiagnosticAppendOutcome,
+      failure: Option[TUIDiagnosticAppendFailure],
+      rowCount: Int,
+      controlCount: Int
+  )
+
+  private enum AppendPublication:
+    case Direct(completion: AppendCompletion)
+    case Queued(own: Boolean)
+
+  private enum AppendCommitDecision:
+    case Retry
+    case Reject(reason: AppendRejection)
+    case Fail(error: Throwable)
+    case Publish
+
+  private final class AppendClassifiedFailure(
+      val original: Throwable,
+      val category: TUIDiagnosticAppendFailure
+  ) extends RuntimeException(original)
+
+  private final class AppendContextViolation(operation: String)
+      extends IllegalStateException(s"Restricted append context forbids $operation")
+
+  private final class AppendViolationLatch:
+    private var retainedFailure = Option.empty[Throwable]
+
+    def violate(operation: String): Nothing = synchronized {
+      val failure = retainedFailure.getOrElse {
+        val created = AppendContextViolation(operation)
+        retainedFailure = Some(created)
+        created
+      }
+      throw failure
+    }
+
+    def failure: Option[Throwable] = synchronized(retainedFailure)
+
+    /** Linearize final publication against concurrent use of every revoked operation context. */
+    def claimPublication(): Option[Throwable] = synchronized(retainedFailure)
+
+  private object AppendViolationLatch:
+    def apply(): AppendViolationLatch = new AppendViolationLatch
+
+  private final class RestrictedAppendContext(
+      dimensions: ImageCellDimensions,
+      violation: AppendViolationLatch
+  ) extends TUIContext:
+    private var revoked = false
+
+    def revoke(): Unit = synchronized { revoked = true }
+
+    private def ensureActive(): Unit = synchronized {
+      if revoked then violation.violate("access after revocation")
+    }
+
+    private def forbidden(operation: String): Nothing =
+      ensureActive()
+      violation.violate(operation)
+
+    override def imageCellDimensions: ImageCellDimensions =
+      ensureActive()
+      dimensions
+
+    override def requestRender(force: Boolean): Unit         = forbidden("render scheduling")
+    override def flushRender(): Unit                         = forbidden("nested flush")
+    override def requestExit(): Unit                         = forbidden("exit")
+    override def setFocus(component: Component | Null): Unit = forbidden("focus")
+    override def overlays: OverlayHost                       = forbidden("overlays")
+
+  private object RestrictedAppendContext:
+    def apply(
+        dimensions: ImageCellDimensions,
+        violation: AppendViolationLatch
+    ): RestrictedAppendContext = new RestrictedAppendContext(dimensions, violation)
 
   private enum ActionPublication:
     case Accepted(own: Boolean)

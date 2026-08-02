@@ -1277,7 +1277,7 @@ class TUIConcurrencySuite extends munit.FunSuite:
     }
     assertEquals(completions, (1 to 65).toVector)
 
-  test("ordinary work selection cycles through all five continuously ready categories"):
+  test("ordinary work selection cycles through all six continuously ready categories"):
     val terminal        = RecordingTerminal()
     val callbackEntered = Gate()
     val allowCallback   = Gate()
@@ -1287,8 +1287,12 @@ class TUIConcurrencySuite extends munit.FunSuite:
     var actionCount     = 0
     var ingressCount    = 0
     var controlCount    = 0
+    var appendCount     = 0
     var renderCount     = 0
-    val tui             = TUI(terminal)
+    val tui             = TUI(
+      terminal,
+      TUIOptions(normalResizeClearPolicy = NormalResizeClearPolicy.PreserveScrollback)
+    )
 
     def nextStructural(): Component = new Component with ContextualComponent:
       override def render(width: Int): ComponentRender           = ComponentRender.empty
@@ -1340,6 +1344,13 @@ class TUIConcurrencySuite extends munit.FunSuite:
         controlCount += 1
         if controlCount < 6 then tui.setTerminalTitle("cycle")
 
+    def nextAppend(): Component = new Component:
+      override def render(width: Int): ComponentRender =
+        events += "append"
+        appendCount += 1
+        if appendCount < 6 then tui.appendToScrollback(nextAppend())
+        ComponentRender.text("appended")
+
     tui.start()
     tracking = true
     val owner = Thread(() => terminal.send(TerminalInput.Key(TerminalKey.Character("hold"))))
@@ -1350,12 +1361,13 @@ class TUIConcurrencySuite extends munit.FunSuite:
     terminal.send(TerminalInput.Key(TerminalKey.Character("cycle")))
     tui.setTerminalTitle("cycle")
     tui.requestRender()
+    tui.appendToScrollback(nextAppend())
     allowCallback.release()
     owner.join(5000)
 
     assert(!owner.isAlive)
-    val cycle = Vector("structural", "action", "ingress", "control", "render")
-    events.take(25).sliding(2).foreach {
+    val cycle = Vector("structural", "action", "ingress", "control", "append", "render")
+    events.take(36).sliding(2).foreach {
       case Seq(previous, next) =>
         val distance = (cycle.indexOf(next) - cycle.indexOf(previous) + cycle.length) % cycle.length
         assert(distance > 0, s"ordinary selection did not advance cyclically: $previous, $next")
@@ -1365,6 +1377,7 @@ class TUIConcurrencySuite extends munit.FunSuite:
     assertEquals(actionCount, 6)
     assertEquals(ingressCount, 6)
     assertEquals(controlCount, 6)
+    assertEquals(appendCount, 6)
     assertEquals(renderCount, 6)
     tui.stop()
 

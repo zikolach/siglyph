@@ -26,7 +26,10 @@ object TerminalInputParser:
   private val fixedAltControlKeys = fixedControlKeys.map(entry =>
     entry.copy(sequence = "\u001b" + entry.sequence, modifiers = entry.modifiers.copy(alt = true))
   )
-  private val fixedKeysBySequence =
+  // Keep first-use initialization stack-bounded on Scala Native. An eagerly constructed immutable
+  // hash trie was unstable when the runtime first parsed a reply on a concurrent callback thread.
+
+  private val fixedKeys       =
     val entries = Vector(
       FixedKey("\r", TerminalKey.Enter),
       FixedKey("\n", TerminalKey.Enter),
@@ -112,18 +115,22 @@ object TerminalInputParser:
       FixedKey("\u001b[[D", TerminalKey.Function(4)),
       FixedKey("\u001b[[E", TerminalKey.Function(5))
     ) ++ fixedControlKeys ++ fixedAltControlKeys
-    val result  = entries.iterator.map(entry => entry.sequence -> entry).toMap
-    require(result.size === entries.size, "fixed key sequences must be unique")
-    result
-  private val ModifiedCsi         = "\u001b\\[1;(\\d+)(?::\\d+)?([ABCDHFPQRS])".r
-  private val ModifiedFunc        = "\u001b\\[(\\d+);(\\d+)(?::\\d+)?~".r
-  private val CsiU                = "\u001b\\[(\\d+)(?::(\\d*))?(?::(\\d+))?(?:;(\\d+))?(?::(\\d+))?u".r
-  private val ModifyOtherKeys     = "\u001b\\[27;(\\d+);(\\d+)~".r
-  private val SgrMouse            = "\u001b\\[<(\\d+);(-?\\d+);(-?\\d+)([Mm])".r
+    entries.indices.foreach { index =>
+      require(
+        !entries.drop(index + 1).exists(_.sequence === entries(index).sequence),
+        "fixed key sequences must be unique"
+      )
+    }
+    entries
+  private val ModifiedCsi     = "\u001b\\[1;(\\d+)(?::\\d+)?([ABCDHFPQRS])".r
+  private val ModifiedFunc    = "\u001b\\[(\\d+);(\\d+)(?::\\d+)?~".r
+  private val CsiU            = "\u001b\\[(\\d+)(?::(\\d*))?(?::(\\d+))?(?:;(\\d+))?(?::(\\d+))?u".r
+  private val ModifyOtherKeys = "\u001b\\[27;(\\d+);(\\d+)~".r
+  private val SgrMouse        = "\u001b\\[<(\\d+);(-?\\d+);(-?\\d+)([Mm])".r
 
   private[terminal] def parseTyped(bytes: Array[Byte]): Option[TerminalInput] =
     val data = String(bytes, java.nio.charset.StandardCharsets.UTF_8)
-    fixedKeysBySequence.get(data).map(entry =>
+    fixedKeys.find(_.sequence === data).map(entry =>
       key(entry.terminalKey, entry.modifiers)
     ).orElse(
       parseMouse(data)

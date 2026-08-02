@@ -1,6 +1,15 @@
 package scalatui.terminal.jvm
 
 import scalatui.syntax.Equality.*
+import scalatui.core.{
+  Component,
+  ComponentRender,
+  NormalResizeClearPolicy,
+  TUI,
+  TUIOptions,
+  TerminalControlPlacement
+}
+import scalatui.terminal.{Base64ImagePayload, TerminalImageProtocol}
 
 import java.io.{ByteArrayOutputStream, InputStream}
 import java.util.concurrent.{CountDownLatch, TimeUnit}
@@ -52,6 +61,52 @@ class SttyTerminalPtySuite extends munit.FunSuite:
         if !stopped then
           terminal.cleanupFailureForTesting = _ => None
           scala.util.Try(terminal.stop())
+        restoreStty(originalState, originalRows, originalColumns)
+    }
+
+  test("PTY append orders typed output, omits forbidden cleanup, and restores terminal"):
+    withPtyTest {
+      val originalState                   = runStty("-g")
+      val originalStableState             = stableSttyState()
+      val (originalRows, originalColumns) = querySize()
+      val output                          = ByteArrayOutputStream()
+      val terminal                        = SttyTerminal(
+        input = InputStream.nullInputStream(),
+        output = output
+      )
+      val tui                             = TUI(
+        terminal,
+        TUIOptions(normalResizeClearPolicy = NormalResizeClearPolicy.PreserveScrollback)
+      )
+      var stopped                         = false
+
+      try
+        tui.addChild(new Component:
+          override def render(width: Int): ComponentRender = ComponentRender.text("live-frame"))
+        tui.start()
+        output.reset()
+        val payload = Base64ImagePayload.from("YQ==").toOption.get
+        val control = TerminalImageProtocol.encodeKitty(payload, 987654321, 1, 1)
+        tui.appendToScrollback(new Component:
+          override def render(width: Int): ComponentRender = ComponentRender(
+            Vector("append-row"),
+            Vector(TerminalControlPlacement(0, 0, control)),
+            Vector.empty
+          ))
+        tui.stop()
+        stopped = true
+
+        val written = output.toString(java.nio.charset.StandardCharsets.UTF_8)
+        val append  = written.indexOf("append-row")
+        val live    = written.indexOf("live-frame")
+        assert(written.contains("\u001b_Ga=T"), written)
+        assert(!written.contains("a=d"), written)
+        assert(append >= 0, written)
+        assert(live > append, written)
+        assert(written.contains("\u001b[?25h"), written)
+        assertEquals(stableSttyState(), originalStableState)
+      finally
+        if !stopped then scala.util.Try(tui.stop())
         restoreStty(originalState, originalRows, originalColumns)
     }
 

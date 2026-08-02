@@ -28,7 +28,8 @@ case "$(uname -s)" in
     script -q -e -c "SIGLYPH_PTY_TEST=1 mill --no-daemon $test_target" /dev/null
     ;;
   Darwin)
-    script -q -e /dev/null env SIGLYPH_PTY_TEST=1 mill --no-daemon \
+    # BSD script(1) has no GNU -e/-c flags; direct invocation propagates the child exit status.
+    script -q /dev/null env SIGLYPH_PTY_TEST=1 mill --no-daemon \
       terminalJvm.test.testOnly scalatui.terminal.jvm.SttyTerminalPtySuite
     ;;
   *)

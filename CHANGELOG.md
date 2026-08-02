@@ -7,6 +7,13 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Added
+
+- Added bounded callback-completed `TUI.appendToScrollback` output for detached typed components in
+  preserve-scrollback normal-screen sessions, including retained-frame relocation, Kitty ID
+  isolation, iTerm2 safety rejection, resize retry, mouse-origin restoration, diagnostics, and
+  shared JVM/Scala Native behavior.
+
 ## [0.7.1] - 2026-07-22
 
 ### Fixed
