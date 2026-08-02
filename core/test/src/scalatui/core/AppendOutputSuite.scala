@@ -245,13 +245,23 @@ class AppendOutputSuite extends munit.FunSuite:
       )
     )
     val overflowResult  = AtomicReference[AppendResult]()
-    val overflow        = Thread(() => tui.appendToScrollback(Line("overflow"), overflowResult.set))
+    val overflowStarted = CountDownLatch(1)
+    val overflowDone    = CountDownLatch(1)
+    val overflow        = Thread(() =>
+      overflowStarted.countDown()
+      try tui.appendToScrollback(Line("overflow"), overflowResult.set)
+      finally overflowDone.countDown()
+    )
     overflow.start()
-    Thread.sleep(20)
-    assert(overflow.isAlive, "capacity rejection did not backpressure on full ingress")
+    assert(overflowStarted.await(1, TimeUnit.SECONDS), "capacity publisher did not start")
+    assert(
+      !overflowDone.await(100, TimeUnit.MILLISECONDS),
+      "capacity rejection did not backpressure on full ingress"
+    )
     release.countDown()
     owner.join(5000)
-    overflow.join(5000)
+    assert(overflowDone.await(5, TimeUnit.SECONDS), "capacity publisher did not finish")
+    overflow.join(1000)
 
     assert(!owner.isAlive)
     assert(!overflow.isAlive)

@@ -26,7 +26,10 @@ object TerminalInputParser:
   private val fixedAltControlKeys = fixedControlKeys.map(entry =>
     entry.copy(sequence = "\u001b" + entry.sequence, modifiers = entry.modifiers.copy(alt = true))
   )
-  private val fixedKeys           =
+  // Keep first-use initialization stack-bounded on Scala Native. An eagerly constructed immutable
+  // hash trie was unstable when the runtime first parsed a reply on a concurrent callback thread.
+
+  private val fixedKeys       =
     val entries = Vector(
       FixedKey("\r", TerminalKey.Enter),
       FixedKey("\n", TerminalKey.Enter),
@@ -119,11 +122,11 @@ object TerminalInputParser:
       )
     }
     entries
-  private val ModifiedCsi         = "\u001b\\[1;(\\d+)(?::\\d+)?([ABCDHFPQRS])".r
-  private val ModifiedFunc        = "\u001b\\[(\\d+);(\\d+)(?::\\d+)?~".r
-  private val CsiU                = "\u001b\\[(\\d+)(?::(\\d*))?(?::(\\d+))?(?:;(\\d+))?(?::(\\d+))?u".r
-  private val ModifyOtherKeys     = "\u001b\\[27;(\\d+);(\\d+)~".r
-  private val SgrMouse            = "\u001b\\[<(\\d+);(-?\\d+);(-?\\d+)([Mm])".r
+  private val ModifiedCsi     = "\u001b\\[1;(\\d+)(?::\\d+)?([ABCDHFPQRS])".r
+  private val ModifiedFunc    = "\u001b\\[(\\d+);(\\d+)(?::\\d+)?~".r
+  private val CsiU            = "\u001b\\[(\\d+)(?::(\\d*))?(?::(\\d+))?(?:;(\\d+))?(?::(\\d+))?u".r
+  private val ModifyOtherKeys = "\u001b\\[27;(\\d+);(\\d+)~".r
+  private val SgrMouse        = "\u001b\\[<(\\d+);(-?\\d+);(-?\\d+)([Mm])".r
 
   private[terminal] def parseTyped(bytes: Array[Byte]): Option[TerminalInput] =
     val data = String(bytes, java.nio.charset.StandardCharsets.UTF_8)

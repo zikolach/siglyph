@@ -155,14 +155,19 @@ import scalatui.core.{AppendResult, NormalResizeClearPolicy, TUI, TUIOptions}
 val tui = TUI(terminal, TUIOptions(
   normalResizeClearPolicy = NormalResizeClearPolicy.PreserveScrollback
 ))
+val status = Text("Ready", paddingX = 0)
+tui.addChild(status)
+tui.start() // Commits the initial retained frame before append admission.
 
-tui.appendToScrollback(Text("completed output", paddingX = 0)) {
-  case AppendResult.Published(rows, controls) =>
-    println(s"published $rows rows and $controls controls")
-  case AppendResult.Rejected(reason) =>
-    System.err.println(s"append rejected: $reason")
-  case AppendResult.Failed(cause) =>
-    System.err.println(s"append failed: ${cause.getClass.getSimpleName}")
+tui.appendToScrollback(Text("completed output", paddingX = 0)) { result =>
+  status.text = result match
+    case AppendResult.Published(rows, controls) =>
+      s"Published $rows rows and $controls controls"
+    case AppendResult.Rejected(reason) =>
+      s"Append rejected: $reason"
+    case AppendResult.Failed(cause) =>
+      s"Append failed: ${cause.getClass.getSimpleName}"
+  tui.requestRender()
 }
 ```
 

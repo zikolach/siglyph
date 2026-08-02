@@ -33,6 +33,10 @@ trait SiglyphPublishModule extends SiglyphModule with PublishModule {
   def pomSettings = siglyphPomSettings
 }
 
+/**
+ * Keep every Native module and test on the same supported Clang toolchain. Environment overrides
+ * let CI and developers avoid pre-16 compiler/runtime defects during shared concurrency tests.
+ */
 trait SiglyphNativeToolchain extends ScalaNativeModule {
   override def nativeClang = Task.Input {
     Task.env.get("SIGLYPH_NATIVE_CLANG")
