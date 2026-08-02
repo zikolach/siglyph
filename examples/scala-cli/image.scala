@@ -1,8 +1,8 @@
 #!/usr/bin/env -S scala-cli shebang
 //> using scala 3.7.4
-//> using dep io.github.zikolach::siglyph-core:0.7.1
-//> using dep io.github.zikolach::siglyph-terminal-jvm:0.7.1
-//> using dep io.github.zikolach::siglyph-image:0.7.1
+//> using dep io.github.zikolach::siglyph-core:0.8.0
+//> using dep io.github.zikolach::siglyph-terminal-jvm:0.8.0
+//> using dep io.github.zikolach::siglyph-image:0.8.0
 
 import java.nio.file.Paths
 

@@ -7,12 +7,19 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-02
+
 ### Added
 
 - Added bounded callback-completed `TUI.appendToScrollback` output for detached typed components in
   preserve-scrollback normal-screen sessions, including retained-frame relocation, Kitty ID
   isolation, iTerm2 safety rejection, resize retry, mouse-origin restoration, diagnostics, and
-  shared JVM/Scala Native behavior.
+  shared JVM/Scala Native behavior. #54
+
+### Fixed
+
+- Stabilized first-use terminal input parsing on concurrent Scala Native callback threads and added
+  Clang toolchain overrides for testing with supported compiler versions. #54
 
 ## [0.7.1] - 2026-07-22
 
@@ -272,7 +279,8 @@ and this project uses semantic versioning while it remains pre-1.0.
 - GitHub Actions CI, jar packaging, GitHub Packages publishing, and GitHub
   release artifacts.
 
-[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/zikolach/siglyph/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/zikolach/siglyph/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/zikolach/siglyph/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/zikolach/siglyph/compare/v0.5.0...v0.6.0
