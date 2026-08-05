@@ -109,7 +109,8 @@ Siglyph SHALL invoke the provider synchronously as application-controlled Render
 
 #### Scenario: Recovery line exceeds current width
 - **WHEN** a returned line has visible width greater than `context.width`
-- **THEN** the existing ANSI- and Unicode-aware runtime safety path SHALL sanitize it to current width and record existing sanitization metadata
+- **THEN** the existing ANSI- and Unicode-aware runtime safety path SHALL sanitize it to current width and increment aggregate sanitization accounting
+- **AND** Siglyph SHALL NOT retain the provider source or sanitized line in the content-bearing last-sanitization sample
 
 #### Scenario: Application needs typed recovery images
 - **WHEN** an application wants Kitty, iTerm2, cleanup, or cursor metadata in recovery output

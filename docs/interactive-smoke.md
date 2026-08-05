@@ -98,6 +98,33 @@ Kitty-image, and iTerm2-image components passed to `appendToScrollback`.
 - Confirm cursor placements and Kitty cleanup controls fail before output and terminal state is
   restored through normal fail-fast cleanup.
 
+## Normal-screen resize recovery smoke checks
+
+Use a small normal-screen application with `PreserveScrollback`, a bounded application-owned
+semantic transcript, `NormalResizeRecoveryProvider`, one retained editor/status frame, and a button
+or key that publishes detached output through `appendToScrollback`.
+
+- In Kitty, iTerm2, and one conventional terminal (for example Terminal.app, GNOME Terminal, or
+  xterm), append durable `A`, repeatedly change width and height, and have the provider reflow and
+  select at most the newest `context.maxRows` transcript rows. Confirm the selected tail appears
+  immediately above the retained live frame without entering alternate screen or clearing shell
+  scrollback.
+- After recovery of `A`, append durable `B`. Confirm visible chronology is `A`, `B`, then the
+  retained editor/status frame. Change only retained status and confirm neither `A` nor `B` is
+  repainted as part of the live frame.
+- Repeat shrink/grow cycles with a live frame that leaves recovery capacity, fills the viewport,
+  exceeds the viewport, and is empty. Confirm zero capacity skips provider invocation and an empty
+  live frame keeps a blank anchor below recovered output for a later append.
+- Trigger another resize while provider rendering is intentionally delayed. Confirm no stale-width
+  recovery appears and only latest-width output commits. Provider logic must remain retryable and
+  free of one-shot side effects.
+- Return too many provider rows and throw a provider exception in a disposable test application.
+  Confirm no recovery lines publish, bounded diagnostics contain no transcript or exception text,
+  and terminal cursor/modes are restored.
+- Treat these as emulator persistence checks. Automated PTY coverage verifies clear/recovery/live/
+  append byte ordering, `CSI 3 J` absence, synchronized output, and restoration, but a PTY cannot
+  prove which rows a real emulator preserves or reflows.
+
 ## Fullscreen image smoke checks
 
 Use a fullscreen layout with one scrolling `Image.withSessionCapabilities` and sticky text above or

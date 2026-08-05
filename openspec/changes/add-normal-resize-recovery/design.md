@@ -95,7 +95,7 @@ physical cursor anchor: append and differential movement must have a live-frame 
 rather than treating the final recovery row as replaceable live output. If the resulting footprint
 fills or exceeds the viewport, recovery is empty and the provider is not invoked.
 
-For a positive budget, the provider receives current width, height, and `maxRows`. Siglyph sanitizes every returned line at current width, adds the normal line reset, and rejects the candidate if the provider returned more than `maxRows`. It does not silently truncate or `takeRight`, because only the application knows semantic entry boundaries and whether dropping a prefix would split an entry. Empty output is valid and introduces no extra blank row.
+For a positive budget, the provider receives current width, height, and `maxRows`. Siglyph sanitizes every returned line at current width, adds the normal line reset, and rejects the candidate if the provider returned more than `maxRows`. Recovery sanitization increments the existing aggregate count but does not retain provider source or sanitized text in the content-bearing `lastSanitizedLine` sample. It does not silently truncate or `takeRight`, because only the application knows semantic entry boundaries and whether dropping a prefix would split an entry. Empty output is valid and introduces no extra blank row.
 
 The provider is contractually responsible for reflowing its semantic transcript at `context.width`, selecting at most the newest `context.maxRows` rows that belonged in the invalidated active viewport, and returning them oldest-to-newest. Siglyph does not ask for or retain the complete transcript and does not infer survivors from terminal scrollback.
 
