@@ -74,10 +74,18 @@ class NormalResizeRecoverySuite extends munit.FunSuite:
 
   test("recovery public context validates positive geometry and options remain additive") {
     assertEquals(TUIOptions().normalResizeRecovery, None)
-    assertEquals(NormalResizeRecoveryContext(20, 8, 3).maxRows, 3)
-    intercept[IllegalArgumentException](NormalResizeRecoveryContext(0, 8, 3))
-    intercept[IllegalArgumentException](NormalResizeRecoveryContext(20, 0, 3))
-    intercept[IllegalArgumentException](NormalResizeRecoveryContext(20, 8, 0))
+    val context = NormalResizeRecoveryContext(20, 8, 3, 24, 10, 5)
+    assertEquals(context.maxRows, 3)
+    assertEquals(context.previousMaxRows, 5)
+    intercept[IllegalArgumentException](NormalResizeRecoveryContext(0, 8, 3, 24, 10, 5))
+    intercept[IllegalArgumentException](NormalResizeRecoveryContext(20, 0, 3, 24, 10, 5))
+    intercept[IllegalArgumentException](NormalResizeRecoveryContext(20, 8, 0, 24, 10, 5))
+    intercept[IllegalArgumentException](NormalResizeRecoveryContext(20, 8, 3, 0, 10, 5))
+    intercept[IllegalArgumentException](NormalResizeRecoveryContext(20, 8, 3, 24, 0, 5))
+    intercept[IllegalArgumentException](NormalResizeRecoveryContext(20, 8, 3, 24, 10, 0))
+    intercept[IllegalArgumentException](NormalResizeRecoveryContext(20, 8, 6, 24, 10, 5))
+    intercept[IllegalArgumentException](NormalResizeRecoveryContext(20, 3, 3, 24, 10, 3))
+    intercept[IllegalArgumentException](NormalResizeRecoveryContext(20, 8, 3, 24, 5, 5))
   }
 
   test("incompatible recovery options fail before terminal startup or output") {
@@ -125,8 +133,38 @@ class NormalResizeRecoverySuite extends munit.FunSuite:
     TestInputStreams.parse("\u001b[6;12;24t").foreach(terminal.sendInput)
     assertEquals(calls.get(), 0)
 
+    terminal.clearWrites()
+    terminal.resize(20, 8)
+    assertEquals(calls.get(), 0)
+    assertEquals(terminal.output, "")
+
     terminal.resize(19, 8)
     assertEquals(calls.get(), 1)
+    tui.stop()
+  }
+
+  test("height growth bounds recovery by the previous viewport capacity") {
+    val contexts = ArrayBuffer.empty[NormalResizeRecoveryContext]
+    val terminal = VirtualTerminal(20, 5)
+    val tui      = running(
+      terminal,
+      MutableFrame(ComponentRender.text("live")),
+      NormalResizeRecoveryProvider { context =>
+        contexts += context
+        Vector.fill(context.maxRows)("history")
+      }
+    )
+
+    terminal.resize(20, 100)
+
+    assertEquals(contexts.length, 1)
+    assertEquals(contexts.head.width, 20)
+    assertEquals(contexts.head.height, 100)
+    assertEquals(contexts.head.previousWidth, 20)
+    assertEquals(contexts.head.previousHeight, 5)
+    assertEquals(contexts.head.previousMaxRows, 4)
+    assertEquals(contexts.head.maxRows, 4)
+    assertEquals(terminal.screenLines.count(_ === "history"), 4)
     tui.stop()
   }
 

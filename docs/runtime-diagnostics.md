@@ -19,9 +19,12 @@ semantics may briefly show stale rows. Alternate-screen resize behavior is uncha
 clears normal-screen scrollback.
 
 Optional `TUIOptions.normalResizeRecovery` adds a text-only recovery phase to committed
-normal-screen `PreserveScrollback` geometry changes. The runtime first prepares the retained live
-frame, reserves its physical footprint (including one cursor anchor for an empty frame), and gives
-the provider only the remaining positive `maxRows`. Returning more rows fails before output rather
+normal-screen `PreserveScrollback` geometry changes. Redundant same-size resize notifications do not
+invoke recovery or clear the viewport. The runtime first prepares the retained live frame, reserves
+its physical footprint (including one cursor anchor for an empty frame), and bounds `maxRows` by
+both the old viewport's maximum durable-prefix capacity and space above the new live frame. The
+context also supplies previous dimensions and that old capacity so applications can select the old
+semantic tail before reflowing it at current width. Returning more rows fails before output rather
 than being silently truncated. A stale geometry candidate is discarded and may invoke the provider
 again for latest dimensions.
 

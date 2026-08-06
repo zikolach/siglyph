@@ -40,7 +40,10 @@ trait NormalResizeRecoveryProvider:
 final case class NormalResizeRecoveryContext(
     width: Int,
     height: Int,
-    maxRows: Int
+    maxRows: Int,
+    previousWidth: Int,
+    previousHeight: Int,
+    previousMaxRows: Int
 )
 
 final case class TUIOptions(
@@ -49,7 +52,13 @@ final case class TUIOptions(
 )
 ```
 
-The provider receives positive terminal dimensions and a positive strict row budget. It returns ordinary lines in oldest-to-newest display order. Returning `Vector[String]` rather than `Component`, `ComponentRender`, or raw terminal bytes makes the first contract structurally text-only: recovery cannot attach context, retain component identity, acquire cursor ownership, or introduce a typed control whose later cleanup would need historical ownership.
+The provider receives positive current and previous terminal dimensions, the maximum durable prefix
+that could have occupied the old viewport above its live frame, and a positive strict publication
+budget bounded by both old and new capacities. It returns ordinary lines in oldest-to-newest display
+order. Returning `Vector[String]` rather than `Component`, `ComponentRender`, or raw terminal bytes
+makes the first contract structurally text-only: recovery cannot attach context, retain component
+identity, acquire cursor ownership, or introduce a typed control whose later cleanup would need
+historical ownership.
 
 Ordinary lines still support the existing bounded SGR and OSC 8 allowlist. Every other terminal-looking sequence remains inert, and final width sanitization and line resets use the same path as retained and append output.
 
@@ -67,6 +76,11 @@ Alternatives considered:
 ### 2. Track resize recovery eligibility separately from generic force/clear rendering
 
 `publishResize` continues to coalesce resize work and increment `resizeGeneration`, but records that the latest pending forced-clear render came from terminal geometry change. Generic `requestRender(force = true)`, initial rendering, image cell-dimension changes, appends, and ordinary full redraws do not set recovery eligibility.
+
+A redundant resize callback whose positive width and height equal the committed dimensions remains
+observable through ordinary resize diagnostics but is not a geometry-changing recovery event. It
+does not invoke the provider or perform the destructive viewport clear; any coalesced forced render
+may still repaint through the ordinary owned path.
 
 When Render work is claimed, it snapshots the eligible resize generation. A later resize supersedes that marker. Recovery is attempted only when all of these hold:
 
@@ -86,7 +100,10 @@ The owner renders, composes, validates, and prepares the current live frame befo
 
 ```text
 liveFrameFootprintRows = max(1, liveFrameRowCount)
-maxRows = max(0, terminalHeight - liveFrameFootprintRows)
+currentMaxRows = max(0, terminalHeight - liveFrameFootprintRows)
+previousLiveFrameFootprintRows = max(1, previousLiveFrameRowCount)
+previousMaxRows = max(0, previousTerminalHeight - previousLiveFrameFootprintRows)
+maxRows = min(currentMaxRows, previousMaxRows)
 ```
 
 `ComponentRender.lines` already includes rows reserved by typed controls, so a non-empty
@@ -95,15 +112,31 @@ physical cursor anchor: append and differential movement must have a live-frame 
 rather than treating the final recovery row as replaceable live output. If the resulting footprint
 fills or exceeds the viewport, recovery is empty and the provider is not invoked.
 
-For a positive budget, the provider receives current width, height, and `maxRows`. Siglyph sanitizes every returned line at current width, adds the normal line reset, and rejects the candidate if the provider returned more than `maxRows`. Recovery sanitization increments the existing aggregate count but does not retain provider source or sanitized text in the content-bearing `lastSanitizedLine` sample. It does not silently truncate or `takeRight`, because only the application knows semantic entry boundaries and whether dropping a prefix would split an entry. Empty output is valid and introduces no extra blank row.
+For a positive budget, the provider receives current width and height, previous width and height,
+`previousMaxRows`, and `maxRows`. The old capacity lets it identify the newest semantic entries that
+could have occupied the invalidated old viewport before reflowing those entries at current width.
+Bounding `maxRows` by both old and current capacities prevents a large viewport growth from
+replaying rows that necessarily predated the old viewport tail. Siglyph sanitizes every returned
+line at current width, adds the normal line reset, and rejects the candidate if the provider returned
+more than `maxRows`. Recovery sanitization increments the existing aggregate count but does not
+retain provider source or sanitized text in the content-bearing `lastSanitizedLine` sample. It does
+not silently truncate or `takeRight`, because only the application knows semantic entry boundaries
+and whether dropping a prefix would split an entry. Empty output is valid and introduces no extra
+blank row.
 
-The provider is contractually responsible for reflowing its semantic transcript at `context.width`, selecting at most the newest `context.maxRows` rows that belonged in the invalidated active viewport, and returning them oldest-to-newest. Siglyph does not ask for or retain the complete transcript and does not infer survivors from terminal scrollback.
+The provider is contractually responsible for using `context.previousWidth` and
+`context.previousMaxRows` to select the semantic entries that could have occupied the invalidated
+old viewport, reflowing that selected tail at `context.width`, selecting at most the newest
+`context.maxRows` current-width rows, and returning them oldest-to-newest. Siglyph does not ask for
+or retain the complete transcript and does not infer survivors from terminal scrollback.
 
 Alternatives:
 
 - Budget before live rendering: rejected because overlays and current component state determine the actual live row count.
 - Clamp oversized output: rejected because silent row loss can split semantic output and obscure provider bugs.
-- Expose old/new geometry and guessed survivor counts: deferred because terminal emulators can reflow scrollback differently, so such values would imply precision Siglyph does not possess.
+- Expose an exact survivor count: rejected because terminal emulators can reflow scrollback
+  differently. Previous geometry and the old live-frame-derived maximum are structural upper bounds,
+  not claims about emulator scrollback survivors.
 
 ### 4. Publish clear, recovery, and live frame as one render commit
 
@@ -191,6 +224,9 @@ JVM PTY coverage verifies clear/recovery/live/append byte ordering, absence of `
 - **A slow provider blocks input and other callbacks** → Keep the provider synchronous, bounded in output, owner-serialized, and document that it must be fast and side-effect-light.
 - **Provider state locking can reproduce application lock inversion** → Invoke outside runtime locks and document the same application-lock discipline as component rendering.
 - **Oversized recovery could overwrite live-frame geometry** → Validate row count strictly before write and fail fast rather than truncate.
+- **Viewport growth could offer space for history older than the invalidated old tail** → Bound the
+  publication budget by both previous and current live-frame-derived capacities and expose previous
+  width/capacity for application semantic selection.
 - **Live frame fills the viewport** → Compute zero budget, skip provider invocation, and perform the existing resize redraw safely.
 - **Resize changes during provider execution** → Discard before output and retry through coalesced Render scheduling.
 - **Backend accepts only part of the combined write** → Run normal terminal restoration and report write-category diagnostics without rollback claims.

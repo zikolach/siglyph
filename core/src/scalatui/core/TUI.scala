@@ -95,9 +95,11 @@ enum TUIScreenMode derives CanEqual:
  *   does not affect normal-screen or append-only image ownership.
  * @param normalResizeRecovery
  *   Optional synchronous provider for reconstructing a bounded durable text tail after a
- *   geometry-changing normal-screen preserve-scrollback resize. The provider is retryable Render
- *   work and receives no component, cursor, typed-control, or raw-terminal authority. Configuring
- *   it with alternate screen or scrollback-clearing resize policy fails before terminal startup.
+ *   geometry-changing normal-screen preserve-scrollback resize. Its context includes previous and
+ *   current geometry with a strict budget bounded by both viewport capacities. The provider is
+ *   retryable Render work and receives no component, cursor, typed-control, or raw-terminal
+ *   authority. Configuring it with alternate screen or scrollback-clearing resize policy fails
+ *   before terminal startup.
  */
 final case class TUIOptions(
     hardwareCursorPositioning: Boolean = false,
@@ -1214,16 +1216,16 @@ final class TUI(
             TUI.Work.Done
         }
         work match
-          case TUI.Work.Ingress(ingress)             => processIngress(ingress)
-          case TUI.Work.QueryCompletion(completion)  => processQueryCompletion(completion)
-          case TUI.Work.AppendCompletion(completion) => processAppendCompletion(completion)
-          case TUI.Work.ComponentEffect              =>
+          case TUI.Work.Ingress(ingress)                         => processIngress(ingress)
+          case TUI.Work.QueryCompletion(completion)              => processQueryCompletion(completion)
+          case TUI.Work.AppendCompletion(completion)             => processAppendCompletion(completion)
+          case TUI.Work.ComponentEffect                          =>
             componentEffectCoordinator.runNextRuntimeBatch()
-          case TUI.Work.Structural(claimed)          => applyStructural(claimed)
-          case TUI.Work.Action(action)               =>
+          case TUI.Work.Structural(claimed)                      => applyStructural(claimed)
+          case TUI.Work.Action(action)                           =>
             try action()
             catch case error: Throwable => recordFailure(error)
-          case TUI.Work.Control(action)              => action()
+          case TUI.Work.Control(action)                          => action()
           case TUI.Work.Append(operation)                        => processAppend(operation)
           case TUI.Work.Render(force, clear, recoveryGeneration) =>
             renderNow(force, clear, recoveryGeneration)
@@ -1233,7 +1235,7 @@ final class TUI(
               options.screenMode
             ))
             deferredCleanupFailure = cleanup()
-          case TUI.Work.Done                         => continue = false
+          case TUI.Work.Done                                     => continue = false
       completed = true
     catch
       case e: Throwable =>
@@ -2544,9 +2546,19 @@ final class TUI(
     }
     val frame                          = rendererPolicy.prepareFrame(composed.validated(width), width)
     validateRetainedKittyOwnership(frame)
+    val widthChanged                   = (rendererPolicy.retainedWidth !== 0) &&
+      (rendererPolicy.retainedWidth !== width)
+    val heightChanged                  = (rendererPolicy.retainedHeight !== 0) &&
+      (rendererPolicy.retainedHeight !== height)
+    val resizeGeometryChanged          = widthChanged || heightChanged
+    val forceForRender                 =
+      force && (recoveryGeneration.isEmpty || resizeGeometryChanged)
+    val clearForRender                 =
+      clear && (recoveryGeneration.isEmpty || resizeGeometryChanged)
     val recovery                       = Option.when(
-      clear && rendererPolicy.retainedFrame.nonEmpty && recoveryGeneration.exists(_ === generation) &&
-        options.normalResizeRecovery.nonEmpty && !rendererPolicy.isAlternateScreen &&
+      clearForRender && resizeGeometryChanged && rendererPolicy.retainedFrame.nonEmpty &&
+        recoveryGeneration.exists(_ === generation) && options.normalResizeRecovery.nonEmpty &&
+        !rendererPolicy.isAlternateScreen &&
         options.normalResizeClearPolicy === NormalResizeClearPolicy.PreserveScrollback
     ) {
       prepareResizeRecovery(frame, width, height, generation)
@@ -2588,7 +2600,7 @@ final class TUI(
         )
       )
     else
-      try rendererPolicy.render(frame, width, height, force, clear, recovery)
+      try rendererPolicy.render(frame, width, height, forceForRender, clearForRender, recovery)
       catch
         case error: Throwable =>
           recovery.foreach(value =>
@@ -2623,11 +2635,26 @@ final class TUI(
       height: Int,
       generation: Long
   ): TUI.PreparedResizeRecovery =
-    val liveFrameFootprint = math.max(1, frame.lines.length)
-    val maxRows            = math.max(0, height - liveFrameFootprint)
+    val liveFrameFootprint         = math.max(1, frame.lines.length)
+    val currentMaxRows             = math.max(0, height - liveFrameFootprint)
+    val previousLiveFrameFootprint = rendererPolicy.retainedFrame.fold(1)(value =>
+      math.max(1, value.lines.length)
+    )
+    val previousMaxRows            = math.max(
+      0,
+      rendererPolicy.retainedHeight - previousLiveFrameFootprint
+    )
+    val maxRows                    = math.min(currentMaxRows, previousMaxRows)
     if maxRows === 0 then TUI.PreparedResizeRecovery(Vector.empty, maxRows, generation)
     else
-      val context  = NormalResizeRecoveryContext(width, height, maxRows)
+      val context  = NormalResizeRecoveryContext(
+        width,
+        height,
+        maxRows,
+        rendererPolicy.retainedWidth,
+        rendererPolicy.retainedHeight,
+        previousMaxRows
+      )
       val rawLines =
         try
           Option(options.normalResizeRecovery.get.render(context)).getOrElse(

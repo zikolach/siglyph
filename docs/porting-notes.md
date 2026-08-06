@@ -61,8 +61,9 @@ Fullscreen is not a drop-in TypeScript API. It does not add runtime renderer swi
 - Normal-screen resize recovery is a siglyph extension beyond current `pi-tui`. An opt-in
   `NormalResizeRecoveryProvider` can reconstruct an application-owned, current-width newest durable
   tail before the retained live frame when `PreserveScrollback` clears the active viewport. The
-  provider is synchronous, retryable, strictly row-bounded, and text-only; siglyph retains no
-  transcript and makes no terminal-independent survivor or deduplication claim.
+  provider is synchronous, retryable, text-only, and strictly bounded by both previous and current
+  live-frame viewport capacity; its context exposes prior geometry for semantic tail selection.
+  siglyph retains no transcript and makes no terminal-independent survivor or deduplication claim.
 - Kitty retransmission differs from the earlier lowercase targeted cleanup: every old positive ID retransmitted by `a=T` is deleted first with one uppercase `a=d,d=I,i=<id>` command, and removed old IDs receive the same cleanup. Cleanup order follows previous-frame control order. New IDs and unchanged IDs outside a partial redraw range receive no cleanup. Delete-all remains `a=d,d=A`.
 - Typed validation failures and `TerminalRenderControl.toString` retain only bounded semantic kind, optional ID, geometry, frame dimensions, and duplicate coordinates. They do not retain or print image payloads, filenames, controls, placements, or application text.
 - Terminal runtime now sends a cell-size query (`ESC[16t`) on start and consumes valid terminal replies (`ESC[6;H;Wt`) for runtime image sizing. `ImageRenderOptions` uses fixed `ImageCellDimensions` by default; low-level protocol helpers opt into queried dimensions with `ImageCellDimensionsSource.Runtime`. When reply data is missing or invalid, runtime image layout keeps deterministic fallback dimensions (`9x18`).

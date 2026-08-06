@@ -27,6 +27,10 @@ The TUI runtime SHALL track both terminal width and terminal height changes acro
 - **WHEN** terminal dimensions change after a previous render while alternate-screen mode is active
 - **THEN** the TUI emits synchronized output with autowrap disabled, clears the active alternate-screen viewport, homes the cursor, and writes the recomputed frame without emitting another alternate-screen enter sequence, `CSI 3 J`, or normal-screen recovery output
 
+#### Scenario: Redundant resize notification preserves the viewport
+- **WHEN** a backend resize callback reports dimensions equal to the committed width and height
+- **THEN** the TUI SHALL NOT invoke recovery or destructively clear the active viewport
+
 #### Scenario: Generic forced redraw does not recover
 - **WHEN** application or runtime work requests a forced or cleared redraw without a terminal width or height change
 - **THEN** the TUI SHALL preserve existing redraw behavior and SHALL NOT invoke the normal resize recovery provider

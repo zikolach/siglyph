@@ -105,16 +105,20 @@ semantic transcript, `NormalResizeRecoveryProvider`, one retained editor/status 
 or key that publishes detached output through `appendToScrollback`.
 
 - In Kitty, iTerm2, and one conventional terminal (for example Terminal.app, GNOME Terminal, or
-  xterm), append durable `A`, repeatedly change width and height, and have the provider reflow and
-  select at most the newest `context.maxRows` transcript rows. Confirm the selected tail appears
-  immediately above the retained live frame without entering alternate screen or clearing shell
-  scrollback.
+  xterm), append durable `A`, repeatedly change width and height, and have the provider use
+  `context.previousWidth` and `context.previousMaxRows` to select the old semantic tail before
+  reflowing it at current width and taking at most `context.maxRows` rows. Confirm the selected tail
+  appears immediately above the retained live frame without entering alternate screen or clearing
+  shell scrollback.
 - After recovery of `A`, append durable `B`. Confirm visible chronology is `A`, `B`, then the
   retained editor/status frame. Change only retained status and confirm neither `A` nor `B` is
   repainted as part of the live frame.
 - Repeat shrink/grow cycles with a live frame that leaves recovery capacity, fills the viewport,
   exceeds the viewport, and is empty. Confirm zero capacity skips provider invocation and an empty
   live frame keeps a blank anchor below recovered output for a later append.
+- Grow a short viewport to a much taller one and confirm the provider budget remains bounded by the
+  old viewport capacity. Trigger a redundant same-size resize notification where possible and
+  confirm it neither invokes recovery nor clears the viewport.
 - Trigger another resize while provider rendering is intentionally delayed. Confirm no stale-width
   recovery appears and only latest-width output commits. Provider logic must remain retryable and
   free of one-shot side effects.

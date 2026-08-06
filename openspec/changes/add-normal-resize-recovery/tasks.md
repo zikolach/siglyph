@@ -1,13 +1,13 @@
 ## 1. Public recovery and diagnostics API
 
-- [x] 1.1 Add shared `NormalResizeRecoveryProvider` and `NormalResizeRecoveryContext` public types with explicit Scaladoc for synchronous invocation, retryability, strict row ownership, text-only output, platform scope, and non-goals.
+- [x] 1.1 Add shared `NormalResizeRecoveryProvider` and `NormalResizeRecoveryContext` public types with explicit Scaladoc for synchronous invocation, retryability, previous/current strict row ownership, text-only output, platform scope, and non-goals.
 - [x] 1.2 Add trailing `TUIOptions.normalResizeRecovery` with an absent default and source-compatibility coverage for existing option construction.
 - [x] 1.3 Add fail-fast startup validation for provider combinations other than normal-screen `PreserveScrollback`, with tests proving failure precedes backend startup and terminal output.
 - [x] 1.4 Add bounded resize-recovery outcome/failure diagnostic enums and an additive `TUIDiagnosticEvent` case without changing existing event arities.
 
 ## 2. Resize eligibility and owner scheduling
 
-- [x] 2.1 Add focused tests showing only a committed width/height resize can invoke recovery, while startup, append, ordinary input/action/structure/overlay rendering, image cell-size updates, and generic forced redraws cannot.
+- [x] 2.1 Add focused tests showing only a committed width/height delta can invoke recovery, while same-size notifications, startup, append, ordinary input/action/structure/overlay rendering, image cell-size updates, and generic forced redraws cannot.
 - [x] 2.2 Track coalesced geometry-change recovery eligibility and generation separately from existing force/clear flags without consuming ingress capacity or adding a scheduler category.
 - [x] 2.3 Snapshot positive width, height, and resize generation for one recovery Render attempt and preserve existing six-category owner fairness.
 - [x] 2.4 Test and preserve owner serialization, lock separation, non-recursive follow-up work, and absence of concurrent callbacks/component renders while provider code executes.
@@ -15,7 +15,7 @@
 
 ## 3. Budgeted text-only provider rendering
 
-- [x] 3.1 Add tests that render/compose/validate the live frame before provider invocation and calculate `maxRows` from terminal height minus its physical footprint, including the empty-frame anchor, overlay extension, and typed-control reserved rows.
+- [x] 3.1 Add tests that render/compose/validate the live frame before provider invocation and calculate `maxRows` from both previous and current terminal height minus each live-frame physical footprint, including viewport growth, the empty-frame anchor, overlay extension, and typed-control reserved rows.
 - [x] 3.2 Implement positive-context creation and skip provider invocation when the live frame fills or exceeds the viewport.
 - [x] 3.3 Invoke the provider on the owner outside lifecycle/write locks and retain no provider result beyond the current unpublished Render candidate.
 - [x] 3.4 Apply existing ordinary-line ANSI allowlisting, Unicode-aware width sanitization, aggregate sanitization accounting, redacted content-sample handling, and line resets to recovery lines.
@@ -43,7 +43,7 @@
 
 - [x] 6.1 Keep all semantic `VirtualTerminal` recovery contracts in shared core tests and run the same suites on JVM and Scala Native.
 - [x] 6.2 Extend JVM PTY conformance to verify viewport-clear/recovery/live/append byte ordering, synchronized output, forbidden `CSI 3 J` absence, and terminal lifecycle restoration without emulator-persistence claims.
-- [x] 6.3 Add repeated/coalesced width and height resize coverage with bounded semantic transcript selection and verify no TUI-owned complete transcript or provider output cache is introduced.
+- [x] 6.3 Add repeated/coalesced width and height resize coverage, including large height growth bounded by the previous viewport, with bounded semantic transcript selection and verify no TUI-owned complete transcript or provider output cache is introduced.
 - [x] 6.4 Confirm the implementation changes no terminal backend API and adds no third-party runtime dependency.
 
 ## 7. Documentation and release notes

@@ -199,7 +199,16 @@ import scalatui.core.{
 
 val semanticTranscript = Vector("old result", "newer result") // Application-owned and bounded.
 val recovery = NormalResizeRecoveryProvider { context =>
-  semanticTranscript
+  val invalidatedEntries = semanticTranscript.reverseIterator
+    .foldLeft((Vector.empty[String], 0)) { case ((entries, oldRows), entry) =>
+      if oldRows >= context.previousMaxRows then entries -> oldRows
+      else
+        val entryRows = Ansi.wrapLogicalLinesWithAnsi(entry, context.previousWidth).length
+        (entry +: entries) -> (oldRows + entryRows)
+    }
+    ._1
+
+  invalidatedEntries
     .flatMap(Ansi.wrapLogicalLinesWithAnsi(_, context.width))
     .takeRight(context.maxRows) // Retains oldest-to-newest order within the newest tail.
 }
@@ -211,11 +220,14 @@ val tui = TUI(terminal, TUIOptions(
 ```
 
 The provider runs synchronously only for a committed geometry-changing resize, after the live frame
-has been rendered and its strict viewport budget is known. It may run again if another resize makes
-the candidate stale, so it must be fast, side-effect-light, and retryable. It returns ordinary text
-lines only: existing SGR/OSC 8 sanitization is preserved, while typed controls, images, cursors, and
-raw terminal output are unavailable. A later append is placed in chronological order as
-`recovered tail -> newly appended output -> retained live frame`.
+has been rendered and its strict viewport budget is known. `previousWidth`, `previousHeight`, and
+`previousMaxRows` describe the old viewport and its maximum durable prefix; `maxRows` is also
+bounded by space above the new live frame, preventing viewport growth from replaying older history.
+The provider may run again if another resize makes the candidate stale, so it must be fast,
+side-effect-light, and retryable. It returns ordinary text lines only: existing SGR/OSC 8
+sanitization is preserved, while typed controls, images, cursors, and raw terminal output are
+unavailable. A later append is placed in chronological order as `recovered tail -> newly appended
+output -> retained live frame`.
 
 Siglyph does not retain the transcript or inspect emulator scrollback. The application must select
 only the current-width newest tail that belonged in the invalidated viewport; exact survivor and

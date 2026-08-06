@@ -27,12 +27,25 @@ Siglyph SHALL expose a shared-core `NormalResizeRecoveryProvider`, `NormalResize
 - **WHEN** an input, action, overlay, structure mutation, append, image cell-size update, ordinary differential redraw, or application-forced render occurs without terminal geometry change
 - **THEN** the provider SHALL NOT be invoked
 
-### Requirement: Recovery uses a strict live-frame-derived row budget
-Siglyph SHALL render, compose, validate, and prepare the retained live frame first, then calculate recovery `maxRows` as `max(0, terminalHeight - max(1, liveFrameRowCount))` from positive current dimensions and the complete prepared live-frame row count. The minimum one-row footprint SHALL reserve a physical cursor anchor for an empty retained frame.
+#### Scenario: Backend reports unchanged geometry
+- **WHEN** a resize callback reports the same positive width and height as the committed frame
+- **THEN** the provider SHALL NOT be invoked and the active viewport SHALL NOT be destructively cleared
+
+### Requirement: Recovery uses strict previous/current live-frame-derived row bounds
+Siglyph SHALL render, compose, validate, and prepare the retained live frame first. It SHALL
+calculate current capacity as `max(0, terminalHeight - max(1, liveFrameRowCount))`, previous
+capacity as `max(0, previousTerminalHeight - max(1, previousLiveFrameRowCount))`, and recovery
+`maxRows` as the smaller capacity. The context SHALL expose positive current and previous dimensions
+plus positive previous capacity whenever the provider is invoked. The minimum one-row footprint
+SHALL reserve a physical cursor anchor for an empty retained frame.
 
 #### Scenario: Live frame leaves viewport rows available
-- **WHEN** the prepared live frame has 3 rows in a terminal with height 10
-- **THEN** the provider SHALL receive `NormalResizeRecoveryContext(width, 10, 7)` using the current positive terminal width
+- **WHEN** the previous and prepared live frames each have 3 rows in terminals with height 10
+- **THEN** the provider SHALL receive current and previous positive dimensions, `previousMaxRows` 7, and `maxRows` 7
+
+#### Scenario: Viewport grows substantially
+- **WHEN** a one-row live frame moves from a terminal of height 5 to a terminal of height 100
+- **THEN** `previousMaxRows` and `maxRows` SHALL both be 4 rather than allowing 99 rows of older history to replay
 
 #### Scenario: Overlay extends the live frame
 - **WHEN** a visible overlay causes the final prepared retained frame to occupy additional rows
@@ -43,8 +56,8 @@ Siglyph SHALL render, compose, validate, and prepare the retained live frame fir
 - **THEN** every reserved frame row SHALL count toward the live-frame row count and reduce recovery capacity
 
 #### Scenario: Retained frame is empty
-- **WHEN** the prepared retained frame has zero semantic rows in a terminal with height 10
-- **THEN** Siglyph SHALL reserve one physical live-frame anchor row and the provider SHALL receive `maxRows` 9
+- **WHEN** the previous and prepared retained frames have zero semantic rows in terminals with height 10
+- **THEN** Siglyph SHALL reserve one physical live-frame anchor row and the provider SHALL receive `previousMaxRows` and `maxRows` 9
 
 #### Scenario: Live frame fills or exceeds viewport
 - **WHEN** the live-frame physical footprint is greater than or equal to terminal height
@@ -63,7 +76,11 @@ Siglyph SHALL render, compose, validate, and prepare the retained live frame fir
 - **THEN** Siglyph SHALL fail the resize candidate before terminal output rather than truncating, dropping, or partially publishing provider output
 
 ### Requirement: Applications select the semantic recovery tail
-The recovery contract SHALL require the provider to reflow application-owned semantic history at `context.width` and return only the newest durable tail that belongs in the invalidated active viewport, bounded by `context.maxRows`. Siglyph SHALL NOT retain a transcript, infer emulator scrollback survivors, request the complete history, or claim terminal-independent deduplication.
+The recovery contract SHALL require the provider to use `context.previousWidth` and
+`context.previousMaxRows` to select the application-owned semantic tail that could have occupied the
+invalidated old viewport, reflow that tail at `context.width`, and return only its newest rows bounded
+by `context.maxRows`. Siglyph SHALL NOT retain a transcript, infer emulator scrollback survivors,
+request the complete history, or claim terminal-independent deduplication.
 
 #### Scenario: Older history is already above the viewport
 - **WHEN** older durable rows remain in preserved terminal scrollback and only a newer tail occupied the invalidated viewport

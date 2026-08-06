@@ -41,6 +41,8 @@ private[core] trait RendererPolicy:
   def isAlternateScreen: Boolean
   def isFullscreenViewport: Boolean = false
   def retainedFrame: Option[PreparedFrame]
+  def retainedWidth: Int
+  def retainedHeight: Int
   def frameStartRow: Option[Int]
   def frameStartRow_=(value: Option[Int]): Unit
   def sanitizationCount: Int
@@ -94,6 +96,10 @@ private[core] final class NormalScreenPolicy(
     case TUIScreenMode.Normal    => false
 
   override def retainedFrame: Option[PreparedFrame] = previousFrame
+
+  override def retainedWidth: Int = previousWidth
+
+  override def retainedHeight: Int = previousHeight
 
   override def frameStartRow: Option[Int] = latestFrameStartRow
 
@@ -519,6 +525,8 @@ private[core] final class FullscreenViewportPolicy(
   override def isAlternateScreen: Boolean                       = true
   override def isFullscreenViewport: Boolean                    = true
   override def retainedFrame: Option[PreparedFrame]             = previousFrame
+  override def retainedWidth: Int                               = previousWidth
+  override def retainedHeight: Int                              = previousHeight
   override def frameStartRow: Option[Int]                       = Some(0)
   override def frameStartRow_=(value: Option[Int]): Unit        = ()
   override def sanitizationCount: Int                           = sanitizedLineCount
