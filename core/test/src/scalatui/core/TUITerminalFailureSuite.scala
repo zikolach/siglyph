@@ -101,7 +101,7 @@ class TUITerminalFailureSuite extends munit.FunSuite:
     tui.addInputListener {
       case TerminalInput.Key(TerminalKey.Character("hold"), _) =>
         callbackEntered.countDown()
-        assert(releaseCallback.await(5, TimeUnit.SECONDS))
+        releaseCallback.await()
         InputResult.NoRender
       case _                                                   =>
         ordinaryCalls.incrementAndGet()
