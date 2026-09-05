@@ -374,11 +374,9 @@ class TranscriptSearchSuite extends munit.FunSuite:
     assertEquals(tui.viewportSearchState.map(_.matchCount), Some(0))
     tui.stop()
 
-  test("oversized grapheme control and decomposition scan units stop without payload retention"):
-    val hugeCluster = "a" + "\u0301".repeat(1100000)
-    val hugeOsc     = "\u001b]8;;" + "SECRET".repeat(10000) + "\u0007needle"
-    val decomposed  = "\u01FA".repeat(400000) + "hidden"
-    val view        = ScrollView(Lines(Vector(hugeCluster, hugeOsc, decomposed)), primary = true)
+  test("oversized grapheme scan unit stops search without payload retention"):
+    val hugeCluster = "a" + "\u0301".repeat(5000)
+    val view        = ScrollView(Lines(Vector(hugeCluster + "SECRET")), primary = true)
     val terminal    = VirtualTerminal(16, 2)
     val tui         = TUI.fullscreen(terminal, view)
     tui.start()

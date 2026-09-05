@@ -95,6 +95,50 @@ class AnsiSuite extends munit.FunSuite:
     assertEquals(Ansi.strip(supplementary), "")
     assertEquals(Ansi.strip(oversized), Ansi.visibleControlText(oversized))
 
+  test("bounded selection scan rejects oversized graphemes and controls without retaining payload"):
+    val acceptedCluster  = "a" + "\u0301".repeat(2046) + "\u1AB0"
+    val oversizedCluster = "a" + "\u0301".repeat(2048)
+    val oversizedControl =
+      "safe\u001b]8;;" + "SECRET".repeat(Ansi.MaxRecognizedMetadataBytes) + "\u0007\u0301needle"
+
+    assertEquals(acceptedCluster.getBytes("UTF-8").length, Ansi.MaxSelectionGraphemeUtf8Bytes)
+    val accepted = Vector.newBuilder[String]
+    assertEquals(
+      Ansi.foreachSelectionGraphemeWhile(acceptedCluster, 16, Int.MaxValue) { grapheme =>
+        accepted += grapheme
+        true
+      },
+      true
+    )
+    assertEquals(accepted.result(), Vector(acceptedCluster))
+
+    assertEquals(
+      oversizedCluster.getBytes("UTF-8").length,
+      Ansi.MaxSelectionGraphemeUtf8Bytes + 1
+    )
+    val retained = Vector.newBuilder[String]
+
+    assertEquals(
+      Ansi.foreachSelectionGraphemeWhile(oversizedCluster, 16, Int.MaxValue) { grapheme =>
+        retained += grapheme
+        true
+      },
+      false
+    )
+    assertEquals(retained.result(), Vector.empty)
+
+    val controlRetained = Vector.newBuilder[String]
+    assertEquals(
+      Ansi.foreachSelectionGraphemeWhile(oversizedControl, 16, Int.MaxValue) { grapheme =>
+        controlRetained += grapheme
+        true
+      },
+      false
+    )
+    val retainedText    = controlRetained.result().mkString
+    assertEquals(retainedText, "saf")
+    assert(!retainedText.contains("SECRET"))
+
   test("truncate preserves ANSI and appends reset/ellipsis"):
     val truncated = Ansi.truncateToWidth("\u001b[31mhello world", 8)
     assertEquals(Ansi.visibleWidth(truncated), 8)

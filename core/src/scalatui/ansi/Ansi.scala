@@ -172,6 +172,9 @@ object Ansi:
   /** Maximum complete SGR or OSC 8 sequence size recognized for execution, in UTF-8 bytes. */
   val MaxRecognizedMetadataBytes: Int = 4096
 
+  /** Maximum UTF-8 source bytes scanned for one selectable grapheme. */
+  private[scalatui] val MaxSelectionGraphemeUtf8Bytes: Int = 4096
+
   /**
    * Extract a complete supported escape at `offset` when its complete UTF-8 encoding, including the
    * introducer and terminator, is at most [[MaxRecognizedMetadataBytes]]. Unsupported, private,
@@ -222,6 +225,7 @@ object Ansi:
     var printableBytes = 0L
     var metadataBytes  = 0L
     var emitted        = 0
+    var clusterBytes   = 0L
     var continue       = maxGraphemes > 0 && maxInputUtf8Bytes > 0
     while index < value.length && continue do
       boundedControlCandidate(
@@ -234,18 +238,22 @@ object Ansi:
           index = end
         case BoundedCandidate.Oversized            => continue = false
         case BoundedCandidate.NotCandidate         =>
-          val codePoint = value.codePointAt(index)
-          val bytes     = utf8BytesForCodePoint(codePoint)
-          val end       = index + Character.charCount(codePoint)
-          val control   = codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f)
-          val boundary  = !control && engine.accept(codePoint) && cluster.nonEmpty
+          val codePoint   = value.codePointAt(index)
+          val bytes       = utf8BytesForCodePoint(codePoint)
+          val end         = index + Character.charCount(codePoint)
+          val control     = codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f)
+          val boundary    = !control && engine.accept(codePoint) && cluster.nonEmpty
           if boundary then
             continue = emitted < maxGraphemes && consume(cluster.result())
             emitted += 1
             cluster.clear()
-          if continue && printableBytes + bytes <= maxInputUtf8Bytes.toLong then
+            clusterBytes = 0L
+          val clusterFits = control || clusterBytes + bytes <= MaxSelectionGraphemeUtf8Bytes.toLong
+          if continue && printableBytes + bytes <= maxInputUtf8Bytes.toLong && clusterFits then
             printableBytes += bytes
-            if !control then cluster.appendAll(Character.toChars(codePoint))
+            if !control then
+              clusterBytes += bytes
+              cluster.appendAll(Character.toChars(codePoint))
             index = end
           else continue = false
     if continue && cluster.nonEmpty && emitted < maxGraphemes then

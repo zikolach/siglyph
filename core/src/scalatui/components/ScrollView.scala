@@ -84,8 +84,9 @@ private enum SelectionGranularity:
  * indicator callbacks run during rendering after the state snapshot is released. They should be
  * side-effect free. Search retains at most [[ScrollView.MaxRetainedSearchRows]] document rows and
  * the configured match and query limits. Selection and search request range-rendered documents in
- * bounded chunks from row zero and stop when their limits are reached. The view does not schedule
- * growth, animation, or edge-scroll timers.
+ * bounded chunks from row zero and stop when their limits are reached. An individual selectable
+ * grapheme over 4096 UTF-8 source bytes stops indexing before partial retention. The view does not
+ * schedule growth, animation, or edge-scroll timers.
  *
  * @param child
  *   Content owned by this view. Context and invalidation propagate to this child.
