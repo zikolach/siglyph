@@ -26,6 +26,22 @@ Built-in mutable components SHALL define one JVM and Scala Native threading cont
 - **WHEN** supported mutation APIs are called from more than one execution context
 - **THEN** their visible state transitions use the documented serialization boundary rather than relying on unsynchronized field visibility
 
+#### Scenario: Attached effects share session order
+- **WHEN** effectful transitions commit across components attached to one active TUI
+- **THEN** state commit and immutable effect-batch admission are atomic and the existing single-owner TUI drain executes batches in one session order outside library locks
+
+#### Scenario: Effect admission is bounded
+- **WHEN** 4096 effect batches are queued while one batch executes
+- **THEN** the next effectful transition is rejected before state mutation with bounded diagnostics
+
+#### Scenario: Concurrent attached caller does not wait
+- **WHEN** another attached callback batch is executing
+- **THEN** a concurrent or reentrant transition returns after state commit and enqueue rather than waiting for callback completion
+
+#### Scenario: Detached reentrant failure reaches the outer drain
+- **WHEN** a detached callback triggers a reentrant transition whose effect fails after the nested caller returned
+- **THEN** the active outer drain reports that failure and suppresses later failures on the first failure
+
 ### Requirement: Component callback isolation
 Built-in components SHALL invoke application callbacks, providers, cancellation handles, and other application-controlled code without holding component-state, TUI lifecycle, or terminal-write locks. State required for a callback SHALL be captured before the callback, and callback results SHALL be applied through the component's serialized state boundary.
 
@@ -40,6 +56,14 @@ Built-in components SHALL invoke application callbacks, providers, cancellation 
 #### Scenario: Callback throws
 - **WHEN** application-controlled component code throws during runtime-owned input handling
 - **THEN** the runtime records the failure and performs normal cleanup without leaving component locks retained
+
+#### Scenario: Stop closes component admission
+- **WHEN** stopping begins while attached effect batches remain accepted
+- **THEN** the TUI drains that finite prefix before cleanup and rejects later external effectful mutations before state change
+
+#### Scenario: Context handoff requires detach
+- **WHEN** a contextual component is assigned a second active TUI context without an intervening completed detach
+- **THEN** the handoff is rejected and attach and detach effects remain on their respective new and old coordinators
 
 ### Requirement: Viewport rendering avoids unnecessary work
 The viewport renderer SHALL cache reusable component renders by component identity and width for one frame, SHALL avoid recompositing unchanged full-width visible rows, and SHALL skip layout painting and search highlighting for clipped or offscreen rows where semantic control cleanup does not require work.

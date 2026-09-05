@@ -1,6 +1,7 @@
 package scalatui.image
 
 import scalatui.ansi.Ansi
+import scalatui.components.ComponentStateBoundary
 import scalatui.core.{
   Component,
   ComponentRender,
@@ -18,6 +19,7 @@ import scalatui.terminal.{
   ImageCellSize,
   ImageRenderOptions,
   TerminalCapabilities,
+  TerminalCapabilitiesSource,
   TerminalImageProtocol,
   TerminalRenderControl
 }
@@ -254,11 +256,19 @@ object ImageSizing:
  * output. Unsupported capability and supported geometry above 10,000 frame rows return readable
  * ordinary text with no control. The geometry guard runs before frame-row or image-id allocation.
  *
+ * A fullscreen viewport applies stack, scroll, viewport, and overlay clips to the typed footprint
+ * before encoding. Fully clipped images emit no transmission. Partial Kitty and iTerm2 images are
+ * omitted because cell geometry cannot validate source-pixel cropping. Recently offscreen Kitty
+ * data can be retained under the owning TUI's bounded retention options and returned with a typed
+ * placement-only control. iTerm2 images retransmit only after their complete footprint is visible.
+ *
  * By default, this high-level component opts into runtime terminal cell dimensions because it is
  * rendered inside a [[scalatui.core.TUI]] lifecycle that sends the cell-size query on start. Pass
  * [[scalatui.terminal.ImageRenderOptions]] with
  * [[scalatui.terminal.ImageCellDimensionsSource.Fixed]] when component rendering must use
- * caller-supplied deterministic cell dimensions.
+ * caller-supplied deterministic cell dimensions. Existing constructors keep their fixed local
+ * capability choice. [[Image.withSessionCapabilities]] opts into the owning TUI session's detected
+ * and overridden capabilities. A session-disabled capability remains disabled for either choice.
  */
 final class Image(
     payload: Base64ImagePayload,
@@ -267,35 +277,42 @@ final class Image(
     options: ImageRenderOptions = ImageRenderOptions(
       cellDimensionsSource = ImageCellDimensionsSource.Runtime
     ),
-    theme: ImageTheme = ImageTheme()
+    theme: ImageTheme = ImageTheme(),
+    capabilitySource: TerminalCapabilitiesSource = TerminalCapabilitiesSource.Fixed
 ) extends Component,
       ContextualComponent:
-  private var imageId    = options.imageId
-  private var tuiContext = Option.empty[TUIContext]
+  private val stateBoundary = ComponentStateBoundary()
+  private var imageId       = options.imageId
+  private var tuiContext    = Option.empty[TUIContext]
 
-  override def tuiContext_=(value: Option[TUIContext]): Unit = tuiContext = value
+  override def tuiContext_=(value: Option[TUIContext]): Unit =
+    stateBoundary.transitionContext(tuiContext, value) { _ => tuiContext = value }
 
   /** Protocol image id used for Kitty render/reuse flows, if one has been allocated. */
-  def currentImageId: Option[Int] = imageId
+  def currentImageId: Option[Int] = stateBoundary(imageId)
 
   override def render(width: Int): ComponentRender =
-    val safeWidth     = math.max(0, width)
-    val renderOptions = effectiveRenderOptions
-    if capabilities.images.nonEmpty &&
+    val (imageIdSnapshot, contextSnapshot) = stateBoundary((imageId, tuiContext))
+    val safeWidth                          = math.max(0, width)
+    val renderOptions                      = effectiveRenderOptions(imageIdSnapshot, contextSnapshot)
+    val renderCapabilities                 = effectiveCapabilities(contextSnapshot)
+    if renderCapabilities.images.nonEmpty &&
       renderedRows(safeWidth, renderOptions) > Image.MaxRenderedFrameRows
     then fallback(safeWidth)
-    else if safeWidth <= 0 && capabilities.images.nonEmpty then ComponentRender.text("")
+    else if safeWidth <= 0 && renderCapabilities.images.nonEmpty then ComponentRender.text("")
     else
       TerminalImageProtocol.renderBase64Image(
         payload,
         dimensions,
-        capabilities,
+        renderCapabilities,
         safeWidth,
         renderOptions
       ) match
         case Some(result) if result.rows <= Image.MaxRenderedFrameRows =>
           val lines = Vector.fill(result.rows)("")
-          imageId = result.imageId.orElse(imageId)
+          stateBoundary {
+            if imageId === imageIdSnapshot then imageId = result.imageId.orElse(imageIdSnapshot)
+          }
           ComponentRender(
             lines,
             Vector(TerminalControlPlacement(row = 0, column = 0, result.control)),
@@ -303,17 +320,32 @@ final class Image(
           )
         case Some(_) | None                                            => fallback(safeWidth)
 
-  private def effectiveRenderOptions: ImageRenderOptions =
-    val currentOptions = options.copy(imageId = imageId)
+  private def effectiveRenderOptions(
+      imageIdSnapshot: Option[Int],
+      contextSnapshot: Option[TUIContext]
+  ): ImageRenderOptions =
+    val currentOptions = options.copy(imageId = imageIdSnapshot)
     currentOptions.cellDimensionsSource match
       case ImageCellDimensionsSource.Fixed   => currentOptions
       case ImageCellDimensionsSource.Runtime =>
         currentOptions.copy(
-          cellDimensions = tuiContext.map(_.imageCellDimensions).getOrElse(
+          cellDimensions = contextSnapshot.map(_.imageCellDimensions).getOrElse(
             currentOptions.cellDimensions
           ),
           cellDimensionsSource = ImageCellDimensionsSource.Fixed
         )
+
+  private def effectiveCapabilities(contextSnapshot: Option[TUIContext]): TerminalCapabilities =
+    contextSnapshot
+      .map(context =>
+        TerminalCapabilities.forComponent(
+          capabilities,
+          context.terminalCapabilities,
+          context.terminalCapabilityOverrides,
+          capabilitySource
+        )
+      )
+      .getOrElse(capabilities)
 
   private def renderedRows(width: Int, renderOptions: ImageRenderOptions): Int =
     TerminalImageProtocol.calculateCellSize(dimensions, renderOptions, width).heightCells
@@ -334,10 +366,31 @@ final class Image(
    * final output.
    */
   def cleanupSequence: Option[TerminalRenderControl] =
-    imageId.flatMap(TerminalImageProtocol.deleteImage(_, capabilities))
+    val (imageIdSnapshot, contextSnapshot) = stateBoundary((imageId, tuiContext))
+    imageIdSnapshot.flatMap(
+      TerminalImageProtocol.deleteImage(_, effectiveCapabilities(contextSnapshot))
+    )
 
 object Image:
   private[image] val MaxRenderedFrameRows = 10000
+
+  /** Create an image that uses its owning TUI session capabilities when attached. */
+  def withSessionCapabilities(
+      payload: Base64ImagePayload,
+      dimensions: ImageDimensions,
+      options: ImageRenderOptions = ImageRenderOptions(
+        cellDimensionsSource = ImageCellDimensionsSource.Runtime
+      ),
+      theme: ImageTheme = ImageTheme()
+  ): Image =
+    new Image(
+      payload,
+      dimensions,
+      TerminalCapabilities.Conservative,
+      options,
+      theme,
+      TerminalCapabilitiesSource.Session
+    )
 
   /**
    * Validate raw standard base64 before constructing an image component on JVM or Scala Native.
@@ -353,8 +406,9 @@ object Image:
       options: ImageRenderOptions = ImageRenderOptions(
         cellDimensionsSource = ImageCellDimensionsSource.Runtime
       ),
-      theme: ImageTheme = ImageTheme()
+      theme: ImageTheme = ImageTheme(),
+      capabilitySource: TerminalCapabilitiesSource = TerminalCapabilitiesSource.Fixed
   ): Either[Base64ImagePayloadError, Image] =
     Base64ImagePayload.from(base64Data).map(payload =>
-      new Image(payload, dimensions, capabilities, options, theme)
+      new Image(payload, dimensions, capabilities, options, theme, capabilitySource)
     )

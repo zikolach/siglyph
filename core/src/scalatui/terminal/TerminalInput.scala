@@ -88,6 +88,9 @@ object MouseAction:
   /** Mouse button release. */
   final case class Release(button: MouseButton) extends MouseAction
 
+  /** Pointer movement with the button state reported by the terminal. */
+  final case class Move(buttonState: MouseButtonState) extends MouseAction
+
   /** Mouse wheel movement. */
   final case class Wheel(direction: MouseWheelDirection) extends MouseAction
 
@@ -101,6 +104,16 @@ object MouseButton:
 
   /** SGR button identity bits without modifier, motion, or wheel flags. */
   final case class Other(code: Int) extends MouseButton
+
+/** Button state carried by an SGR pointer-motion report. */
+sealed trait MouseButtonState derives CanEqual
+
+object MouseButtonState:
+  /** Motion reported without a pressed button. */
+  case object Released extends MouseButtonState
+
+  /** Motion reported while this button is pressed. */
+  final case class Pressed(button: MouseButton) extends MouseButtonState
 
 /** Mouse wheel direction parsed from terminal wheel reports. */
 enum MouseWheelDirection derives CanEqual:

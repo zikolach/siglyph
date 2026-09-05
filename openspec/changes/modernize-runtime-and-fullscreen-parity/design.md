@@ -44,7 +44,9 @@ An optional capability trait was considered. Rejected because every terminal bac
 
 ### 2. Use snapshot, effect, and commit phases in mutable components
 
-Built-in mutable components use one private state boundary. Each operation follows these phases:
+Built-in mutable components use one private state boundary and one coordinator binding. Detached boundaries own a bounded local FIFO. Each TUI lifecycle opens one bounded `ComponentEffectCoordinator` generation shared by every attached built-in. State commit and immutable effect-batch admission occur atomically under the component boundary and coordinator admission lock, which gives attached effects one cross-component session order. The existing TUI work-drain owner executes attached batches outside component, coordinator, lifecycle, and terminal-output locks. No process-global registry or executor is used.
+
+Each operation follows these phases:
 
 1. Validate, mutate, or capture an immutable snapshot under the state boundary.
 2. Release the state boundary.
@@ -55,6 +57,10 @@ Built-in mutable components use one private state boundary. Each operation follo
 Rendering captures a coherent immutable snapshot before formatting output. Public scheduler-driven methods such as `Loader.tick`, message updates, and cancellation use the same boundary. Runtime-owned input and render callbacks remain serialized by the TUI drain, while public calls from other execution contexts are linearized by the component boundary.
 
 Holding component monitors while invoking callbacks was considered. Rejected because it permits application lock inversion and makes slow providers block unrelated component state access.
+
+Each coordinator admits at most 4096 queued batches plus one executing batch. Full admission fails with a bounded diagnostic before state mutation. An uncontended caller may acquire the owning drain synchronously. Reentrant and concurrent callers commit and enqueue without waiting. Detached failures propagate through the active outer drain, with later failures suppressed on the first. Attached failures enter the TUI first-failure and cleanup path.
+
+Context changes atomically update component state and coordinator ownership. Attach effects use the new coordinator. Detach effects use the old coordinator. Direct active-context handoff is rejected until detach completes. Start opens a fresh generation. Stopping closes external admission, drains the finite accepted prefix, permits only bounded runtime-owned context teardown, and then restores terminal state. This prevents callback chains from extending cleanup indefinitely.
 
 ### 3. Extract renderer policies behind the existing TUI facade
 

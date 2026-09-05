@@ -1,11 +1,12 @@
 package scalatui.terminal.native
 
-import scalatui.terminal.{KittyKeyboardProtocol, Terminal}
+import scalatui.terminal.{KittyKeyboardProtocol, Terminal, TerminalMouseTrackingMode}
 import scalatui.syntax.Equality.*
 
 import java.io.{IOException, OutputStream, PrintStream}
 import java.util.concurrent.{CountDownLatch, TimeUnit}
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
+import scala.scalanative.posix.errno
 
 class PosixTerminalSuite extends munit.FunSuite:
   test("output-side capabilities do not require or invoke callback delivery"):
@@ -29,6 +30,27 @@ class PosixTerminalSuite extends munit.FunSuite:
       true
     )
     assert(KittyKeyboardProtocol.QuerySequence.nonEmpty)
+
+  test("Native mouse tracking enables each minimum mode with one SGR cleanup obligation"):
+    Vector(
+      TerminalMouseTrackingMode.Basic,
+      TerminalMouseTrackingMode.Drag,
+      TerminalMouseTrackingMode.AllMotion
+    ).foreach { mode =>
+      val terminal = PosixTerminal(initialColumns = 80, initialRows = 24)
+      val writes   = scala.collection.mutable.ArrayBuffer.empty[String]
+      terminal.writeFailureForTesting = data =>
+        writes += data
+        None
+
+      Terminal.setMouseTracking(terminal, mode)
+      terminal.start(_ => (), () => ())
+      terminal.stop()
+      terminal.stop()
+
+      assert(writes.contains(Terminal.MouseProtocol.enable(mode)))
+      assertEquals(writes.count(_ === Terminal.MouseProtocol.disable(mode)), 1)
+    }
 
   test("failed Kitty enable retains Native disable cleanup and retries it on stop"):
     val terminal    = PosixTerminal(initialColumns = 80, initialRows = 24)
@@ -247,3 +269,133 @@ class PosixTerminalSuite extends munit.FunSuite:
 
     terminal.cleanupFailureForTesting = _ => None
     terminal.stop()
+
+  test("POSIX read errors distinguish retry, stop, and unexpected failure"):
+    assertEquals(
+      PosixTerminal.classifyReadError(errno.EINTR, active = true),
+      PosixTerminal.ReadErrorClassification.Retry
+    )
+    assertEquals(
+      PosixTerminal.classifyReadError(errno.EAGAIN, active = true),
+      PosixTerminal.ReadErrorClassification.Retry
+    )
+    assertEquals(
+      PosixTerminal.classifyReadError(errno.EIO, active = false),
+      PosixTerminal.ReadErrorClassification.Stop
+    )
+    PosixTerminal.classifyReadError(errno.EIO, active = true) match
+      case PosixTerminal.ReadErrorClassification.Failure(error) =>
+        assert(error.getMessage.contains(s"errno ${errno.EIO}"), error.getMessage)
+      case other                                                => fail(s"unexpected classification: $other")
+
+  test("Native input, flush, and resize workers each report and restore state"):
+    Vector("input", "flush", "resize").foreach { failingWorker =>
+      val observed       = CountDownLatch(1)
+      val releaseInput   = CountDownLatch(1)
+      val writes         = scala.collection.mutable.ArrayBuffer.empty[String]
+      val terminal       = PosixTerminal(initialColumns = 80, initialRows = 24)
+      terminal.writeFailureForTesting = data =>
+        writes += data
+        None
+      val failure        = RuntimeException(s"$failingWorker failed")
+      terminal.workerFailureForTesting = worker =>
+        if (worker === "input") && (failingWorker !== "input") then
+          releaseInput.await()
+          None
+        else Option.when(worker === failingWorker)(failure)
+      val reported       = AtomicReference[Throwable]()
+      val callbackThread = AtomicReference[Thread]()
+      val caller         = Thread.currentThread()
+      terminal.start(
+        _ => (),
+        () => (),
+        error => {
+          callbackThread.set(Thread.currentThread())
+          reported.set(error)
+          observed.countDown()
+        }
+      )
+
+      assert(observed.await(5, TimeUnit.SECONDS), s"$failingWorker failure was not reported")
+      releaseInput.countDown()
+      terminal.stop()
+
+      assert(callbackThread.get() ne caller)
+      assert(reported.get() eq failure)
+      assert(writes.contains("\u001b[?2004h"), writes.toVector)
+      assert(writes.contains("\u001b[?2004l"), writes.toVector)
+    }
+
+  test("same-generation Native input and resize failures publish after cleanup starts"):
+    val inputFailure  = RuntimeException("input failed")
+    val resizeFailure = RuntimeException("resize failed")
+    val failuresReady = CountDownLatch(2)
+    val claimsReady   = CountDownLatch(2)
+    val observed      = CountDownLatch(2)
+    val firstCallback = AtomicBoolean(true)
+    val writes        = scala.collection.mutable.ArrayBuffer.empty[String]
+    val terminal      = PosixTerminal(initialColumns = 80, initialRows = 24)
+    terminal.writeFailureForTesting = data =>
+      writes += data
+      None
+    terminal.workerFailureForTesting = worker =>
+      val failure = worker match
+        case "input"  => Some(inputFailure)
+        case "resize" => Some(resizeFailure)
+        case _        => None
+      failure.foreach { _ =>
+        failuresReady.countDown()
+        var ready = false
+        while !ready do
+          try ready = failuresReady.await(5, TimeUnit.SECONDS)
+          catch case _: InterruptedException => ()
+      }
+      failure
+    terminal.workerFailureClaimedForTesting = _ =>
+      claimsReady.countDown()
+      var ready = false
+      while !ready do
+        try ready = claimsReady.await(5, TimeUnit.SECONDS)
+        catch case _: InterruptedException => ()
+    val failures      = scala.collection.mutable.ArrayBuffer.empty[Throwable]
+    terminal.start(
+      _ => (),
+      () => (),
+      error =>
+        failures.synchronized(failures += error)
+        try
+          if firstCallback.compareAndSet(true, false) then terminal.stop()
+        finally observed.countDown()
+    )
+
+    assert(observed.await(5, TimeUnit.SECONDS))
+    terminal.stop()
+
+    assertEquals(
+      failures.synchronized(failures.toSet),
+      Set[Throwable](inputFailure, resizeFailure)
+    )
+    assert(writes.contains("\u001b[?2004l"), writes.toVector)
+
+  test("Native stale worker failure after explicit stop is not reported"):
+    val entered  = CountDownLatch(1)
+    val release  = CountDownLatch(1)
+    val failures = AtomicInteger(0)
+    val terminal = PosixTerminal(initialColumns = 80, initialRows = 24)
+    terminal.workerFailureForTesting = worker =>
+      if worker === "input" then
+        entered.countDown()
+        var released = false
+        while !released do
+          try released = release.await(5, TimeUnit.SECONDS)
+          catch case _: InterruptedException => ()
+        Some(RuntimeException("stale input failure"))
+      else None
+    terminal.start(_ => (), () => (), _ => failures.incrementAndGet())
+    assert(entered.await(5, TimeUnit.SECONDS))
+
+    terminal.stop()
+    release.countDown()
+    Thread.sleep(100)
+
+    assertEquals(failures.get(), 0)

@@ -24,24 +24,26 @@ final class TruncatedText(
     paddingX: Int = 0,
     paddingY: Int = 0
 ) extends Component:
-  private var content = initialText
+  private val stateBoundary = ComponentStateBoundary()
+  private var content       = initialText
 
-  def text: String = content
+  def text: String = stateBoundary(content)
 
-  def text_=(value: String): Unit = content = value
+  def text_=(value: String): Unit = stateBoundary { content = value }
 
   override def render(width: Int): ComponentRender =
-    val safeWidth = math.max(0, width)
-    val emptyLine = " ".repeat(safeWidth)
-    val vertical  = Vector.fill(math.max(0, paddingY))(emptyLine)
-    ComponentRender.text(vertical ++ Vector(contentLine(safeWidth)) ++ vertical)
+    val contentSnapshot = stateBoundary(content)
+    val safeWidth       = math.max(0, width)
+    val emptyLine       = " ".repeat(safeWidth)
+    val vertical        = Vector.fill(math.max(0, paddingY))(emptyLine)
+    ComponentRender.text(vertical ++ Vector(contentLine(contentSnapshot, safeWidth)) ++ vertical)
 
-  private def contentLine(width: Int): String =
+  private def contentLine(contentSnapshot: String, width: Int): String =
     if width <= 0 then ""
     else
       val horizontal     = " ".repeat(math.max(0, paddingX))
       val availableWidth = math.max(1, width - math.max(0, paddingX) * 2)
-      val firstLine      = content.takeWhile(ch => (ch !== '\r') && (ch !== '\n'))
+      val firstLine      = contentSnapshot.takeWhile(ch => (ch !== '\r') && (ch !== '\n'))
       val displayText    = Ansi.truncateToWidth(firstLine, availableWidth, "")
       val padded         = horizontal + displayText + horizontal
       if Ansi.visibleWidth(padded) === width then padded

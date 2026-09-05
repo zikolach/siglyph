@@ -29,19 +29,28 @@ final class VirtualTerminal(initialColumns: Int = 80, initialRows: Int = 24)
   private var autowrapEnabled                     = true
   private var wrapPending                         = false
   private val screen                              = ArrayBuffer.fill(currentRows)(blankRow())
-  @volatile private var mouseReportingEnabled     = false
+  @volatile private var mouseTrackingMode         = TerminalMouseTrackingMode.Disabled
+  private var mouseCleanupPending                 = false
 
   override def mouseReportingEnabled_=(enabled: Boolean): Unit =
-    mouseReportingEnabled = enabled
+    mouseTrackingMode =
+      if enabled then TerminalMouseTrackingMode.Basic else TerminalMouseTrackingMode.Disabled
+
+  override def mouseTrackingMode_=(mode: TerminalMouseTrackingMode): Unit =
+    mouseTrackingMode = mode
 
   override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
     inputHandler = onInput
     resizeHandler = onResize
     running = true
-    if mouseReportingEnabled then write(Terminal.MouseProtocol.Enable)
+    if mouseTrackingMode !== TerminalMouseTrackingMode.Disabled then
+      mouseCleanupPending = true
+      write(Terminal.MouseProtocol.enable(mouseTrackingMode))
 
   override def stop(): Unit =
-    if mouseReportingEnabled then write(Terminal.MouseProtocol.Disable)
+    if mouseCleanupPending then
+      write(Terminal.MouseProtocol.disable(mouseTrackingMode))
+      mouseCleanupPending = false
     running = false
     inputHandler = _ => ()
     resizeHandler = () => ()

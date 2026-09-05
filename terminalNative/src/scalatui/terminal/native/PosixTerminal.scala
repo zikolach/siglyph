@@ -11,6 +11,7 @@ import scalatui.terminal.{
   TerminalInput,
   TerminalInputChunk,
   TerminalMouseProtocolSupport,
+  TerminalMouseTrackingMode,
   TerminalInputBuffer,
   OrderedInputDelivery,
   TerminalProgressSupport,
@@ -21,6 +22,7 @@ import scala.scalanative.unsafe.*
 import scala.scalanative.unsigned.*
 import java.io.IOException
 
+import scala.scalanative.posix.errno
 import scala.scalanative.posix.termios
 import scala.scalanative.posix.termios.*
 import scala.scalanative.posix.termiosOps.*
@@ -61,19 +63,35 @@ final class PosixTerminal(
   private val inputBuffer                                                   = TerminalInputBuffer()
   private val inputDelivery                                                 = OrderedInputDelivery()
   private var inputGeneration                                               = 0L
+  private var inputFailureGeneration                                        = -1L
+  private var flushFailureGeneration                                        = -1L
+  private var resizeFailureGeneration                                       = -1L
   private var inputCleanupPending                                           = false
   private var pasteCleanupPending                                           = false
   private var kittyCleanupPending                                           = false
-  @volatile private var mouseReportingEnabled                               = false
+  @volatile private var mouseTrackingMode                                   = TerminalMouseTrackingMode.Disabled
   private var mouseCleanupPending                                           = false
   private[native] var cleanupFailureForTesting: String => Option[Throwable] = _ => None
+  private[native] var workerFailureForTesting: String => Option[Throwable]  = _ => None
+  private[native] var workerFailureClaimedForTesting: String => Unit        = _ => ()
   private[native] var writeFailureForTesting: String => Option[Throwable]   = _ => None
   private val keyboardProtocolNegotiator                                    = KittyKeyboardProtocolNegotiator()
 
   override def mouseReportingEnabled_=(enabled: Boolean): Unit =
-    mouseReportingEnabled = enabled
+    mouseTrackingMode =
+      if enabled then TerminalMouseTrackingMode.Basic else TerminalMouseTrackingMode.Disabled
 
-  override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit = synchronized {
+  override def mouseTrackingMode_=(mode: TerminalMouseTrackingMode): Unit =
+    mouseTrackingMode = mode
+
+  override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
+    start(onInput, onResize, _ => ())
+
+  override def start(
+      onInput: TerminalInput => Unit,
+      onResize: () => Unit,
+      onFailure: Throwable => Unit
+  ): Unit = synchronized {
     if running then throw IllegalStateException("PosixTerminal is already running")
     else
       reapInputThread()
@@ -106,22 +124,28 @@ final class PosixTerminal(
         enableRawMode()
         pasteCleanupPending = true
         write("\u001b[?2004h")
-        if mouseReportingEnabled then
+        if mouseTrackingMode !== TerminalMouseTrackingMode.Disabled then
           mouseCleanupPending = true
-          write(Terminal.MouseProtocol.Enable)
+          write(Terminal.MouseProtocol.enable(mouseTrackingMode))
         inputGeneration = inputDelivery.start(inputBuffer.clear())
         inputCleanupPending = true
         running = true
         val generation = inputGeneration
-        val thread     = Thread(() => readLoop(generation), "siglyph-posix-terminal-input")
-        val flusher    = Thread(() => flushLoop(generation), "siglyph-posix-terminal-flush")
+        val thread     = Thread(
+          () => readLoop(generation, onFailure),
+          "siglyph-posix-terminal-input"
+        )
+        val flusher    = Thread(
+          () => flushLoop(generation, onFailure),
+          "siglyph-posix-terminal-flush"
+        )
         thread.setDaemon(true)
         flusher.setDaemon(true)
         inputThread = thread
         flushThread = flusher
         thread.start()
         flusher.start()
-        startResizePolling()
+        startResizePolling(generation, onFailure)
       catch
         case e: Throwable =>
           running = false
@@ -230,7 +254,7 @@ final class PosixTerminal(
         savedState = null
       else throw IllegalStateException("tcsetattr restore mode failed")
 
-  private def refreshSize(notify: Boolean): Boolean =
+  private def refreshSize(notify: Boolean, failOnError: Boolean = false): Boolean =
     val winsize = stackalloc[Winsize]()
     if ioctl.ioctl(
         unistd.STDOUT_FILENO,
@@ -247,12 +271,19 @@ final class PosixTerminal(
         if changed && notify then resizeHandler()
         changed
       else false
+    else if failOnError then
+      val errorNumber = errno.errno
+      if PosixTerminal.isRetryableError(errorNumber) then false
+      else throw IOException(s"POSIX terminal size query failed with errno $errorNumber")
     else false
 
-  private def startResizePolling(): Unit =
+  private def startResizePolling(generation: Long, onFailure: Throwable => Unit): Unit =
     if (resizeThread eq null) then
       resizePolling = true
-      val thread = Thread(() => resizeLoop(), "siglyph-posix-terminal-resize")
+      val thread = Thread(
+        () => resizeLoop(generation, onFailure),
+        "siglyph-posix-terminal-resize"
+      )
       thread.setDaemon(true)
       resizeThread = thread
       thread.start()
@@ -264,23 +295,26 @@ final class PosixTerminal(
   private def reapResizeThread(): Unit =
     if Option(resizeThread).exists(!_.isAlive) then resizeThread = null
 
-  private def resizeLoop(): Unit =
+  private def resizeLoop(generation: Long, onFailure: Throwable => Unit): Unit =
     try
       while resizePolling do
-        try
-          Thread.sleep(PosixTerminal.ResizePollMillis)
-          refreshSize(notify = true)
-        catch
-          case _: InterruptedException => resizePolling = false
-          case _: Throwable            => ()
+        Thread.sleep(PosixTerminal.ResizePollMillis)
+        workerFailureForTesting("resize").foreach(throw _)
+        refreshSize(notify = true, failOnError = true)
+    catch case error: Throwable => reportResizeFailure(generation, error, onFailure)
     finally clearResizeThread(Thread.currentThread())
 
-  private def readLoop(generation: Long): Unit =
+  private def readLoop(generation: Long, onFailure: Throwable => Unit): Unit =
     try
       val buffer = stackalloc[CChar](4096)
       while inputDelivery.isActive(generation) do
+        workerFailureForTesting("input").foreach(throw _)
         val read = unistd.read(unistd.STDIN_FILENO, buffer, 4096.toUSize)
-        if read < 0 then terminateGeneration(generation)
+        if read < 0 then
+          PosixTerminal.classifyReadError(errno.errno, inputDelivery.isActive(generation)) match
+            case PosixTerminal.ReadErrorClassification.Retry          => ()
+            case PosixTerminal.ReadErrorClassification.Stop           => terminateGeneration(generation)
+            case PosixTerminal.ReadErrorClassification.Failure(error) => throw error
         else if read.toLong === 0L then ()
         else
           val bytes = Array.ofDim[Byte](read)
@@ -290,20 +324,63 @@ final class PosixTerminal(
             i += 1
           val chunk = TerminalInputChunk(bytes)
           parseAndDeliver(generation, inputBuffer.process(chunk))
+    catch case error: Throwable => reportFailure(generation, "input", error, onFailure)
     finally
       terminateGeneration(generation)
       clearInputThread(Thread.currentThread())
 
-  private def flushLoop(generation: Long): Unit =
+  private def flushLoop(generation: Long, onFailure: Throwable => Unit): Unit =
     try
       while inputDelivery.isActive(generation) do
-        try
-          Thread.sleep(PosixTerminal.IncompleteEscapeFlushMillis)
-          flushPending(generation)
-        catch
-          case _: InterruptedException => terminateGeneration(generation)
-          case _: Throwable            => ()
+        Thread.sleep(PosixTerminal.IncompleteEscapeFlushMillis)
+        workerFailureForTesting("flush").foreach(throw _)
+        flushPending(generation)
+    catch case error: Throwable => reportFailure(generation, "flush", error, onFailure)
     finally clearFlushThread(Thread.currentThread())
+
+  private def reportFailure(
+      generation: Long,
+      worker: String,
+      error: Throwable,
+      onFailure: Throwable => Unit
+  ): Unit =
+    if claimWorkerFailure(generation, worker) then
+      try workerFailureClaimedForTesting(worker)
+      catch case _: Throwable => ()
+      try onFailure(error)
+      catch case _: Throwable => ()
+
+  private def claimWorkerFailure(generation: Long, worker: String): Boolean = synchronized {
+    if !running || (inputGeneration !== generation) then false
+    else
+      worker match
+        case "input" if inputFailureGeneration !== generation =>
+          inputFailureGeneration = generation
+          true
+        case "flush" if flushFailureGeneration !== generation =>
+          flushFailureGeneration = generation
+          true
+        case _                                                => false
+  }
+
+  private def reportResizeFailure(
+      generation: Long,
+      error: Throwable,
+      onFailure: Throwable => Unit
+  ): Unit =
+    val claimed = synchronized {
+      val active = running && resizePolling && (inputGeneration === generation)
+      if active && (resizeFailureGeneration !== generation) then
+        resizeFailureGeneration = generation
+        resizePolling = false
+        true
+      else false
+    }
+    if claimed then
+      try workerFailureClaimedForTesting("resize")
+      catch case _: Throwable => ()
+      try onFailure(error)
+      catch case _: Throwable => ()
 
   private def flushPending(generation: Long): Unit =
     parseAndDeliver(generation, inputBuffer.flush())
@@ -312,10 +389,13 @@ final class PosixTerminal(
     inputDelivery.parseAndDeliver(generation, parse)(inputHandler)
 
   private def terminateGeneration(generation: Long): Unit =
-    if inputDelivery.stop(generation, inputBuffer.clear()) then
-      synchronized {
-        if inputGeneration === generation then running = false
-      }
+    val terminate = synchronized {
+      if running && (inputGeneration === generation) then
+        running = false
+        true
+      else false
+    }
+    if terminate then inputDelivery.stop(generation, inputBuffer.clear())
 
   private def hasCleanupObligations: Boolean =
     inputCleanupPending || kittyCleanupPending || mouseCleanupPending || pasteCleanupPending ||
@@ -344,7 +424,7 @@ final class PosixTerminal(
     if kittyCleanupPending then attempt("kitty")(disableKittyKeyboardProtocol())
     if mouseCleanupPending then
       attempt("mouse") {
-        write(Terminal.MouseProtocol.Disable)
+        write(Terminal.MouseProtocol.disable(mouseTrackingMode))
         mouseCleanupPending = false
       }
     if pasteCleanupPending then
@@ -386,6 +466,25 @@ final class PosixTerminal(
 object PosixTerminal:
   private val ResizePollMillis            = 150L
   private val IncompleteEscapeFlushMillis = 75L
+
+  private[native] enum ReadErrorClassification:
+    case Retry, Stop
+    case Failure(error: IOException)
+
+  private[native] def classifyReadError(
+      errorNumber: Int,
+      active: Boolean
+  ): ReadErrorClassification =
+    if !active then ReadErrorClassification.Stop
+    else if isRetryableError(errorNumber) then ReadErrorClassification.Retry
+    else
+      ReadErrorClassification.Failure(
+        IOException(s"POSIX terminal read failed with errno $errorNumber")
+      )
+
+  private def isRetryableError(errorNumber: Int): Boolean =
+    errorNumber === errno.EINTR || errorNumber === errno.EAGAIN ||
+      errorNumber === errno.EWOULDBLOCK
 
   private val TIOCGWINSZ: CLongInt =
     if Option(System.getProperty("os.name")).exists(_.toLowerCase.contains("mac")) then

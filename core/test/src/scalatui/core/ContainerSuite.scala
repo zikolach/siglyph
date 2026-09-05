@@ -184,10 +184,14 @@ class ContainerSuite extends munit.FunSuite:
     assertEquals(contexts, Vector(Some(firstTui), None))
 
     inner.addChild(leaf)
+    interceptMessage[IllegalStateException](
+      "A contextual component must detach before attaching to another TUI context"
+    )(outer.tuiContext_=(Some(secondTui)))
+    outer.tuiContext_=(None)
     outer.tuiContext_=(Some(secondTui))
     outer.clear()
 
     assertEquals(
       contexts,
-      Vector(Some(firstTui), None, Some(firstTui), Some(secondTui), None)
+      Vector(Some(firstTui), None, Some(firstTui), None, Some(secondTui), None)
     )

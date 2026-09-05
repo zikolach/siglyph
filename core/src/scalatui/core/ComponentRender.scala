@@ -33,7 +33,7 @@ final case class TerminalControlPlacement(
 
 /** Bounded semantic kind used in control-validation diagnostics. */
 enum ComponentRenderControlKind derives CanEqual:
-  case KittyImage, ITerm2Image, KittyCleanup
+  case KittyImage, KittyPlacement, ITerm2Image, KittyCleanup, KittyPlacementCleanup
 
 /**
  * Bounded control geometry retained by validation failures.
@@ -71,12 +71,45 @@ enum ComponentRenderValidationError derives CanEqual:
   /** A cursor candidate uses a column outside the requested display width. */
   case CursorOutsideWidth(row: Int, column: Int, frameWidth: Int)
 
+  /** A typed document marker uses a row outside the returned frame rows. */
+  case DocumentPositionOutsideRows(row: Int, column: Int, frameRows: Int)
+
+  /** A typed document marker uses a column beyond the requested display width. */
+  case DocumentPositionOutsideWidth(row: Int, column: Int, frameWidth: Int)
+
   /** Two active Kitty image controls in one final frame use the same semantic image ID. */
   case DuplicateActiveKittyImageId(
       imageId: Int,
       first: ComponentRenderControlDiagnostic,
       duplicate: ComponentRenderControlDiagnostic
   )
+
+/** A normalized position in rendered document rows and display-cell columns. */
+final case class DocumentPosition(row: Int, column: Int = 0) derives CanEqual:
+  require(row >= 0, "Document position row must be non-negative")
+  require(column >= 0, "Document position column must be non-negative")
+
+/** Typed semantic metadata attached to a rendered document position. */
+sealed trait DocumentMarker derives CanEqual:
+  def position: DocumentPosition
+
+/** Marks the start of a shell prompt without granting authority to ordinary rendered strings. */
+final case class PromptStart(position: DocumentPosition) extends DocumentMarker derives CanEqual
+
+/** Optional typed document metadata retained independently from text and terminal controls. */
+final case class DocumentMetadata(markers: Vector[DocumentMarker] = Vector.empty) derives CanEqual:
+  /** Translate marker geometry while preserving marker types. */
+  def translated(rowOffset: Int = 0, columnOffset: Int = 0): DocumentMetadata =
+    DocumentMetadata(markers.map {
+      case PromptStart(position) => PromptStart(DocumentPosition(
+          position.row + rowOffset,
+          position.column + columnOffset
+        ))
+    })
+
+object DocumentMetadata:
+  /** Empty typed document metadata. */
+  val empty: DocumentMetadata = DocumentMetadata()
 
 /**
  * Component output shared by JVM and Scala Native.
@@ -99,7 +132,9 @@ final case class ComponentRender(
     /** Semantic controls anchored relative to `lines`. */
     controls: Vector[TerminalControlPlacement],
     /** Hardware-cursor candidates anchored relative to `lines`. */
-    cursorPlacements: Vector[CursorPlacement]
+    cursorPlacements: Vector[CursorPlacement],
+    /** Optional semantic document markers anchored relative to `lines`. */
+    documentMetadata: DocumentMetadata = DocumentMetadata.empty
 ) derives CanEqual:
   /**
    * Validate every cursor candidate and control footprint against this frame and `width`.
@@ -130,26 +165,44 @@ final case class ComponentRender(
       }
       .collectFirst { case Left(error) => Left(error) }
 
-    cursorError.getOrElse {
+    cursorError.orElse {
+      documentMetadata.markers.iterator
+        .map(_.position)
+        .map { position =>
+          if position.row >= lines.length then
+            Left(ComponentRenderValidationError.DocumentPositionOutsideRows(
+              position.row,
+              position.column,
+              lines.length
+            ))
+          else if position.column > frameWidth then
+            Left(ComponentRenderValidationError.DocumentPositionOutsideWidth(
+              position.row,
+              position.column,
+              frameWidth
+            ))
+          else Right(())
+        }
+        .collectFirst { case Left(error) => Left(error) }
+    }.getOrElse {
       val activeKittyPlacements = mutable.HashMap.empty[Int, ComponentRenderControlDiagnostic]
       controls.iterator
         .map { placement =>
           validatePlacement(placement, width).flatMap { _ =>
             placement.control.details match
-              case kitty: TerminalRenderControlDetails.KittyImage =>
-                val diagnostic = controlDiagnostic(placement)
-                activeKittyPlacements.get(kitty.imageId) match
-                  case Some(first) => Left(
-                      ComponentRenderValidationError.DuplicateActiveKittyImageId(
-                        kitty.imageId,
-                        first,
-                        diagnostic
-                      )
-                    )
-                  case None        =>
-                    activeKittyPlacements.put(kitty.imageId, diagnostic)
-                    Right(())
-              case _                                              => Right(())
+              case kitty: TerminalRenderControlDetails.KittyImage     =>
+                validateActiveKitty(
+                  kitty.imageId,
+                  placement,
+                  activeKittyPlacements
+                )
+              case kitty: TerminalRenderControlDetails.KittyPlacement =>
+                validateActiveKitty(
+                  kitty.imageId,
+                  placement,
+                  activeKittyPlacements
+                )
+              case _                                                  => Right(())
           }
         }
         .collectFirst { case Left(error) => Left(error) }
@@ -172,7 +225,8 @@ final case class ComponentRender(
   def translated(rowOffset: Int = 0, columnOffset: Int = 0): ComponentRender =
     copy(
       controls = controls.map(_.translated(rowOffset, columnOffset)),
-      cursorPlacements = cursorPlacements.map(_.translated(rowOffset, columnOffset))
+      cursorPlacements = cursorPlacements.map(_.translated(rowOffset, columnOffset)),
+      documentMetadata = documentMetadata.translated(rowOffset, columnOffset)
     )
 
   private def validatePlacement(
@@ -192,16 +246,36 @@ final case class ComponentRender(
       ))
     else Right(())
 
+  private def validateActiveKitty(
+      imageId: Int,
+      placement: TerminalControlPlacement,
+      active: mutable.HashMap[Int, ComponentRenderControlDiagnostic]
+  ): Either[ComponentRenderValidationError, Unit] =
+    val diagnostic = controlDiagnostic(placement)
+    active.get(imageId) match
+      case Some(first) => Left(ComponentRenderValidationError.DuplicateActiveKittyImageId(
+          imageId,
+          first,
+          diagnostic
+        ))
+      case None        =>
+        active.put(imageId, diagnostic)
+        Right(())
+
   private def controlDiagnostic(
       placement: TerminalControlPlacement
   ): ComponentRenderControlDiagnostic =
     val (kind, imageId) = placement.control.details match
-      case kitty: TerminalRenderControlDetails.KittyImage     =>
+      case kitty: TerminalRenderControlDetails.KittyImage              =>
         ComponentRenderControlKind.KittyImage -> Some(kitty.imageId)
-      case _: TerminalRenderControlDetails.ITerm2Image        =>
+      case kitty: TerminalRenderControlDetails.KittyPlacement          =>
+        ComponentRenderControlKind.KittyPlacement -> Some(kitty.imageId)
+      case _: TerminalRenderControlDetails.ITerm2Image                 =>
         ComponentRenderControlKind.ITerm2Image -> None
-      case cleanup: TerminalRenderControlDetails.KittyCleanup =>
+      case cleanup: TerminalRenderControlDetails.KittyCleanup          =>
         ComponentRenderControlKind.KittyCleanup -> cleanup.imageId
+      case cleanup: TerminalRenderControlDetails.KittyPlacementCleanup =>
+        ComponentRenderControlKind.KittyPlacementCleanup -> Some(cleanup.imageId)
     ComponentRenderControlDiagnostic(
       kind,
       imageId,
@@ -212,6 +286,20 @@ final case class ComponentRender(
     )
 
 object ComponentRender:
+  /** Preserve the original three-argument positional constructor. */
+  def apply(
+      lines: Vector[String],
+      controls: Vector[TerminalControlPlacement],
+      cursorPlacements: Vector[CursorPlacement]
+  ): ComponentRender =
+    new ComponentRender(lines, controls, cursorPlacements, DocumentMetadata.empty)
+
+  /** Preserve the original three-field pattern extractor. */
+  def unapply(
+      value: ComponentRender
+  ): (Vector[String], Vector[TerminalControlPlacement], Vector[CursorPlacement]) =
+    (value.lines, value.controls, value.cursorPlacements)
+
   /** Construct shared JVM/Native text-only output with no controls or cursor candidates. */
   def text(lines: Vector[String]): ComponentRender =
     ComponentRender(lines, Vector.empty, Vector.empty)

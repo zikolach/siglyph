@@ -5,6 +5,36 @@ Manual smoke checks for interactive runtime demos and the multiline editor demo.
 Automated PTY lifecycle and terminal-restoration coverage is documented in
 [terminal-conformance.md](terminal-conformance.md).
 
+## Fullscreen transcript example
+
+Run the shared JVM example in a macOS or Linux terminal:
+
+```bash
+mill fullscreenJvmDemo.run
+```
+
+Build and run the same shared source through Scala Native:
+
+```bash
+mill fullscreenNativeDemo.nativeLink
+./out/fullscreenNativeDemo/nativeLink.dest/out
+```
+
+Manual checks for both launchers:
+
+- Confirm the alternate screen has exactly the current terminal height. Resize width and height while background rows are appended. The editor and footer remain visible while the transcript takes the remaining rows.
+- Scroll upward with the wheel. Follow-end stops. New background rows do not move the viewport. Scroll to the end or activate `Jump to latest` to resume follow-end.
+- Place the pointer over nested scroll content in an application that embeds another `ScrollView`. The deepest view consumes wheel delta first. Remaining delta reaches an ancestor only with `OverscrollPolicy.Chain`. Automated nested geometry and routing evidence is in `FullscreenViewportSuite`.
+- Press `Ctrl+Shift+F`, type a query from the transcript, use Enter and Shift+Enter to move between matches, then press Escape. Search captures editor input while open and leaves editor text unchanged.
+- Drag the primary button across transcript text. Double-click a path or kebab-case token and triple-click a row. Selection uses complete grapheme clusters across wrapped rows.
+- Press `Ctrl+Alt+C` or click the footer after selecting text. The example's explicit `HostClipboard` callback accepts the bounded text and updates footer status. It stores text in application memory and does not integrate with an operating-system clipboard. Confirm no OSC 52 prompt or terminal clipboard permission appears.
+- Press `Ctrl+C` to exit. Confirm normal shell content returns, the cursor is visible, bracketed paste and mouse tracking are disabled, and terminal input is canonical with echo restored.
+
+These are emulator-visible manual checks. `FullscreenTranscriptDemoSuite`, `FullscreenViewportSuite`,
+`TranscriptSearchSuite`, `ViewportSelectionSuite`, and `MouseFoundationSuite` provide automated JVM
+and Scala Native behavior checks with `VirtualTerminal`. They do not prove emulator rendering or an
+operating-system clipboard integration.
+
 ## JVM interactive demo
 
 Run in a macOS/Linux terminal:
@@ -68,6 +98,19 @@ Kitty-image, and iTerm2-image components passed to `appendToScrollback`.
 - Confirm cursor placements and Kitty cleanup controls fail before output and terminal state is
   restored through normal fail-fast cleanup.
 
+## Fullscreen image smoke checks
+
+Use a fullscreen layout with one scrolling `Image.withSessionCapabilities` and sticky text above or
+below it. Run in Kitty and iTerm2:
+
+- Move the image completely outside the scroll clip. Confirm no image appears in sticky regions.
+- Leave only part of the image footprint visible. Siglyph omits the complete typed control. It does not crop or partially execute Kitty or iTerm2 output.
+- In Kitty, return an unchanged image before the configured retention age and count bounds expire. Confirm placement returns without visible payload retransmission flicker. Move enough distinct images or generations through the viewport to force eviction, then confirm later return follows normal retransmission.
+- In iTerm2, confirm only a completely visible footprint renders. Partial and relocated clipped images are omitted because iTerm2 lacks the required placement and cleanup contract.
+- Exit after visible, offscreen, and evicted Kitty states. Confirm the normal screen and cursor return.
+
+These image checks are manual because a PTY cannot display Kitty or iTerm2 graphics. `FullscreenViewportSuite` and `ImageSuite` assert control omission, retention, eviction, isolation, and cleanup bytes automatically.
+
 ## Scala Native interactive demo
 
 Build:
@@ -111,9 +154,13 @@ Expected behavior matches the JVM multiline editor demo, including opt-in mouse 
   replayed ordinary raw events consume one slot each. Backend publishers apply backpressure when
   required capacity is full and wake when capacity is freed or stop rejects later input. Resize
   remains coalesced and consumes no FIFO slot.
-- `Terminal.start` returns without invoking input or resize callbacks on its calling stack. A backend
-  may publish independently from another thread before `start` returns. Output methods also do not
-  deliver callbacks synchronously.
+- `Terminal.start` returns without invoking input, resize, or failure callbacks on its calling
+  stack. A backend may publish independently from another thread before `start` returns. Output
+  methods also do not deliver callbacks synchronously.
+- Unexpected active reader, fragment-flush, or resize-worker failure wakes `TUI.run()`. The first
+  failure is rethrown after idempotent cleanup. EOF, stop interruption, and stale worker generations
+  are normal outcomes. Deterministic worker-failure tests are automated. The demos do not inject
+  backend worker failures manually.
 - An uncontended `flushRender()` or `stop()` completes synchronously. A reentrant or concurrent call
   publishes work and returns without waiting for active application code; `run()` still waits for
   terminal restoration before returning.

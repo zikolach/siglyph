@@ -1,7 +1,8 @@
 package scalatui.terminal
+import scalatui.core.TUI
 import scalatui.syntax.Equality.*
 
-import java.io.{ByteArrayInputStream, ByteArrayOutputStream}
+import java.io.{ByteArrayInputStream, ByteArrayOutputStream, InputStream}
 import java.util.concurrent.{CountDownLatch, TimeUnit}
 
 class StreamTerminalSuite extends munit.FunSuite:
@@ -654,3 +655,162 @@ class StreamTerminalSuite extends munit.FunSuite:
       terminal.drainInput()
       assertEquals(inlineCallbacks, 0)
     finally terminal.stop()
+
+  test("unexpected reader failure is reported once on each active generation"):
+    val terminal                = StreamTerminal(input =
+      new java.io.InputStream:
+        override def read(): Int = throw RuntimeException("reader failed")
+    )
+    val observed                = CountDownLatch(2)
+    val failures                = scala.collection.mutable.ArrayBuffer.empty[Throwable]
+    val callbackThreads         = scala.collection.mutable.ArrayBuffer.empty[Thread]
+    val caller                  = Thread.currentThread()
+    def startGeneration(): Unit = terminal.start(
+      _ => (),
+      () => (),
+      error => {
+        failures.synchronized(failures += error)
+        callbackThreads.synchronized(callbackThreads += Thread.currentThread())
+        observed.countDown()
+      }
+    )
+
+    startGeneration()
+    val restartDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+    var restarted       = false
+    while !restarted && System.nanoTime() < restartDeadline do
+      try
+        startGeneration()
+        restarted = true
+      catch case _: IllegalStateException => Thread.onSpinWait()
+
+    assert(restarted, "reader generation did not terminate")
+    assert(observed.await(5, TimeUnit.SECONDS))
+    terminal.stop()
+    assert(callbackThreads.synchronized(callbackThreads.forall(_ ne caller)))
+    assertEquals(
+      failures.synchronized(failures.toVector.map(_.getMessage)),
+      Vector("reader failed", "reader failed")
+    )
+
+  test("finite EOF does not report a worker failure"):
+    val terminal = StreamTerminal(input = ByteArrayInputStream(Array.emptyByteArray))
+    val failures = java.util.concurrent.atomic.AtomicInteger(0)
+    terminal.start(_ => (), () => (), _ => failures.incrementAndGet())
+
+    val deadline  = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+    var restarted = false
+    while !restarted && System.nanoTime() < deadline do
+      try
+        terminal.start(_ => (), () => (), _ => failures.incrementAndGet())
+        restarted = true
+      catch case _: IllegalStateException => Thread.onSpinWait()
+
+    assert(restarted, "finite EOF did not terminate")
+    terminal.stop()
+    assertEquals(failures.get(), 0)
+
+  test("explicit stop and stale reader termination do not report failure"):
+    val entered  = CountDownLatch(1)
+    val release  = CountDownLatch(1)
+    val input    = new java.io.InputStream:
+      override def read(): Int                                              = -1
+      override def read(buffer: Array[Byte], offset: Int, length: Int): Int =
+        entered.countDown()
+        var released = false
+        while !released do
+          try released = release.await(5, TimeUnit.SECONDS)
+          catch case _: InterruptedException => ()
+        throw RuntimeException("stale reader failure")
+    val terminal = StreamTerminal(input = input)
+    val failures = java.util.concurrent.atomic.AtomicInteger(0)
+    terminal.start(_ => (), () => (), _ => failures.incrementAndGet())
+    assert(entered.await(5, TimeUnit.SECONDS))
+
+    terminal.stop()
+    release.countDown()
+    Thread.sleep(100)
+
+    assertEquals(failures.get(), 0)
+
+  test("same-generation input and flush failures reach TUI as primary and suppressed"):
+    val inputFailure  = RuntimeException("input failed")
+    val flushFailure  = RuntimeException("flush failed")
+    val failuresReady = CountDownLatch(2)
+    val claimsReady   = CountDownLatch(2)
+    val terminal      = StreamTerminal(input = InputStream.nullInputStream())
+    terminal.workerFailureForTesting = worker =>
+      val failure = worker match
+        case "input" => Some(inputFailure)
+        case "flush" => Some(flushFailure)
+        case _       => None
+      failure.foreach { _ =>
+        failuresReady.countDown()
+        var ready = false
+        while !ready do
+          try ready = failuresReady.await(5, TimeUnit.SECONDS)
+          catch case _: InterruptedException => ()
+      }
+      failure
+    terminal.workerFailureClaimedForTesting = _ =>
+      claimsReady.countDown()
+      var ready = false
+      while !ready do
+        try ready = claimsReady.await(5, TimeUnit.SECONDS)
+        catch case _: InterruptedException => ()
+
+    val reported = intercept[RuntimeException](TUI(terminal).run())
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+    while reported.getSuppressed.isEmpty && System.nanoTime() < deadline do Thread.onSpinWait()
+
+    assert((reported eq inputFailure) || (reported eq flushFailure))
+    assertEquals(
+      (reported +: reported.getSuppressed.toVector).toSet,
+      Set[Throwable](inputFailure, flushFailure)
+    )
+
+  test("input and flush workers can report independent failures across generations"):
+    val releaseRead     = CountDownLatch(1)
+    val input           = new java.io.InputStream:
+      override def read(): Int                                              = -1
+      override def read(buffer: Array[Byte], offset: Int, length: Int): Int =
+        releaseRead.await()
+        -1
+    val terminal        = StreamTerminal(input = input)
+    val inputFailure    = RuntimeException("input failed")
+    val flushFailure    = RuntimeException("flush failed")
+    val failures        = scala.collection.mutable.ArrayBuffer.empty[Throwable]
+    val inputObserved   = CountDownLatch(1)
+    val observed        = CountDownLatch(2)
+    terminal.workerFailureForTesting = worker => Option.when(worker === "input")(inputFailure)
+    terminal.start(
+      _ => (),
+      () => (),
+      error => {
+        failures.synchronized(failures += error)
+        inputObserved.countDown()
+        observed.countDown()
+      }
+    )
+    assert(inputObserved.await(5, TimeUnit.SECONDS))
+    terminal.workerFailureForTesting = worker => Option.when(worker === "flush")(flushFailure)
+    val restartDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+    var restarted       = false
+    while !restarted && System.nanoTime() < restartDeadline do
+      try
+        terminal.start(
+          _ => (),
+          () => (),
+          error => {
+            failures.synchronized(failures += error)
+            observed.countDown()
+          }
+        )
+        restarted = true
+      catch case _: IllegalStateException => Thread.onSpinWait()
+
+    assert(restarted, "input failure generation did not terminate")
+    assert(observed.await(5, TimeUnit.SECONDS))
+    releaseRead.countDown()
+    terminal.stop()
+    assertEquals(failures.synchronized(failures.toVector), Vector(inputFailure, flushFailure))

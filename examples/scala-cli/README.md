@@ -27,7 +27,7 @@ chmod +x hello.scala
 `markdown.scala` is non-interactive and renders to standard output.
 
 
-`alternate-screen-maven.scala` demonstrates opt-in alternate-screen mode with a practical Sonatype Central explorer. It searches the Sonatype Central browse API, uses the full alternate-screen height and shows built-in loader states, artifacts, versions, published dates, and build-tool snippets in a temporary full-screen workspace, copies the selected snippet through terminal clipboard escape sequences with an inline `Copied!` badge, and exits back to the normal shell without leaving the search UI in scrollback. It uses `jsoniter-scala` only inside the example for JSON parsing.
+`alternate-screen-maven.scala` demonstrates the legacy width-only alternate-screen mode with a practical Sonatype Central explorer. The application reads terminal height itself and writes OSC 52 directly to copy snippets. That raw helper is outside TUI fullscreen selection, `HostClipboard`, and typed control authority. The example exits without leaving its UI in normal shell scrollback and uses `jsoniter-scala` only for JSON parsing. Use `mill fullscreenJvmDemo.run` for height-aware `TUI.fullscreen`, `ScrollView`, search, mouse gestures, selection, and host-only copy.
 
 `editor-autocomplete.scala` demonstrates the built-in `CombinedAutocompleteProvider` with:
 

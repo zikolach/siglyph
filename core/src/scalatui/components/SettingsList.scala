@@ -132,8 +132,9 @@ final class SettingsList(
 ) extends Component,
       ContextualComponent,
       MouseInputHandler:
-  var onChange: (String, String) => Unit = (_, _) => ()
-  var onCancel: () => Unit               = () => ()
+  private val stateBoundary                            = ComponentStateBoundary()
+  private var changeCallback: (String, String) => Unit = (_, _) => ()
+  private var cancelCallback: () => Unit               = () => ()
 
   private var currentItems  = initialItems
   private var selectedIndex = 0
@@ -142,111 +143,156 @@ final class SettingsList(
   private var pasteSession  = Option.empty[FilterPasteSession]
   private var context       = Option.empty[TUIContext]
   private var activeSubmenu = Option.empty[OverlayHandle]
+  private var submenuToken  = 0L
+
+  def onChange: (String, String) => Unit                = stateBoundary(changeCallback)
+  def onChange_=(value: (String, String) => Unit): Unit = stateBoundary {
+    changeCallback = value
+  }
+  def onCancel: () => Unit                              = stateBoundary(cancelCallback)
+  def onCancel_=(value: () => Unit): Unit               = stateBoundary { cancelCallback = value }
 
   override def tuiContext_=(value: Option[TUIContext]): Unit =
-    if value.isEmpty then
-      activeSubmenu.foreach { handle =>
-        handle.unfocus(Some(OverlayUnfocusOptions(target = null)))
-        handle.hide()
-      }
-      activeSubmenu = None
-    context = value
+    stateBoundary.transitionContext(context, value) { effects =>
+      if value.isEmpty then
+        submenuToken += 1
+        activeSubmenu.foreach { handle =>
+          effects.add(() => handle.unfocus(Some(OverlayUnfocusOptions(target = null))))
+          effects.add(() => handle.hide())
+        }
+        activeSubmenu = None
+      context = value
+    }
 
-  def items: Vector[SettingItem] = currentItems
+  def items: Vector[SettingItem] = stateBoundary(currentItems)
 
-  def items_=(value: Vector[SettingItem]): Unit =
-    commitPaste()
+  def items_=(value: Vector[SettingItem]): Unit = stateBoundary {
+    commitPasteLocked()
     currentItems = value
     clampSelection()
+  }
 
-  def selected: Option[SettingItem] = selectedEntry.map(_.item)
+  def selected: Option[SettingItem] = stateBoundary(selectedEntry.map(_.item))
 
-  def query: String = pasteSession.fold(filterQuery)(_.query)
+  def query: String = stateBoundary(pasteSession.fold(filterQuery)(_.query))
 
-  def clearFilter(): Unit =
+  def clearFilter(): Unit = stateBoundary {
     pasteSession = None
     filterQuery = ""
     clampSelection()
+  }
 
   override def handleInput(input: TerminalInput): Unit = handleInputResult(input)
 
-  override def handleMouse(context: MouseInputContext): InputResult = context.input.action match
-    case MouseAction.Wheel(MouseWheelDirection.Up)   => moveSelection(-1)
-    case MouseAction.Wheel(MouseWheelDirection.Down) => moveSelection(1)
-    case _                                           => InputResult.Ignored
-
-  override def handleInputResult(input: TerminalInput): InputResult = input match
-    case TerminalInput.PasteStart if options.effectiveFiltering.enabled        =>
-      val changed = commitPaste()
-      pasteSession = Some(FilterPasteSession(filterQuery))
-      if changed then InputResult.Render else InputResult.NoRender
-    case TerminalInput.PasteChunk(chunk) if options.effectiveFiltering.enabled =>
-      pasteSession match
-        case Some(session) =>
-          session.append(chunk)
-          InputResult.NoRender
-        case None          => InputResult.Ignored
-    case TerminalInput.PasteEnd if options.effectiveFiltering.enabled          =>
-      if commitPaste() then InputResult.Render else InputResult.NoRender
-    case _                                                                     =>
-      val pasteChanged = commitPaste()
-      val result       = handleNonPasteInput(input)
-      if pasteChanged && result === InputResult.Ignored then InputResult.Render else result
-
-  private def handleNonPasteInput(input: TerminalInput): InputResult = input match
-    case TerminalInput.Key(TerminalKey.Up, _)             => moveSelection(-1)
-    case TerminalInput.Key(TerminalKey.Down, _)           => moveSelection(1)
-    case TerminalInput.Key(TerminalKey.Enter, _)          => activateSelected()
-    case TerminalInput.Key(TerminalKey.Character(" "), _) => activateSelected()
-    case TerminalInput.Key(TerminalKey.Escape, _)         =>
-      onCancel()
-      InputResult.Render
-    case TerminalInput.Key(TerminalKey.Backspace, _)
-        if options.effectiveFiltering.enabled && filterQuery.nonEmpty =>
-      filterQuery = dropLastGrapheme(filterQuery)
-      clampSelection()
-      InputResult.Render
-    case TerminalInput.Key(TerminalKey.Character(text), modifiers)
-        if options.effectiveFiltering.enabled && modifiers.isEmpty && text.nonEmpty =>
-      filterQuery += text
-      clampSelection()
-      InputResult.Render
-    case _                                                => InputResult.Ignored
-
-  override def render(width: Int): ComponentRender = ComponentRender.text {
-    val safeWidth = math.max(0, width)
-    if safeWidth <= 0 then Vector("")
-    else
-      val activeQuery = query
-      val entries     = filteredEntries(filterQuery)
-      if pasteSession.isEmpty then clampSelection(entries)
-      val out         = Vector.newBuilder[String]
-      if options.effectiveFiltering.enabled then
-        out += fit(options.theme.search(options.searchPrompt + activeQuery), safeWidth)
-      if currentItems.isEmpty then out += fit(options.emptyText, safeWidth)
-      else
-        if entries.isEmpty then out += fit(options.noMatchesText, safeWidth)
-        else
-          if pasteSession.isEmpty then ensureVisible(entries.length)
-          val visibleCount = math.max(1, options.maxVisible)
-          val pageOffset   = normalizedScrollOffset(entries.length, visibleCount)
-          val visible      = entries.slice(pageOffset, pageOffset + visibleCount)
-          visible.zipWithIndex.foreach { case (entry, visibleIndex) =>
-            out += renderRow(entry.item, pageOffset + visibleIndex, safeWidth)
-          }
-          if options.showScrollIndicators && entries.length > visibleCount then
-            val end = math.min(entries.length, pageOffset + visibleCount)
-            out += fit(s"${pageOffset + 1}-$end of ${entries.length}", safeWidth)
-          entries.lift(selectedIndex).flatMap(_.item.description).foreach { description =>
-            Ansi.wrapLogicalLinesWithAnsi(description, safeWidth).foreach { line =>
-              out += fit(options.theme.description(line), safeWidth)
-            }
-          }
-      if options.showHints then out += fit(options.theme.hint(options.hintText), safeWidth)
-      out.result()
+  override def handleMouse(context: MouseInputContext): InputResult = stateBoundary {
+    context.input.action match
+      case MouseAction.Wheel(MouseWheelDirection.Up)   => moveSelection(-1)
+      case MouseAction.Wheel(MouseWheelDirection.Down) => moveSelection(1)
+      case _                                           => InputResult.Ignored
   }
 
+  override def handleInputResult(input: TerminalInput): InputResult = stateBoundary.transition {
+    effects =>
+      input match
+        case TerminalInput.PasteStart if options.effectiveFiltering.enabled        =>
+          val changed = commitPasteLocked()
+          pasteSession = Some(FilterPasteSession(filterQuery))
+          if changed then InputResult.Render else InputResult.NoRender
+        case TerminalInput.PasteChunk(chunk) if options.effectiveFiltering.enabled =>
+          pasteSession match
+            case Some(session) =>
+              session.append(chunk)
+              InputResult.NoRender
+            case None          => InputResult.Ignored
+        case TerminalInput.PasteEnd if options.effectiveFiltering.enabled          =>
+          if commitPasteLocked() then InputResult.Render else InputResult.NoRender
+        case _                                                                     =>
+          val pasteChanged = commitPasteLocked()
+          val result       = handleNonPasteInput(input, effects)
+          if pasteChanged && result === InputResult.Ignored then InputResult.Render else result
+  }
+
+  private def handleNonPasteInput(input: TerminalInput, effects: ComponentEffects): InputResult =
+    input match
+      case TerminalInput.Key(TerminalKey.Up, _)             => moveSelection(-1)
+      case TerminalInput.Key(TerminalKey.Down, _)           => moveSelection(1)
+      case TerminalInput.Key(TerminalKey.Enter, _)          => activateSelected(effects)
+      case TerminalInput.Key(TerminalKey.Character(" "), _) => activateSelected(effects)
+      case TerminalInput.Key(TerminalKey.Escape, _)         =>
+        val callback = cancelCallback
+        effects.add(callback)
+        InputResult.Render
+      case TerminalInput.Key(TerminalKey.Backspace, _)
+          if options.effectiveFiltering.enabled && filterQuery.nonEmpty =>
+        filterQuery = dropLastGrapheme(filterQuery)
+        clampSelection()
+        InputResult.Render
+      case TerminalInput.Key(TerminalKey.Character(text), modifiers)
+          if options.effectiveFiltering.enabled && modifiers.isEmpty && text.nonEmpty =>
+        filterQuery += text
+        clampSelection()
+        InputResult.Render
+      case _                                                => InputResult.Ignored
+
+  override def render(width: Int): ComponentRender =
+    val snapshot = stateBoundary {
+      val activeQuery = pasteSession.fold(filterQuery)(_.query)
+      val entries     = filteredEntries(filterQuery)
+      if pasteSession.isEmpty then
+        clampSelection(entries)
+        ensureVisible(entries.length)
+      SettingsRenderSnapshot(
+        activeQuery,
+        entries,
+        currentItems.isEmpty,
+        selectedIndex,
+        normalizedScrollOffset(entries.length, math.max(1, options.maxVisible))
+      )
+    }
+    ComponentRender.text {
+      val safeWidth = math.max(0, width)
+      if safeWidth <= 0 then Vector("")
+      else
+        val out = Vector.newBuilder[String]
+        if options.effectiveFiltering.enabled then
+          out += fit(options.theme.search(options.searchPrompt + snapshot.query), safeWidth)
+        if snapshot.allItemsEmpty then out += fit(options.emptyText, safeWidth)
+        else if snapshot.entries.isEmpty then out += fit(options.noMatchesText, safeWidth)
+        else
+          val visibleCount = math.max(1, options.maxVisible)
+          val visible      = snapshot.entries.slice(
+            snapshot.pageOffset,
+            snapshot.pageOffset + visibleCount
+          )
+          visible.zipWithIndex.foreach { case (entry, visibleIndex) =>
+            out += renderRow(
+              entry.item,
+              snapshot.pageOffset + visibleIndex,
+              snapshot.selectedIndex,
+              safeWidth
+            )
+          }
+          if options.showScrollIndicators && snapshot.entries.length > visibleCount then
+            val end = math.min(snapshot.entries.length, snapshot.pageOffset + visibleCount)
+            out += fit(s"${snapshot.pageOffset + 1}-$end of ${snapshot.entries.length}", safeWidth)
+          snapshot.entries.lift(snapshot.selectedIndex).flatMap(_.item.description).foreach {
+            description =>
+              Ansi.wrapLogicalLinesWithAnsi(description, safeWidth).foreach { line =>
+                out += fit(options.theme.description(line), safeWidth)
+              }
+          }
+        if options.showHints then out += fit(options.theme.hint(options.hintText), safeWidth)
+        out.result()
+    }
+
   private final case class IndexedSetting(originalIndex: Int, item: SettingItem)
+  private final case class SettingsRenderSnapshot(
+      query: String,
+      entries: Vector[IndexedSetting],
+      allItemsEmpty: Boolean,
+      selectedIndex: Int,
+      pageOffset: Int
+  )
 
   private def filteredEntries(queryValue: String): Vector[IndexedSetting] =
     val indexed = currentItems.zipWithIndex.map { case (item, index) =>
@@ -279,48 +325,68 @@ final class SettingsList(
       ensureVisible(entries.length)
       if selectedIndex === before then InputResult.NoRender else InputResult.Render
 
-  private def activateSelected(): InputResult =
+  private def activateSelected(effects: ComponentEffects): InputResult =
     selectedEntry match
       case Some(entry) =>
         entry.item.submenu match
-          case Some(submenu) => openSubmenu(entry, submenu)
-          case None          => cycleSelected()
+          case Some(submenu) => openSubmenu(entry, submenu, effects)
+          case None          => cycleSelected(effects)
       case None        => InputResult.Ignored
 
-  private def openSubmenu(entry: IndexedSetting, submenu: SettingsSubmenu): InputResult =
-    activeSubmenu.foreach(_.hide())
+  private def openSubmenu(
+      entry: IndexedSetting,
+      submenu: SettingsSubmenu,
+      effects: ComponentEffects
+  ): InputResult =
     context match
       case Some(contextValue) =>
-        val handle = contextValue.overlays.showOverlay(submenu.component, submenu.options)
-        activeSubmenu = Some(handle)
-        handle.focus()
-        submenu.onOpen(new SettingsSubmenuController:
-          override def commitValue(value: String): Unit =
-            completeSubmenu(entry.item.id, handle, value)
-          override def cancel(): Unit                   = cancelSubmenu(handle))
+        submenuToken += 1
+        val token = submenuToken
+        activeSubmenu.foreach(handle => effects.add(() => handle.hide()))
+        activeSubmenu = None
+        effects.add(() => {
+          val handle   = contextValue.overlays.showOverlay(submenu.component, submenu.options)
+          handle.focus()
+          val accepted = stateBoundary {
+            if token === submenuToken && context.exists(_ eq contextValue) then
+              activeSubmenu = Some(handle)
+              true
+            else false
+          }
+          if accepted then
+            submenu.onOpen(new SettingsSubmenuController:
+              override def commitValue(value: String): Unit =
+                completeSubmenu(entry.item.id, handle, value)
+              override def cancel(): Unit                   = cancelSubmenu(handle))
+          else handle.hide()
+        })
         InputResult.Render
       case None               => InputResult.Ignored
 
   private def completeSubmenu(rowId: String, handle: OverlayHandle, value: String): Unit =
-    if activeSubmenu.exists(_.id === handle.id) then
-      currentItems.indexWhere(_.id === rowId) match
-        case -1    => ()
-        case index =>
-          val item = currentItems(index)
-          currentItems = currentItems.updated(index, item.copy(currentValue = value))
-          onChange(rowId, value)
-      closeSubmenu()
+    stateBoundary.transition { effects =>
+      if activeSubmenu.exists(_ eq handle) then
+        currentItems.indexWhere(_.id === rowId) match
+          case -1    => ()
+          case index =>
+            val item     = currentItems(index)
+            currentItems = currentItems.updated(index, item.copy(currentValue = value))
+            val callback = changeCallback
+            effects.add(() => callback(rowId, value))
+        closeSubmenuLocked(effects)
+    }
 
-  private def cancelSubmenu(handle: OverlayHandle): Unit =
-    if activeSubmenu.exists(_.id === handle.id) then
-      closeSubmenu()
+  private def cancelSubmenu(handle: OverlayHandle): Unit = stateBoundary.transition { effects =>
+    if activeSubmenu.exists(_ eq handle) then closeSubmenuLocked(effects)
+  }
 
-  private def closeSubmenu(): Unit =
-    activeSubmenu.foreach(_.hide())
+  private def closeSubmenuLocked(effects: ComponentEffects): Unit =
+    submenuToken += 1
+    activeSubmenu.foreach(handle => effects.add(() => handle.hide()))
     activeSubmenu = None
-    context.foreach(_.setFocus(this))
+    context.foreach(contextValue => effects.add(() => contextValue.setFocus(this)))
 
-  private def cycleSelected(): InputResult =
+  private def cycleSelected(effects: ComponentEffects): InputResult =
     selectedEntry match
       case Some(entry) if entry.item.values.nonEmpty =>
         val values     = entry.item.values
@@ -328,7 +394,8 @@ final class SettingsList(
         val nextValue  = values(if valueIndex < 0 then 0 else (valueIndex + 1) % values.length)
         currentItems =
           currentItems.updated(entry.originalIndex, entry.item.copy(currentValue = nextValue))
-        onChange(entry.item.id, nextValue)
+        val callback   = changeCallback
+        effects.add(() => callback(entry.item.id, nextValue))
         InputResult.Render
       case _                                         => InputResult.Ignored
 
@@ -351,7 +418,7 @@ final class SettingsList(
     val maxOffset = math.max(0, length - visibleCount)
     math.max(0, math.min(offset, maxOffset))
 
-  private def commitPaste(): Boolean =
+  private def commitPasteLocked(): Boolean =
     pasteSession match
       case None          => false
       case Some(session) =>
@@ -367,8 +434,13 @@ final class SettingsList(
     val visibleCount = math.max(1, options.maxVisible)
     scrollOffset = normalizedScrollOffset(length, visibleCount)
 
-  private def renderRow(item: SettingItem, filteredIndex: Int, width: Int): String =
-    val selected = filteredIndex === selectedIndex
+  private def renderRow(
+      item: SettingItem,
+      filteredIndex: Int,
+      selectedSnapshot: Int,
+      width: Int
+  ): String =
+    val selected = filteredIndex === selectedSnapshot
     val prefix   = if selected then options.selectedPrefix else options.normalPrefix
     val row      = prefix + renderLabelValue(item, math.max(0, width - Ansi.visibleWidth(prefix)))
     val styled   = if selected then options.theme.selected(row) else row

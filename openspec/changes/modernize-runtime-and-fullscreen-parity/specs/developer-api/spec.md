@@ -51,6 +51,25 @@ The public API SHALL state which component operations may be called from applica
 - **WHEN** a developer reads Editor, Loader, autocomplete, or TUI callback Scaladoc
 - **THEN** it states that application code runs outside library state and terminal-output locks and describes callback ordering
 
+#### Scenario: Attached callback timing is documented
+- **WHEN** a caller mutates an attached built-in while another component callback is active
+- **THEN** the API contract states that state commits and the effect batch queues before the caller returns, while callback execution may occur later on the TUI drain
+
+#### Scenario: Detached callback timing and failure are documented
+- **WHEN** a built-in has no TUI context
+- **THEN** the API contract states that an uncontended call drains synchronously, a reentrant or concurrent call returns after enqueue, and descendant failure propagates through the active outer drain
+
+#### Scenario: Lifecycle cutoff is documented
+- **WHEN** TUI stopping begins
+- **THEN** the API contract states the 4096 queued-batch bound, finite accepted-prefix drain, post-cutoff mutation rejection, and runtime failure propagation
+
+### Requirement: Added case-class fields preserve legacy source shapes
+`ComponentRender` SHALL preserve its original three-argument positional `apply`, expected-type `apply` eta expansion, and three-field extractor while retaining named four-field construction and `copy`. `MarkdownRenderOptions` SHALL preserve the corresponding four-argument forms while retaining named five-field construction and `copy`. `TUIOptions` compatibility SHALL remain unchanged.
+
+#### Scenario: Legacy constructors and extractors compile on JVM and Native
+- **WHEN** compatibility fixtures compile and run against JVM and Scala Native modules
+- **THEN** all legacy positional constructors, expected-type eta expansions, and extractor arities remain available with new fields set to their defaults
+
 ### Requirement: Version-pinned compatibility claims
 Every project claim about current `pi-tui` feature or behavior parity SHALL name one reviewed upstream commit and date. The compatibility matrix SHALL list added upstream areas, local coverage, intentional deviations, and evidence, and SHALL be refreshed before a release repeats a completeness claim.
 

@@ -9,7 +9,12 @@ import scalatui.core.{
   TUIOptions,
   TerminalControlPlacement
 }
-import scalatui.terminal.{Base64ImagePayload, TerminalImageProtocol}
+import scalatui.terminal.{
+  Base64ImagePayload,
+  Terminal,
+  TerminalImageProtocol,
+  TerminalMouseTrackingMode
+}
 
 import java.io.{ByteArrayOutputStream, InputStream}
 import java.util.concurrent.{CountDownLatch, TimeUnit}
@@ -62,6 +67,50 @@ class SttyTerminalPtySuite extends munit.FunSuite:
           terminal.cleanupFailureForTesting = _ => None
           scala.util.Try(terminal.stop())
         restoreStty(originalState, originalRows, originalColumns)
+    }
+
+  test("PTY mouse tracking enables each minimum mode with one SGR cleanup obligation"):
+    withPtyTest {
+      val originalState                   = runStty("-g")
+      val (originalRows, originalColumns) = querySize()
+      val cases                           = Vector(
+        (
+          TerminalMouseTrackingMode.Basic,
+          Terminal.MouseProtocol.EnableNormalTracking,
+          Terminal.MouseProtocol.DisableNormalTracking
+        ),
+        (
+          TerminalMouseTrackingMode.Drag,
+          Terminal.MouseProtocol.EnableButtonMotionTracking,
+          Terminal.MouseProtocol.DisableButtonMotionTracking
+        ),
+        (
+          TerminalMouseTrackingMode.AllMotion,
+          Terminal.MouseProtocol.EnableAllMotionTracking,
+          Terminal.MouseProtocol.DisableAllMotionTracking
+        )
+      )
+      try
+        cases.foreach { (mode, enable, disable) =>
+          val output   = ByteArrayOutputStream()
+          val terminal = SttyTerminal(
+            input = InputStream.nullInputStream(),
+            output = output
+          )
+          try
+            Terminal.setMouseTracking(terminal, mode)
+            terminal.start(_ => (), () => ())
+            terminal.stop()
+            terminal.stop()
+
+            val written = output.toString(java.nio.charset.StandardCharsets.UTF_8)
+            assert(written.contains(enable), written)
+            assert(written.contains(Terminal.MouseProtocol.EnableSgrCoordinates), written)
+            assertEquals(countOccurrences(written, disable), 1)
+            assertEquals(countOccurrences(written, Terminal.MouseProtocol.DisableSgrCoordinates), 1)
+          finally scala.util.Try(terminal.stop())
+        }
+      finally restoreStty(originalState, originalRows, originalColumns)
     }
 
   test("PTY append orders typed output, omits forbidden cleanup, and restores terminal"):
@@ -170,6 +219,9 @@ class SttyTerminalPtySuite extends munit.FunSuite:
     }
     assert(failure eq sizeFailure)
     assertEquals(failedSizeCommands.toVector, Vector("rows 24 cols 80", "saved-state"))
+
+  private def countOccurrences(value: String, needle: String): Int =
+    value.sliding(needle.length).count(_ === needle)
 
   private def withPtyTest(body: => Unit): Unit =
     if sys.env.get(PtyTestEnabled).contains("1") then body

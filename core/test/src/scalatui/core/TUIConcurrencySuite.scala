@@ -117,6 +117,70 @@ class TUIConcurrencySuite extends munit.FunSuite:
     def starts: Int                 = synchronized(startCount)
     def stops: Int                  = synchronized(stopCount)
 
+  private final class DimensionGateTerminal extends RecordingTerminal:
+    private val counterLock        = Object()
+    private val backendLock        = Object()
+    private var armed              = false
+    private var reads              = 0
+    private val firstReadDone      = java.util.concurrent.CountDownLatch(1)
+    private val backendLockHeld    = java.util.concurrent.CountDownLatch(1)
+    private val secondReadApproach = java.util.concurrent.CountDownLatch(1)
+
+    def arm(): Unit = counterLock.synchronized {
+      armed = true
+      reads = 0
+    }
+
+    def holdBackendLockWhileReadingLifecycle(tui: TUI): Unit =
+      firstReadDone.await()
+      backendLock.synchronized {
+        backendLockHeld.countDown()
+        secondReadApproach.await()
+        tui.children
+      }
+
+    override def columns: Int =
+      val read = counterLock.synchronized {
+        if armed then
+          reads += 1
+          reads
+        else 0
+      }
+      if read === 1 then
+        val value = backendLock.synchronized(super.columns)
+        firstReadDone.countDown()
+        backendLockHeld.await()
+        value
+      else
+        if read === 2 then secondReadApproach.countDown()
+        backendLock.synchronized(super.columns)
+
+  test("append commit reads backend dimensions before taking the lifecycle lock"):
+    val terminal   = DimensionGateTerminal()
+    val tui        = TUI(
+      terminal,
+      TUIOptions(normalResizeClearPolicy = NormalResizeClearPolicy.PreserveScrollback)
+    )
+    tui.addChild(new Component:
+      override def render(width: Int): ComponentRender = ComponentRender.text("live"))
+    tui.start()
+    terminal.arm()
+    val appendDone = java.util.concurrent.CountDownLatch(1)
+    val append     = Thread(() => {
+      tui.appendToScrollback(new Component:
+        override def render(width: Int): ComponentRender = ComponentRender.text("history"))
+      appendDone.countDown()
+    })
+    val lifecycle  = Thread(() => terminal.holdBackendLockWhileReadingLifecycle(tui))
+
+    lifecycle.start()
+    append.start()
+
+    assert(appendDone.await(5, java.util.concurrent.TimeUnit.SECONDS))
+    append.join()
+    lifecycle.join()
+    tui.stop()
+
   test("render and concurrent flush do not invert an application lock"):
     val terminal      = RecordingTerminal()
     val application   = Object()
@@ -1205,7 +1269,7 @@ class TUIConcurrencySuite extends munit.FunSuite:
     owner.join(2000)
 
     assert(!owner.isAlive)
-    assertEquals(attached, Vector("committed:true"))
+    assertEquals(attached, Vector("committed:true", "committed:false"))
     assertEquals(terminal.stops, 1)
 
   test("structural hook failure keeps its commit and discards later ordinary structure"):

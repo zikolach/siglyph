@@ -1,7 +1,8 @@
 # Publishing
 
-siglyph currently publishes release jars to GitHub Releases, Maven packages to
-GitHub Packages, and is prepared for Maven Central publishing.
+siglyph publishes release jars to GitHub Releases and artifacts to GitHub Packages and Maven
+Central. The latest published release referenced by README and Scala CLI examples is `0.8.0`.
+Documentation work on an unreleased branch does not change that version.
 
 ## Version source
 
@@ -10,6 +11,14 @@ GitHub Packages, and is prepared for Maven Central publishing.
 1. `SIGLYPH_VERSION`, when set;
 2. tag names like `v0.1.2`, via `GITHUB_REF_NAME`;
 3. `0.1.0-SNAPSHOT` for local builds.
+
+The local fallback is a build identifier, not the latest released version. Release preparation sets
+an explicit version or tag. Do not change the fallback or published examples as an implicit version
+bump.
+
+Before a release repeats a `pi-tui` parity claim, verify and update the pinned commit, review date,
+status, and local evidence in `docs/pi-tui-compatibility.md`. Other release documentation should
+link to that matrix instead of making an unpinned completeness claim.
 
 ## GitHub Packages
 

@@ -1,9 +1,10 @@
 package scalatui.markdown
 
 import scalatui.ansi.Ansi
-import scalatui.core.{Component, ComponentRender}
+import scalatui.components.ComponentStateBoundary
+import scalatui.core.{Component, ComponentRender, ContextualComponent, TUIContext}
 import scalatui.syntax.Equality.*
-import scalatui.terminal.TerminalCapabilities
+import scalatui.terminal.{TerminalCapabilities, TerminalCapabilitiesSource}
 import scala.util.control.NonFatal
 
 /**
@@ -18,6 +19,12 @@ trait MarkdownRenderer:
   def cacheGeneration: Long = 0L
 
   def render(markdown: String, width: Int): Vector[String]
+
+  /**
+   * Render with an attached session. Custom renderers remain fixed unless they override this hook.
+   */
+  def renderAttached(markdown: String, width: Int, context: TUIContext): Vector[String] =
+    render(markdown, width)
 
 /** Optional syntax-highlighting boundary for fenced Markdown code blocks. */
 trait MarkdownCodeHighlighter:
@@ -50,8 +57,31 @@ final case class MarkdownRenderOptions(
       images = None
     ),
     highlighter: Option[MarkdownCodeHighlighter] = None,
-    preserveSourceListMarkers: Boolean = false
+    preserveSourceListMarkers: Boolean = false,
+    capabilitySource: TerminalCapabilitiesSource = TerminalCapabilitiesSource.Fixed
 )
+
+object MarkdownRenderOptions:
+  /** Preserve the original four-argument positional constructor. */
+  def apply(
+      theme: MarkdownTheme,
+      capabilities: TerminalCapabilities,
+      highlighter: Option[MarkdownCodeHighlighter],
+      preserveSourceListMarkers: Boolean
+  ): MarkdownRenderOptions =
+    new MarkdownRenderOptions(
+      theme,
+      capabilities,
+      highlighter,
+      preserveSourceListMarkers,
+      TerminalCapabilitiesSource.Fixed
+    )
+
+  /** Preserve the original four-field pattern extractor. */
+  def unapply(
+      value: MarkdownRenderOptions
+  ): (MarkdownTheme, TerminalCapabilities, Option[MarkdownCodeHighlighter], Boolean) =
+    (value.theme, value.capabilities, value.highlighter, value.preserveSourceListMarkers)
 
 /** Parser boundary for dependency-free or optional dependency-backed Markdown strategies. */
 trait MarkdownParser:
@@ -238,6 +268,26 @@ final class BasicMarkdownRenderer(
     options: MarkdownRenderOptions = MarkdownRenderOptions()
 ) extends MarkdownRenderer:
   override def render(markdown: String, width: Int): Vector[String] =
+    renderWithOptions(markdown, width, options)
+
+  override def renderAttached(markdown: String, width: Int, context: TUIContext): Vector[String] =
+    val effective = TerminalCapabilities.forComponent(
+      options.capabilities,
+      context.terminalCapabilities,
+      context.terminalCapabilityOverrides,
+      options.capabilitySource
+    )
+    renderWithOptions(markdown, width, options.copy(capabilities = effective))
+
+  private def renderWithOptions(
+      markdown: String,
+      width: Int,
+      renderOptions: MarkdownRenderOptions
+  ): Vector[String] =
+    if renderOptions eq options then renderCurrentOptions(markdown, width)
+    else new BasicMarkdownRenderer(parser, renderOptions).render(markdown, width)
+
+  private def renderCurrentOptions(markdown: String, width: Int): Vector[String] =
     if width <= 0 then Vector.empty
     else
       val rendered = parser.parse(markdown) match
@@ -402,7 +452,9 @@ final class BasicMarkdownRenderer(
     Ansi.wrapLogicalLinesWithAnsi(markdown, width).map(Ansi.truncateToWidth(_, width, ""))
 
 object BasicMarkdownRenderer:
-  val default: BasicMarkdownRenderer = BasicMarkdownRenderer()
+  val default: BasicMarkdownRenderer = BasicMarkdownRenderer(options =
+    MarkdownRenderOptions(capabilitySource = TerminalCapabilitiesSource.Session)
+  )
 
 /** Component wrapper for rendering Markdown in normal TUI layouts. */
 final class Markdown(
@@ -410,65 +462,105 @@ final class Markdown(
     renderer: MarkdownRenderer = BasicMarkdownRenderer.default,
     paddingX: Int = 0,
     paddingY: Int = 0
-) extends Component:
+) extends Component,
+      ContextualComponent:
+  private val stateBoundary   = ComponentStateBoundary()
   private var currentText     = initialText
   private var currentPaddingX = paddingX
   private var currentPaddingY = paddingY
   private var cachedRender    = Option.empty[MarkdownRenderCache.Entry]
+  private var tuiContext      = Option.empty[TUIContext]
+  private var revision        = 0L
 
-  def text: String = currentText
+  override def tuiContext_=(value: Option[TUIContext]): Unit =
+    stateBoundary.transitionContext(tuiContext, value) { _ =>
+      tuiContext = value
+      invalidateLocked()
+    }
 
-  def text_=(value: String): Unit =
+  def text: String = stateBoundary(currentText)
+
+  def text_=(value: String): Unit = stateBoundary {
     currentText = value
-    cachedRender = None
+    invalidateLocked()
+  }
 
   /** Update horizontal padding and invalidate the one-entry render cache. */
-  def setPaddingX(value: Int): Unit =
+  def setPaddingX(value: Int): Unit = stateBoundary {
     currentPaddingX = value
-    cachedRender = None
+    invalidateLocked()
+  }
 
   /** Update vertical padding and invalidate the one-entry render cache. */
-  def setPaddingY(value: Int): Unit =
+  def setPaddingY(value: Int): Unit = stateBoundary {
     currentPaddingY = value
-    cachedRender = None
+    invalidateLocked()
+  }
 
   /** Explicitly discard cached output, including output from a stateful custom renderer. */
-  override def invalidate(): Unit = cachedRender = None
+  override def invalidate(): Unit = stateBoundary(invalidateLocked())
 
   override def render(width: Int): ComponentRender =
-    val safeWidth  = math.max(0, width)
-    val horizontal = math.max(0, currentPaddingX)
-    val vertical   = math.max(0, currentPaddingY)
-    val generation = renderer.cacheGeneration
-    cachedRender match
-      case Some(cache)
-          if cache.matches(
-            currentText,
+    val (textSnapshot, paddingXSnapshot, paddingYSnapshot, contextSnapshot, token) = stateBoundary {
+      (currentText, currentPaddingX, currentPaddingY, tuiContext, revision)
+    }
+    val safeWidth                                                                  = math.max(0, width)
+    val horizontal                                                                 = math.max(0, paddingXSnapshot)
+    val vertical                                                                   = math.max(0, paddingYSnapshot)
+    val generation                                                                 = renderer.cacheGeneration
+    val cached                                                                     = stateBoundary {
+      cachedRender.filter(_.matches(
+        textSnapshot,
+        safeWidth,
+        horizontal,
+        vertical,
+        renderer,
+        generation
+      ))
+    }
+    cached.map(_.render).getOrElse {
+      val rendered = ComponentRender.text(renderLines(
+        textSnapshot,
+        safeWidth,
+        horizontal,
+        vertical,
+        contextSnapshot
+      ))
+      stateBoundary {
+        if revision === token then
+          cachedRender = Some(MarkdownRenderCache.Entry(
+            textSnapshot,
             safeWidth,
             horizontal,
             vertical,
             renderer,
-            generation
-          ) => cache.render
-      case _ =>
-        val rendered = ComponentRender.text(renderLines(safeWidth, horizontal, vertical))
-        cachedRender = Some(MarkdownRenderCache.Entry(
-          currentText,
-          safeWidth,
-          horizontal,
-          vertical,
-          renderer,
-          generation,
-          rendered
-        ))
-        rendered
+            generation,
+            rendered
+          ))
+      }
+      rendered
+    }
 
-  private def renderLines(safeWidth: Int, paddingX: Int, paddingY: Int): Vector[String] =
+  private def invalidateLocked(): Unit =
+    revision += 1
+    cachedRender = None
+
+  private def renderLines(
+      textSnapshot: String,
+      safeWidth: Int,
+      paddingX: Int,
+      paddingY: Int,
+      context: Option[TUIContext]
+  ): Vector[String] =
     val horizontal   = " ".repeat(paddingX)
     val contentWidth = math.max(1, safeWidth - horizontal.length * 2)
-    val content      = renderer.render(currentText, contentWidth).map { line =>
-      Ansi.truncateToWidth(horizontal + line + horizontal, safeWidth, "")
-    }
+    val content      = context
+      .fold(renderer.render(textSnapshot, contentWidth))(
+        renderer.renderAttached(textSnapshot, contentWidth, _)
+      )
+      .map { line =>
+        Ansi.truncateToWidth(horizontal + line + horizontal, safeWidth, "")
+      }
     val blank        = " ".repeat(safeWidth)
     Vector.fill(paddingY)(blank) ++ content ++ Vector.fill(paddingY)(blank)
 

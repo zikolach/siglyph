@@ -433,7 +433,7 @@ class TUITypedControlSuite extends munit.FunSuite:
     assert(!terminal.output.contains(TUI.SyncStart), terminal.output)
     assert(!terminal.output.contains(encode(control)), terminal.output)
 
-  test("partially clipped overlay failure retains bounded redacted diagnostics"):
+  test("partially clipped overlay image is safely omitted without leaking metadata"):
     val sensitivePayload = "QUJD".repeat(2048)
     val sensitiveName    = "secret-overlay-filename-".repeat(512)
     val control          = TerminalImageProtocol.encodeITerm2(
@@ -457,14 +457,13 @@ class TUITypedControlSuite extends munit.FunSuite:
       )
     )
 
-    val failure = intercept[IllegalArgumentException](tui.start())
+    tui.start()
 
-    assert(!terminal.output.contains(TUI.SyncStart), terminal.output)
+    assert(terminal.output.contains(TUI.SyncStart), terminal.output)
     assert(!terminal.output.contains(encode(control)), terminal.output)
-    assert(!terminal.isRunning)
-    assert(failure.getMessage.length < 512, failure.getMessage.length.toString)
-    assert(!failure.toString.contains("QUJDQUJD"), failure.toString)
-    assert(!failure.toString.contains("secret-overlay-filename-"), failure.toString)
+    assert(!terminal.output.contains("QUJDQUJD"), terminal.output)
+    assert(!terminal.output.contains("secret-overlay-filename-"), terminal.output)
+    tui.stop()
 
   test("invalid final control placement fails before synchronized frame output"):
     val control  = kittyControl("AAAA", imageId = 24, width = 2)

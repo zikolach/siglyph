@@ -1,7 +1,13 @@
 package scalatui.markdown
 
 import scalatui.ansi.Ansi
-import scalatui.terminal.TerminalCapabilities
+import scalatui.core.{TUI, TUIOptions}
+import scalatui.terminal.{
+  TerminalCapabilities,
+  TerminalCapabilityOverride,
+  TerminalCapabilityOverrides,
+  VirtualTerminal
+}
 import scala.util.control.ControlThrowable
 
 class MarkdownRendererSuite extends munit.FunSuite:
@@ -265,6 +271,48 @@ class MarkdownRendererSuite extends munit.FunSuite:
 
     assert(lines.exists(_.contains("\u001b]8;;https://example.test\u0007label\u001b]8;;\u0007")))
     assert(lines.forall(line => Ansi.visibleWidth(line) <= 80), lines.mkString("\n"))
+
+  test("default Markdown uses attached session hyperlinks and detached fallback"):
+    val markdown = Markdown("[label](https://example.test)")
+    assert(!markdown.render(80).lines.exists(_.contains("\u001b]8;;")))
+
+    val terminal = VirtualTerminal(80, 10)
+    val tui      = TUI(
+      terminal,
+      TUIOptions(capabilityOverrides =
+        TerminalCapabilityOverrides(
+          hyperlinks = TerminalCapabilityOverride.Forced(true)
+        )
+      )
+    )
+    tui.addChild(markdown)
+    tui.start()
+
+    assert(terminal.output.contains("\u001b]8;;https://example.test\u0007"), terminal.output)
+    tui.stop()
+
+  test("session Disabled prevents fixed Markdown hyperlinks"):
+    val renderer = BasicMarkdownRenderer(options =
+      MarkdownRenderOptions(
+        capabilities = TerminalCapabilities(trueColor = true, hyperlinks = true, images = None)
+      )
+    )
+    val markdown = Markdown("[label](https://example.test)", renderer)
+    val terminal = VirtualTerminal(80, 10)
+    val tui      = TUI(
+      terminal,
+      TUIOptions(capabilityOverrides =
+        TerminalCapabilityOverrides(
+          hyperlinks = TerminalCapabilityOverride.Disabled
+        )
+      )
+    )
+    tui.addChild(markdown)
+    tui.start()
+
+    assert(!terminal.output.contains("\u001b]8;;https://example.test"), terminal.output)
+    assert(terminal.output.contains("label (https://example.test)"), terminal.output)
+    tui.stop()
 
   test("hyperlink-capable rendering falls back for unsafe link URLs"):
     val renderer = BasicMarkdownRenderer(options =
