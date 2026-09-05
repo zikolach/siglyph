@@ -125,6 +125,6 @@
 
 - [x] 15.1 Run focused JVM core, terminal, Markdown, image, extras, demo, viewport, mouse, search, selection, and benchmark-counter tests.
 - [x] 15.2 Run focused Scala Native core, terminal, image, layout, viewport, mouse, and demo tests and build the Native interactive demo.
-- [ ] 15.3 Run PTY lifecycle, resize, protocol, selection-copy, and restoration tests on supported Linux and macOS environments and state any exact platform gap.
+- [x] 15.3 Run PTY lifecycle, resize, protocol, selection-copy, and restoration tests on supported Linux and macOS environments and state any exact platform gap.
 - [x] 15.4 Run `mill __.compile`, the complete test targets, `mill scalafmtCheck`, `mill scalafixCheck`, `openspec validate --all --strict`, and `git diff --check`.
 - [x] 15.5 Perform independent correctness, concurrency, terminal-protocol security, public API, and compatibility review and resolve every blocking finding before completion.
