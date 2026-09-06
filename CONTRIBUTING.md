@@ -9,7 +9,7 @@ set of optional modules.
 Requirements:
 
 - JDK 21
-- Mill 1.1.6 or newer compatible Mill 1.x
+- Mill 1.1.8 or newer compatible Mill 1.x
 - `openspec` for spec/change validation when working on user-visible behavior
 
 Useful commands:

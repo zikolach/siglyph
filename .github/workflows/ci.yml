@@ -42,7 +42,7 @@ jobs:
 
       - name: Install Mill
         run: |
-          curl -fLo mill https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/1.1.6/mill-dist-1.1.6-mill.sh
+          curl -fLo mill https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/1.1.8/mill-dist-1.1.8-mill.sh
           chmod +x mill
           echo "$PWD" >> "$GITHUB_PATH"
           ./mill --version
@@ -141,7 +141,7 @@ jobs:
 
       - name: Install Mill
         run: |
-          curl -fLo mill https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/1.1.6/mill-dist-1.1.6-mill.sh
+          curl -fLo mill https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/1.1.8/mill-dist-1.1.8-mill.sh
           chmod +x mill
           echo "$PWD" >> "$GITHUB_PATH"
           ./mill --version
