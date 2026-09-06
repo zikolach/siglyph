@@ -70,6 +70,7 @@ final class PosixTerminal(
   private var pasteCleanupPending                                           = false
   private var kittyCleanupPending                                           = false
   @volatile private var mouseTrackingMode                                   = TerminalMouseTrackingMode.Disabled
+  private var mouseCleanupMode                                              = TerminalMouseTrackingMode.Disabled
   private var mouseCleanupPending                                           = false
   private[native] var cleanupFailureForTesting: String => Option[Throwable] = _ => None
   private[native] var workerFailureForTesting: String => Option[Throwable]  = _ => None
@@ -124,18 +125,20 @@ final class PosixTerminal(
         enableRawMode()
         pasteCleanupPending = true
         write("\u001b[?2004h")
-        if mouseTrackingMode !== TerminalMouseTrackingMode.Disabled then
+        val enabledMouseTrackingMode = mouseTrackingMode
+        if enabledMouseTrackingMode !== TerminalMouseTrackingMode.Disabled then
+          mouseCleanupMode = enabledMouseTrackingMode
           mouseCleanupPending = true
-          write(Terminal.MouseProtocol.enable(mouseTrackingMode))
+          write(Terminal.MouseProtocol.enable(enabledMouseTrackingMode))
         inputGeneration = inputDelivery.start(inputBuffer.clear())
         inputCleanupPending = true
         running = true
-        val generation = inputGeneration
-        val thread     = Thread(
+        val generation               = inputGeneration
+        val thread                   = Thread(
           () => readLoop(generation, onFailure),
           "siglyph-posix-terminal-input"
         )
-        val flusher    = Thread(
+        val flusher                  = Thread(
           () => flushLoop(generation, onFailure),
           "siglyph-posix-terminal-flush"
         )
@@ -424,7 +427,8 @@ final class PosixTerminal(
     if kittyCleanupPending then attempt("kitty")(disableKittyKeyboardProtocol())
     if mouseCleanupPending then
       attempt("mouse") {
-        write(Terminal.MouseProtocol.disable(mouseTrackingMode))
+        write(Terminal.MouseProtocol.disable(mouseCleanupMode))
+        mouseCleanupMode = TerminalMouseTrackingMode.Disabled
         mouseCleanupPending = false
       }
     if pasteCleanupPending then

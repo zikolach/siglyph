@@ -90,6 +90,34 @@ class MouseFoundationSuite extends munit.FunSuite:
     assertEquals(click.location.bounds, LayoutBounds(1, 0, 12, 2))
     tui.stop()
 
+  test("click remains owned by the target that handled Press"):
+    val childEvents  = scala.collection.mutable.ArrayBuffer.empty[MouseEvent]
+    val parentEvents = scala.collection.mutable.ArrayBuffer.empty[MouseEvent]
+    val child        = MouseRegion(
+      Text("child"),
+      event =>
+        childEvents += event
+        event match
+          case _: MouseEvent.Click => MouseHandlerResult.Handled
+          case _                   => MouseHandlerResult.Ignored
+    )
+    val parent       = MouseRegion(
+      child,
+      event =>
+        parentEvents += event
+        MouseHandlerResult.Handled
+    )
+    val terminal     = VirtualTerminal(8, 2)
+    val tui          = TUI.fullscreen(terminal, parent, options(TestClock()))
+
+    tui.start()
+    terminal.sendMouse(raw(MouseAction.Press(MouseButton.Left), row = 0, col = 0))
+    terminal.sendMouse(raw(MouseAction.Release(MouseButton.Left), row = 0, col = 0))
+
+    assert(!childEvents.exists(_.isInstanceOf[MouseEvent.Click]))
+    assert(parentEvents.exists(_.isInstanceOf[MouseEvent.Click]))
+    tui.stop()
+
   test("semantic uncaptured move and wheel preserve modifiers and button state"):
     val component = MouseComponent()
     val terminal  = VirtualTerminal(8, 2)
@@ -147,6 +175,37 @@ class MouseFoundationSuite extends munit.FunSuite:
     terminal.sendMouse(raw(MouseAction.Wheel(MouseWheelDirection.Right), 0, 0))
 
     assertEquals(directions.toVector, Vector(MouseWheelDirection.Left, MouseWheelDirection.Right))
+    tui.stop()
+
+  test("ignored horizontal wheel falls back to an ancestor"):
+    var childWheels  = 0
+    var parentWheels = 0
+    val child        = MouseRegion(
+      Text("child"),
+      {
+        case _: MouseEvent.Wheel =>
+          childWheels += 1
+          MouseHandlerResult.Ignored
+        case _                   => MouseHandlerResult.Ignored
+      }
+    )
+    val parent       = MouseRegion(
+      child,
+      {
+        case _: MouseEvent.Wheel =>
+          parentWheels += 1
+          MouseHandlerResult.Handled
+        case _                   => MouseHandlerResult.Ignored
+      }
+    )
+    val terminal     = VirtualTerminal(8, 1)
+    val tui          = TUI.fullscreen(terminal, parent, options())
+    tui.start()
+
+    terminal.sendMouse(raw(MouseAction.Wheel(MouseWheelDirection.Left), 0, 0))
+
+    assertEquals(childWheels, 1)
+    assertEquals(parentWheels, 1)
     tui.stop()
 
   test("handled wheel with unchanged remainder does not enter legacy routing"):
@@ -352,3 +411,20 @@ class MouseFoundationSuite extends munit.FunSuite:
         1
       )
     }
+
+  test("VirtualTerminal disables the mouse mode enabled by start"):
+    val terminal = VirtualTerminal()
+    Terminal.setMouseTracking(terminal, TerminalMouseTrackingMode.Drag)
+    terminal.start(_ => (), () => ())
+    Terminal.setMouseTracking(terminal, TerminalMouseTrackingMode.Basic)
+
+    terminal.stop()
+
+    assertEquals(
+      terminal.writes.count(_ === Terminal.MouseProtocol.disable(TerminalMouseTrackingMode.Drag)),
+      1
+    )
+    assertEquals(
+      terminal.writes.count(_ === Terminal.MouseProtocol.disable(TerminalMouseTrackingMode.Basic)),
+      0
+    )

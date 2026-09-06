@@ -27,24 +27,28 @@ private[components] final class TranscriptSearchIndex(maxMatches: Int):
 
   private var indexedRevision = Long.MinValue
   private var indexedWidth    = -1
+  private var indexedHeight   = -1
   private var rows            = Vector.empty[TranscriptSearchIndex.Row]
   private var cachedQuery     = ""
   private var cachedMatches   = Vector.empty[TranscriptSearchMatch]
   private var mutationToken   = 0L
 
-  def requiresDocument(revision: Long, width: Int): Boolean = synchronized {
-    (indexedRevision !== revision) || (indexedWidth !== width)
+  def requiresDocument(revision: Long, width: Int, height: Int): Boolean = synchronized {
+    (indexedRevision !== revision) || (indexedWidth !== width) || (indexedHeight !== height)
   }
 
   def matches(
       revision: Long,
       width: Int,
+      height: Int,
       query: String,
       rendered: Option[Iterator[String]],
       recordScans: Int => Unit
   ): Vector[TranscriptSearchMatch] =
     val buildToken = synchronized {
-      Option.when((indexedRevision !== revision) || (indexedWidth !== width))(mutationToken)
+      Option.when(
+        (indexedRevision !== revision) || (indexedWidth !== width) || (indexedHeight !== height)
+      )(mutationToken)
     }
     val build      = buildToken.map { token =>
       val indexed = TranscriptSearchIndex.indexRows(rendered.getOrElse(Iterator.empty))
@@ -57,12 +61,15 @@ private[components] final class TranscriptSearchIndex(maxMatches: Int):
           rows = indexed.rows
           indexedRevision = revision
           indexedWidth = width
+          indexedHeight = height
           cachedQuery = ""
           cachedMatches = Vector.empty
           mutationToken += 1L
         case Some(_)                                           => ()
         case None                                              => ()
-      Option.when(indexedRevision === revision && indexedWidth === width)(
+      Option.when(
+        indexedRevision === revision && indexedWidth === width && indexedHeight === height
+      )(
         (rows, mutationToken, cachedQuery, cachedMatches)
       )
     }
@@ -71,7 +78,9 @@ private[components] final class TranscriptSearchIndex(maxMatches: Int):
       else
         val found = TranscriptSearchIndex.findMatches(indexedRows, query, maxMatches)
         synchronized {
-          if mutationToken === token && indexedRevision === revision && indexedWidth === width then
+          if mutationToken === token && indexedRevision === revision && indexedWidth === width &&
+            indexedHeight === height
+          then
             cachedQuery = query
             cachedMatches = found
             found
@@ -82,6 +91,7 @@ private[components] final class TranscriptSearchIndex(maxMatches: Int):
   def clear(): Unit = synchronized {
     indexedRevision = Long.MinValue
     indexedWidth = -1
+    indexedHeight = -1
     rows = Vector.empty
     cachedQuery = ""
     cachedMatches = Vector.empty

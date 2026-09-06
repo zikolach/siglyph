@@ -183,7 +183,14 @@ private[scalatui] object BenchmarkWorkloads:
 
   private def search(scale: Scale): Scenario = Scenario(
     "search",
-    metadata(scale, "queryLength" -> "6", "expectedMatches" -> scale.transcriptRows.toString),
+    metadata(
+      scale,
+      "queryLength"       -> "6",
+      "sourceOccurrences" -> scale.transcriptRows.toString,
+      "expectedMatches"   -> math
+        .min(scale.transcriptRows, ScrollView.MaxRetainedSearchMatches)
+        .toString
+    ),
     () =>
       val view     = ScrollView(RangedTranscript(scale.transcriptRows), primary = true)
       val terminal = VirtualTerminal(80, 24)

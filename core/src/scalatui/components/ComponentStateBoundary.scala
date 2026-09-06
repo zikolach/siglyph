@@ -23,25 +23,26 @@ private[scalatui] final class ComponentStateBoundary:
    * the coordinator that owns that transition.
    */
   def transitionContext[A](
-      current: Option[TUIContext],
+      current: => Option[TUIContext],
       next: Option[TUIContext]
   )(operation: ComponentEffects => A): A =
     val (selected, admission) = synchronized {
+      val previous  = current
       if detachPending && next.nonEmpty then
         throw IllegalStateException("A contextual component detach is still pending")
-      if current.nonEmpty && next.nonEmpty && !current.exists(existing =>
+      if previous.nonEmpty && next.nonEmpty && !previous.exists(existing =>
           next.exists(_ eq existing)
         )
       then
         throw IllegalStateException(
           "A contextual component must detach before attaching to another TUI context"
         )
-      val selected  = current.orElse(next).map(_.componentEffectCoordinator).getOrElse(
+      val selected  = previous.orElse(next).map(_.componentEffectCoordinator).getOrElse(
         coordinator
       )
       val admission = selected.admit { effects =>
         val result = operation(effects)
-        if current.nonEmpty && next.isEmpty then
+        if previous.nonEmpty && next.isEmpty then
           detachPending = true
           effects.add(() =>
             synchronized {
@@ -51,7 +52,7 @@ private[scalatui] final class ComponentStateBoundary:
           )
         result
       }
-      if current.isEmpty && next.nonEmpty then coordinator = selected
+      if previous.isEmpty && next.nonEmpty then coordinator = selected
       selected -> admission
     }
     selected.dispatch(admission)

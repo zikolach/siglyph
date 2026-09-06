@@ -570,6 +570,7 @@ private[core] final class FullscreenViewportPolicy(
     var failure = Option.empty[Throwable]
     val cleanup = kittyRetention.stopCleanup()
     if cleanup.nonEmpty then
+      kittyRetention.recordStopCleanupAttempt()
       try
         val encoded = cleanup.map { control =>
           counters.recordControlEncode()

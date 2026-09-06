@@ -165,15 +165,17 @@ trait ViewportScrollProvider:
   private[scalatui] def commitViewportGeometry(
       contentExtent: Int,
       viewportExtent: Int,
-      viewportWidth: Int
+      viewportWidth: Int,
+      layoutViewport: LayoutViewport
   ): Int
 
   /** Capture the content revision before rendering rows for a conditional commit. */
   private[scalatui] def viewportContentRevision: Long = 0L
 
-  /** Commit rendered document rows for plain-text cell mapping. */
+  /** Commit rendered document rows and their zero-based document start for plain-text mapping. */
   private[scalatui] def commitViewportText(
       rows: Vector[String],
+      startRow: Int,
       complete: Boolean,
       child: Component,
       revision: Long
@@ -251,7 +253,11 @@ object ViewportLayoutEngine:
   def layout(component: Component, width: Int, height: Int): LayoutFrame =
     val safeWidth  = math.max(0, width)
     val safeHeight = math.max(0, height)
-    val context    = LayoutContext(LayoutViewport(safeWidth, safeHeight), includeHidden = false)
+    val context    = LayoutContext(
+      LayoutViewport(safeWidth, safeHeight),
+      includeHidden = false,
+      commitViewport = true
+    )
     val clip       = ClipRect(0, 0, safeWidth, safeHeight)
     val resolved   = layoutComponent(
       context,
@@ -269,7 +275,11 @@ object ViewportLayoutEngine:
   /** Render a layout provider as a complete width-constrained document without height clipping. */
   def renderUnbounded(component: Component, width: Int): LayoutFrame =
     val safeWidth = math.max(0, width)
-    val context   = LayoutContext(LayoutViewport(safeWidth, Int.MaxValue), includeHidden = true)
+    val context   = LayoutContext(
+      LayoutViewport(safeWidth, Int.MaxValue),
+      includeHidden = true,
+      commitViewport = false
+    )
     val rootClip  = ClipRect(0, 0, safeWidth, Int.MaxValue)
     val resolved  = layoutComponent(
       context,
@@ -284,27 +294,70 @@ object ViewportLayoutEngine:
     )
     paintFrame(resolved, safeWidth, resolved.box.rect.height)
 
-  private final class LayoutContext(val viewport: LayoutViewport, val includeHidden: Boolean):
-    private val renders = ArrayBuffer.empty[(Component, Int, ComponentRender)]
+  /** Render a complete document while applying visibility against the current terminal viewport. */
+  private[scalatui] def renderResponsiveUnbounded(
+      component: Component,
+      width: Int,
+      viewport: LayoutViewport
+  ): LayoutFrame =
+    val safeWidth = math.max(0, width)
+    val context   = LayoutContext(viewport, includeHidden = false, commitViewport = false)
+    val rootClip  = ClipRect(0, 0, safeWidth, Int.MaxValue)
+    val resolved  = layoutComponent(
+      context,
+      component,
+      row = 0,
+      col = 0,
+      safeWidth,
+      None,
+      rootClip,
+      None,
+      None
+    )
+    paintFrame(resolved, safeWidth, resolved.box.rect.height)
 
-    def render(component: Component, width: Int): ComponentRender =
+  private final class LayoutContext(
+      val viewport: LayoutViewport,
+      val includeHidden: Boolean,
+      val commitViewport: Boolean
+  ):
+    private val renders =
+      ArrayBuffer.empty[(Component, Int, Option[ComponentRenderOrigin], ComponentRender)]
+
+    def render(
+        component: Component,
+        width: Int,
+        origin: Option[ComponentRenderOrigin] = None
+    ): ComponentRender =
+      val effectiveOrigin = component match
+        case _: RenderOriginAware => origin
+        case _                    => None
       renders.collectFirst {
-        case (cachedComponent, cachedWidth, frame)
-            if (cachedComponent eq component) && cachedWidth === width => frame
+        case (cachedComponent, cachedWidth, cachedOrigin, frame)
+            if (cachedComponent eq component) && cachedWidth === width &&
+              cachedOrigin === effectiveOrigin => frame
       }.getOrElse {
         component match
           case aware: RenderOriginAware =>
-            aware.renderOrigin_=(Some(ComponentRenderOrigin(0, 0)))
+            aware.renderOrigin_=(origin)
           case _                        => ()
         RuntimeCounterScope.recordComponentRender()
         val frame = component.render(width).validated(width)
-        renders += ((component, width, frame))
+        renders += ((component, width, effectiveOrigin, frame))
         frame
       }
 
+    def setOrigin(component: Component, origin: ComponentRenderOrigin): Unit = component match
+      case aware: RenderOriginAware => aware.renderOrigin_=(Some(origin))
+      case _                        => ()
+
   private object LayoutContext:
-    def apply(viewport: LayoutViewport, includeHidden: Boolean): LayoutContext =
-      new LayoutContext(viewport, includeHidden)
+    def apply(
+        viewport: LayoutViewport,
+        includeHidden: Boolean,
+        commitViewport: Boolean
+    ): LayoutContext =
+      new LayoutContext(viewport, includeHidden, commitViewport)
 
   private final case class ResolvedBox(
       box: LayoutBox,
@@ -356,7 +409,7 @@ object ViewportLayoutEngine:
             scrollOwner
           )
     case _                                =>
-      val frame           = context.render(component, width)
+      val frame           = context.render(component, width, Some(ComponentRenderOrigin(row, col)))
       val allocatedHeight = height.fold(frame.lines.length)(value => math.max(0, value))
       val rect            = ViewportRect(row, col, math.max(0, width), allocatedHeight)
       ResolvedBox(
@@ -393,14 +446,15 @@ object ViewportLayoutEngine:
     val rect            = ViewportRect(row, col, width, math.max(0, viewportHeight))
     val clip            = parentClip.intersect(rect)
     val offset          =
-      if context.includeHidden then 0
+      if !context.commitViewport then 0
       else
         scrollProvider.fold(0)(
-          _.commitViewportGeometry(contentHeight, viewportHeight, width)
+          _.commitViewportGeometry(contentHeight, viewportHeight, width, context.viewport)
         )
     val contentRevision = scrollProvider.map(_.viewportContentRevision).getOrElse(0L)
     val child           = layout.child match
-      case ranged: ViewportRangeRenderer if !context.includeHidden =>
+      case ranged: ViewportRangeRenderer if context.commitViewport =>
+        context.setOrigin(layout.child, ComponentRenderOrigin(row, col))
         RuntimeCounterScope.recordComponentRender()
         val range     = ranged.renderRange(contentWidth, offset, viewportHeight).validated(
           contentWidth
@@ -436,7 +490,7 @@ object ViewportLayoutEngine:
           scrollOwner
         )
         withDocumentRowOffset(resolved, offset)
-    if !context.includeHidden then
+    if context.commitViewport then
       val metadata = layout.child match
         case source: ViewportDocumentMetadataProvider =>
           source.viewportDocumentMetadata(contentWidth)
@@ -449,10 +503,16 @@ object ViewportLayoutEngine:
         "Viewport document metadata is outside the scroll document"
       )
       scrollProvider.foreach { scroll =>
+        val complete = !layout.child.isInstanceOf[ViewportRangeRenderer]
+        val startRow = if complete then 0 else offset
+        val rowCount =
+          if complete then contentHeight
+          else math.min(viewportHeight, math.max(0, contentHeight - offset))
         scroll.commitViewportDocumentMetadata(metadata)
         scroll.commitViewportText(
-          renderedDocumentRows(child, row, col, contentWidth, contentHeight),
-          complete = !layout.child.isInstanceOf[ViewportRangeRenderer],
+          renderedDocumentRows(child, row, col, contentWidth, startRow, rowCount),
+          startRow,
+          complete,
           layout.child,
           contentRevision
         )
@@ -468,13 +528,15 @@ object ViewportLayoutEngine:
       originRow: Int,
       originCol: Int,
       width: Int,
-      height: Int
+      startRow: Int,
+      rowCount: Int
   ): Vector[String] =
-    val rows                           = Array.fill(math.max(0, height))("")
+    val rows                           = Array.fill(math.max(0, rowCount))("")
     def visit(node: ResolvedBox): Unit =
       node.source.foreach { frame =>
         frame.lines.zipWithIndex.foreach { case (line, sourceRow) =>
-          val targetRow = sourceRow + node.box.rect.row + node.documentRowOffset - originRow
+          val targetRow =
+            sourceRow + node.box.rect.row + node.documentRowOffset - originRow - startRow
           val targetCol = node.box.rect.col - originCol
           if targetRow >= 0 && targetRow < rows.length && targetCol < width then
             val plain = Ansi.selectionText(line)

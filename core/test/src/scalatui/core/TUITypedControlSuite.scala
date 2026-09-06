@@ -465,6 +465,51 @@ class TUITypedControlSuite extends munit.FunSuite:
     assert(!terminal.output.contains("secret-overlay-filename-"), terminal.output)
     tui.stop()
 
+  test("clipping drops out-of-frame cleanup anchors"):
+    val image     = kittyControl("AAAA", imageId = 37)
+    val cleanup   = TerminalRenderControl.cleanupForReplacement(image).get
+    val placement = TerminalControlPlacement(row = 2, column = 0, cleanup)
+
+    assertEquals(
+      TypedControlClipping.clipPlacement(placement, ClipRect(0, 0, width = 10, height = 2)),
+      None
+    )
+    assertEquals(
+      TypedControlClipping.clipPlacement(
+        placement.copy(row = 1),
+        ClipRect(0, 0, width = 10, height = 2)
+      ),
+      Some(placement.copy(row = 1))
+    )
+
+  test("attempted stop cleanup invalidates Kitty placement reuse but retains retry debt"):
+    val image     = kittyControl("AAAA", imageId = 38)
+    val placement = TerminalControlPlacement(row = 0, column = 0, image)
+    val frame     = PreparedFrame(
+      Vector(""),
+      None,
+      Vector(placement),
+      DocumentMetadata.empty
+    )
+    val retention = FullscreenKittyRetention(KittyImageRetentionOptions())
+    val accepted  = retention.update(frame, previous = None, repaintAll = false).frame
+    val cleanup   = retention.stopCleanup()
+
+    retention.recordStopCleanupAttempt()
+
+    assertEquals(cleanup.size, 1)
+    assertEquals(
+      cleanup.head.details,
+      scalatui.terminal.TerminalRenderControlDetails.KittyCleanup(Some(38))
+    )
+    assertEquals(retention.ownershipCount, 1)
+    val afterAttempt = retention.update(frame, previous = Some(accepted), repaintAll = true).frame
+    assert(
+      afterAttempt.controls.head.control.details
+        .isInstanceOf[scalatui.terminal.TerminalRenderControlDetails.KittyImage]
+    )
+    assertEquals(retention.stopCleanup().size, 1)
+
   test("invalid final control placement fails before synchronized frame output"):
     val control  = kittyControl("AAAA", imageId = 24, width = 2)
     val terminal = VirtualTerminal(1, 5)

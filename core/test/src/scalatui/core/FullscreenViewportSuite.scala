@@ -212,6 +212,37 @@ class FullscreenViewportSuite extends munit.FunSuite:
       DocumentMetadata(Vector(PromptStart(DocumentPosition(0))))
     )
 
+  test("range viewport commits only its bounded row window and document offset"):
+    var committed = Option.empty[(Int, Vector[String], Boolean)]
+    val large     = new Component with ViewportRangeRenderer:
+      override def contentExtent(width: Int): Int                                         = 1000000
+      override def render(width: Int): ComponentRender                                    = fail("full render must stay unused")
+      override def renderRange(width: Int, startRow: Int, rowCount: Int): ComponentRender =
+        ComponentRender.text(Vector.tabulate(rowCount)(index => s"${startRow + index}"))
+    val viewport  = new Component with ViewportLayoutProvider with ViewportScrollProvider:
+      override def render(width: Int): ComponentRender = large.render(width)
+      override def viewportLayout: ViewportLayout      = ViewportScrollLayout(large)
+      override private[scalatui] def commitViewportGeometry(
+          contentExtent: Int,
+          viewportExtent: Int,
+          viewportWidth: Int,
+          layoutViewport: LayoutViewport
+      ): Int = 500000
+      override private[scalatui] def commitViewportText(
+          rows: Vector[String],
+          startRow: Int,
+          complete: Boolean,
+          child: Component,
+          revision: Long
+      ): Unit = committed = Some((startRow, rows, complete))
+
+    ViewportLayoutEngine.layout(viewport, width = 8, height = 3)
+
+    assertEquals(
+      committed.map { case (start, rows, complete) => (start, rows.map(Ansi.strip), complete) },
+      Some((500000, Vector("500000", "500001", "500002"), false))
+    )
+
   test("fullscreen shares overlays cursor controls resize and cleanup services"):
     val control  = TerminalImageProtocol.encodeKitty(
       Base64ImagePayload.from("AAAA").toOption.get,

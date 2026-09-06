@@ -52,6 +52,21 @@ class PosixTerminalSuite extends munit.FunSuite:
       assertEquals(writes.count(_ === Terminal.MouseProtocol.disable(mode)), 1)
     }
 
+  test("Native cleanup disables the mouse mode enabled by start"):
+    val terminal = PosixTerminal(initialColumns = 80, initialRows = 24)
+    val writes   = scala.collection.mutable.ArrayBuffer.empty[String]
+    terminal.writeFailureForTesting = data =>
+      writes += data
+      None
+    Terminal.setMouseTracking(terminal, TerminalMouseTrackingMode.Drag)
+    terminal.start(_ => (), () => ())
+    Terminal.setMouseTracking(terminal, TerminalMouseTrackingMode.Basic)
+
+    terminal.stop()
+
+    assert(writes.contains(Terminal.MouseProtocol.disable(TerminalMouseTrackingMode.Drag)))
+    assert(!writes.contains(Terminal.MouseProtocol.disable(TerminalMouseTrackingMode.Basic)))
+
   test("failed Kitty enable retains Native disable cleanup and retries it on stop"):
     val terminal    = PosixTerminal(initialColumns = 80, initialRows = 24)
     val writes      = scala.collection.mutable.ArrayBuffer.empty[String]

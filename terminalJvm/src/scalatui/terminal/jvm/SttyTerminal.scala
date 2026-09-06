@@ -58,6 +58,7 @@ final class SttyTerminal(
   private var resizeHandler: () => Unit                                  = () => ()
   private var resizeThread: Thread | Null                                = null
   @volatile private var mouseTrackingMode                                = TerminalMouseTrackingMode.Disabled
+  private var mouseCleanupMode                                           = TerminalMouseTrackingMode.Disabled
   private var mouseCleanupPending                                        = false
   private val keyboardProtocolNegotiator                                 = KittyKeyboardProtocolNegotiator()
 
@@ -101,12 +102,14 @@ final class SttyTerminal(
       runStty("raw -echo min 1 time 0")
       pasteCleanupPending = true
       write("\u001b[?2004h")
-      if mouseTrackingMode !== TerminalMouseTrackingMode.Disabled then
+      val enabledMouseTrackingMode = mouseTrackingMode
+      if enabledMouseTrackingMode !== TerminalMouseTrackingMode.Disabled then
+        mouseCleanupMode = enabledMouseTrackingMode
         mouseCleanupPending = true
-        write(Terminal.MouseProtocol.enable(mouseTrackingMode))
+        write(Terminal.MouseProtocol.enable(enabledMouseTrackingMode))
       inputCleanupPending = true
       sttyGeneration += 1
-      val generation = sttyGeneration
+      val generation               = sttyGeneration
       super.start(onInput, onResize, onFailure)
       sttyRunning = true
       startResizePolling(generation, onFailure)
@@ -244,7 +247,8 @@ final class SttyTerminal(
     if kittyCleanupPending then attempt("kitty") { disableKittyKeyboardProtocol() }
     if mouseCleanupPending then
       attempt("mouse") {
-        write(Terminal.MouseProtocol.disable(mouseTrackingMode))
+        write(Terminal.MouseProtocol.disable(mouseCleanupMode))
+        mouseCleanupMode = TerminalMouseTrackingMode.Disabled
         mouseCleanupPending = false
       }
     if pasteCleanupPending then

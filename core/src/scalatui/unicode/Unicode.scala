@@ -217,7 +217,7 @@ object Unicode:
         var outputBytes = 0L
         val iterator    = ordered.iterator
         while iterator.hasNext && outputBytes <= maxUtf8Bytes.toLong do
-          val codePoint = Character.toLowerCase(iterator.next()._1)
+          val codePoint = UnicodeNormalizationTables.lowercase(iterator.next()._1)
           outputBytes += utf8Bytes(codePoint)
           if outputBytes <= maxUtf8Bytes.toLong then builder.appendCodePoint(codePoint)
         Option.when(outputBytes <= maxUtf8Bytes.toLong)(builder.toString)

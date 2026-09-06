@@ -43,4 +43,11 @@ private[core] object TypedControlClipping:
           visibleRows = rows
         )
         .map(control => TerminalControlPlacement(top.toInt, left.toInt, control))
-    case _ => Some(placement)
+    case _: TerminalRenderControlDetails.KittyCleanup |
+        _: TerminalRenderControlDetails.KittyPlacementCleanup =>
+      val bottom = clip.row.toLong + clip.height.toLong
+      val right  = clip.col.toLong + clip.width.toLong
+      Option.when(
+        placement.row.toLong >= clip.row.toLong && placement.row.toLong < bottom &&
+          placement.column.toLong >= clip.col.toLong && placement.column.toLong <= right
+      )(placement)

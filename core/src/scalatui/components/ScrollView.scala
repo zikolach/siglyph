@@ -7,6 +7,7 @@ import scalatui.core.{
   ContextualComponent,
   DocumentMetadata,
   InputResult,
+  LayoutViewport,
   MouseCaptureIntent,
   MouseEvent,
   MouseEventHandler,
@@ -143,30 +144,32 @@ final class ScrollView(
   require(maxSearchQueryUtf8Bytes > 0, "Search query UTF-8 byte bound must be positive")
   require(maxSearchMatches > 0, "Search match bound must be positive")
 
-  private val stateBoundary        = ComponentStateBoundary()
-  private val searchIndex          = TranscriptSearchIndex(maxSearchMatches)
-  private var currentChild         = initialChild
-  private var currentOffset        = 0
-  private var currentContent       = 0
-  private var currentViewport      = 0
-  private var currentWidth         = 0
-  private var currentMetadata      = DocumentMetadata.empty
-  private var currentIndicator     = Option.empty[ScrollAffordanceBounds]
-  private var scrollbarDragOffset  = Option.empty[Int]
-  private var following            = followEnd
-  private var context              = Option.empty[TUIContext]
-  private var contentRevision      = 0L
-  private var searchActive         = false
-  private var searchQuery          = ""
-  private var searchMatches        = Vector.empty[TranscriptSearchMatch]
-  private var currentSearchMatch   = Option.empty[Int]
-  private var selectionDocument    = Option.empty[ViewportSelectionDocument]
-  private var selectionComplete    = false
-  private var selectionScanCount   = 0
-  private var selectionAnchor      = Option.empty[Int]
-  private var selectionFocus       = Option.empty[Int]
-  private var selectionInitial     = Option.empty[SelectionCellRange]
-  private var selectionGranularity = SelectionGranularity.Character
+  private val stateBoundary         = ComponentStateBoundary()
+  private val searchIndex           = TranscriptSearchIndex(maxSearchMatches)
+  private var currentChild          = initialChild
+  private var currentOffset         = 0
+  private var currentContent        = 0
+  private var currentViewport       = 0
+  private var currentWidth          = 0
+  private var geometryCommitted     = false
+  private var currentLayoutViewport = LayoutViewport(0, 0)
+  private var currentMetadata       = DocumentMetadata.empty
+  private var currentIndicator      = Option.empty[ScrollAffordanceBounds]
+  private var scrollbarDragOffset   = Option.empty[Int]
+  private var following             = followEnd
+  private var context               = Option.empty[TUIContext]
+  private var contentRevision       = 0L
+  private var searchActive          = false
+  private var searchQuery           = ""
+  private var searchMatches         = Vector.empty[TranscriptSearchMatch]
+  private var currentSearchMatch    = Option.empty[Int]
+  private var selectionDocument     = Option.empty[ViewportSelectionDocument]
+  private var selectionComplete     = false
+  private var selectionScanCount    = 0
+  private var selectionAnchor       = Option.empty[Int]
+  private var selectionFocus        = Option.empty[Int]
+  private var selectionInitial      = Option.empty[SelectionCellRange]
+  private var selectionGranularity  = SelectionGranularity.Character
 
   /** Content component currently owned by this view. */
   def child: Component = stateBoundary(currentChild)
@@ -316,11 +319,14 @@ final class ScrollView(
   override private[scalatui] def commitViewportGeometry(
       contentExtent: Int,
       viewportExtent: Int,
-      viewportWidth: Int
+      viewportWidth: Int,
+      layoutViewport: LayoutViewport
   ): Int = stateBoundary {
     currentContent = math.max(0, contentExtent)
     currentViewport = math.max(0, viewportExtent)
     currentWidth = math.max(0, viewportWidth)
+    geometryCommitted = true
+    currentLayoutViewport = layoutViewport
     val maximum = maximumOffset
     currentOffset = if followEnd && following then maximum else math.min(currentOffset, maximum)
     currentOffset
@@ -330,11 +336,13 @@ final class ScrollView(
 
   override private[scalatui] def commitViewportText(
       rows: Vector[String],
+      startRow: Int,
       complete: Boolean,
       child: Component,
       revision: Long
   ): Unit =
     if complete then
+      require(startRow === 0, "Complete viewport text must begin at document row zero")
       commitSelectionDocument(
         ViewportSelectionDocument(rows, maxSelectionGraphemes, maxSelectionUtf8Bytes),
         complete = true,
@@ -568,18 +576,34 @@ final class ScrollView(
       recordScans: Int => Unit,
       reveal: Boolean = false
   ): Unit =
-    val contentWidth                      = viewportContentWidth(math.max(0, width))
-    val snapshot                          = stateBoundary {
-      (searchActive, searchQuery, contentRevision, currentChild)
+    val contentWidth                                      = stateBoundary {
+      val resolvedWidth = if geometryCommitted then currentWidth else math.max(0, width)
+      viewportContentWidth(resolvedWidth)
     }
-    val (active, query, revision, target) = snapshot
+    val snapshot                                          = stateBoundary {
+      (searchActive, searchQuery, contentRevision, currentChild, currentLayoutViewport)
+    }
+    val (active, query, revision, target, layoutViewport) = snapshot
     if active then
-      val documentChanged = searchIndex.requiresDocument(revision, contentWidth)
-      val rendered        = Option.when(documentChanged)(
-        renderSearchRows(target, contentWidth)
+      val responsiveHeight =
+        if target.isInstanceOf[ViewportLayoutProvider] then layoutViewport.height else -1
+      val documentChanged  = searchIndex.requiresDocument(
+        revision,
+        contentWidth,
+        responsiveHeight
       )
-      val matches         = searchIndex.matches(revision, contentWidth, query, rendered, recordScans)
-      val stale           = stateBoundary {
+      val rendered         = Option.when(documentChanged)(
+        renderSearchRows(target, contentWidth, layoutViewport)
+      )
+      val matches          = searchIndex.matches(
+        revision,
+        contentWidth,
+        responsiveHeight,
+        query,
+        rendered,
+        recordScans
+      )
+      val stale            = stateBoundary {
         if contentRevision === revision && searchQuery === query then
           searchMatches = matches
           currentSearchMatch =
@@ -591,7 +615,11 @@ final class ScrollView(
       }
       if stale then searchIndex.clear()
 
-  private def renderSearchRows(target: Component, width: Int): Iterator[String] = target match
+  private def renderSearchRows(
+      target: Component,
+      width: Int,
+      layoutViewport: LayoutViewport
+  ): Iterator[String] = target match
     case ranged: ViewportRangeRenderer =>
       new Iterator[String]:
         private val maximum = math.min(
@@ -617,7 +645,11 @@ final class ScrollView(
           if hasNext then current.next()
           else throw new java.util.NoSuchElementException("next on empty iterator")
     case _: ViewportLayoutProvider     =>
-      ViewportLayoutEngine.renderUnbounded(target, width).render.lines.iterator
+      ViewportLayoutEngine.renderResponsiveUnbounded(
+        target,
+        width,
+        layoutViewport
+      ).render.lines.iterator
         .take(TranscriptSearchIndex.MaxIndexedRows)
     case _                             =>
       target.render(width).validated(width).lines.iterator

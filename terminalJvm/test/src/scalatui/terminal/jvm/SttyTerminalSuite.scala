@@ -1,6 +1,11 @@
 package scalatui.terminal.jvm
 
-import scalatui.terminal.{KittyKeyboardProtocol, KittyKeyboardProtocolState, Terminal}
+import scalatui.terminal.{
+  KittyKeyboardProtocol,
+  KittyKeyboardProtocolState,
+  Terminal,
+  TerminalMouseTrackingMode
+}
 import scalatui.syntax.Equality.*
 
 import java.io.{ByteArrayOutputStream, IOException, InputStream, OutputStream, PrintStream}
@@ -243,6 +248,25 @@ class SttyTerminalSuite extends munit.FunSuite:
       catch case _: IllegalStateException => Thread.onSpinWait()
     assert(restarted, "old resize worker did not terminate before restart deadline")
     terminal.stop()
+
+  test("JVM cleanup disables the mouse mode enabled by start"):
+    val output   = ByteArrayOutputStream()
+    val terminal = SttyTerminal(
+      input = InputStream.nullInputStream(),
+      output = output,
+      columnsOverride = Some(80),
+      rowsOverride = Some(24),
+      sizeQuery = () => Some(24 -> 80)
+    )
+    Terminal.setMouseTracking(terminal, TerminalMouseTrackingMode.Drag)
+    terminal.start(_ => (), () => ())
+    Terminal.setMouseTracking(terminal, TerminalMouseTrackingMode.Basic)
+
+    terminal.stop()
+
+    val written = output.toString(java.nio.charset.StandardCharsets.UTF_8)
+    assert(written.contains(Terminal.MouseProtocol.disable(TerminalMouseTrackingMode.Drag)))
+    assert(!written.contains(Terminal.MouseProtocol.disable(TerminalMouseTrackingMode.Basic)))
 
   test("cleanup retries only the failed JVM obligation and rejects restart until it succeeds"):
     Vector("kitty", "paste", "input", "termios").foreach { failedObligation =>

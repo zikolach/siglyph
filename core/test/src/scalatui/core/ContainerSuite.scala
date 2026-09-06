@@ -1,6 +1,6 @@
 package scalatui.core
 
-import scalatui.components.Box
+import scalatui.components.{Box, ComponentStateBoundary}
 import scalatui.terminal.{Base64ImagePayload, TerminalImageProtocol}
 
 class ContainerSuite extends munit.FunSuite:
@@ -195,3 +195,17 @@ class ContainerSuite extends munit.FunSuite:
       contexts,
       Vector(Some(firstTui), None, Some(firstTui), None, Some(secondTui), None)
     )
+
+  test("context transition reads current state inside its boundary"):
+    val boundary = ComponentStateBoundary()
+    var lockHeld = false
+
+    boundary.transitionContext(
+      {
+        lockHeld = Thread.holdsLock(boundary)
+        None
+      },
+      None
+    )(_ => ())
+
+    assert(lockHeld)

@@ -150,6 +150,18 @@ private[core] final class FullscreenKittyRetention(options: KittyImageRetentionO
   def stopCleanup(): Vector[TerminalRenderControl] =
     (activeIds ++ entries.keySet ++ pendingCleanupIds).toVector.sorted.map(dataCleanup)
 
+  /**
+   * Invalidate placement-only reuse before attempting stop cleanup while retaining retry debt.
+   *
+   * A terminal write may execute a delete before reporting failure, so no retained upload may be
+   * reused after an attempted stop-cleanup write.
+   */
+  def recordStopCleanupAttempt(): Unit =
+    pendingCleanupIds ++= activeIds
+    pendingCleanupIds ++= entries.keySet
+    entries.clear()
+    activeIds = Set.empty
+
   def acknowledgeStopCleanup(): Unit =
     entries.clear()
     pendingCleanupIds.clear()

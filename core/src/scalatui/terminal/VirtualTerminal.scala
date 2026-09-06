@@ -30,6 +30,7 @@ final class VirtualTerminal(initialColumns: Int = 80, initialRows: Int = 24)
   private var wrapPending                         = false
   private val screen                              = ArrayBuffer.fill(currentRows)(blankRow())
   @volatile private var mouseTrackingMode         = TerminalMouseTrackingMode.Disabled
+  private var mouseCleanupMode                    = TerminalMouseTrackingMode.Disabled
   private var mouseCleanupPending                 = false
 
   override def mouseReportingEnabled_=(enabled: Boolean): Unit =
@@ -43,13 +44,16 @@ final class VirtualTerminal(initialColumns: Int = 80, initialRows: Int = 24)
     inputHandler = onInput
     resizeHandler = onResize
     running = true
-    if mouseTrackingMode !== TerminalMouseTrackingMode.Disabled then
+    val enabledMouseTrackingMode = mouseTrackingMode
+    if enabledMouseTrackingMode !== TerminalMouseTrackingMode.Disabled then
+      mouseCleanupMode = enabledMouseTrackingMode
       mouseCleanupPending = true
-      write(Terminal.MouseProtocol.enable(mouseTrackingMode))
+      write(Terminal.MouseProtocol.enable(enabledMouseTrackingMode))
 
   override def stop(): Unit =
     if mouseCleanupPending then
-      write(Terminal.MouseProtocol.disable(mouseTrackingMode))
+      write(Terminal.MouseProtocol.disable(mouseCleanupMode))
+      mouseCleanupMode = TerminalMouseTrackingMode.Disabled
       mouseCleanupPending = false
     running = false
     inputHandler = _ => ()

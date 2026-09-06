@@ -1,6 +1,6 @@
 package scalatui.core
 
-import scalatui.components.{ScrollView, Text}
+import scalatui.components.{HStack, ScrollView, StackEntry, StackEntryOptions, Text}
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{
   Base64ImagePayload,
@@ -109,6 +109,147 @@ class TranscriptSearchSuite extends munit.FunSuite:
     assertEquals(tui.viewportSearchState.map(_.query), Some("hé"))
     assertEquals(tui.viewportSearchState.map(_.matchCount), Some(1))
     assertEquals(underlyingInputs, 1)
+    tui.stop()
+
+  test("nested primary search uses its committed content width"):
+    var renderedWidths = Vector.empty[Int]
+    val transcript     = new Component with ViewportRangeRenderer:
+      override def contentExtent(width: Int): Int                                         = 1
+      override def render(width: Int): ComponentRender                                    =
+        fail("nested range transcript must not use full rendering")
+      override def renderRange(width: Int, startRow: Int, rowCount: Int): ComponentRender =
+        renderedWidths :+= width
+        ComponentRender.text(Option.when(startRow === 0 && rowCount > 0)("needle").toVector)
+    val view           = ScrollView(transcript, primary = true)
+    val root           = HStack(Seq(
+      StackEntry(Lines(Vector("side")), StackEntryOptions(basis = Some(5), maxSize = Some(5))),
+      StackEntry(view, StackEntryOptions(grow = 1))
+    ))
+    val terminal       = VirtualTerminal(12, 3)
+    val tui            = TUI.fullscreen(terminal, root)
+
+    tui.start()
+    renderedWidths = Vector.empty
+    openSearch(terminal)
+    typeText(terminal, "n")
+
+    assertEquals(renderedWidths.distinct, Vector(9))
+    tui.stop()
+    assertEquals(renderedWidths.distinct, Vector(9))
+    tui.stop()
+
+  test("nested primary search preserves a committed zero content width"):
+    var renderedWidths = Vector.empty[Int]
+    val transcript     = new Component with ViewportRangeRenderer:
+      override def contentExtent(width: Int): Int                                         = 1
+      override def render(width: Int): ComponentRender                                    =
+        fail("nested range transcript must not use full rendering")
+      override def renderRange(width: Int, startRow: Int, rowCount: Int): ComponentRender =
+        renderedWidths :+= width
+        ComponentRender.text(Option.when(startRow === 0 && rowCount > 0)("needle").toVector)
+    val view           = ScrollView(transcript, primary = true)
+    val root           = HStack(Seq(
+      StackEntry(
+        Lines(Vector("side")),
+        StackEntryOptions(basis = Some(12), shrink = 0, maxSize = Some(12))
+      ),
+      StackEntry(view, StackEntryOptions(grow = 1))
+    ))
+    val terminal       = VirtualTerminal(12, 3)
+    val tui            = TUI.fullscreen(terminal, root)
+
+    tui.start()
+    renderedWidths = Vector.empty
+    openSearch(terminal)
+    typeText(terminal, "n")
+
+    assertEquals(renderedWidths.distinct, Vector(0))
+    tui.stop()
+
+  test("global listeners can intercept viewport and search commands"):
+    val view     = ScrollView(Lines(Vector.tabulate(20)(index => s"row $index")), primary = true)
+    val terminal = VirtualTerminal(12, 3)
+    val tui      = TUI.fullscreen(terminal, view)
+    var inputs   = 0
+    tui.addInputListener { _ =>
+      inputs += 1
+      InputResult.NoRender
+    }
+
+    tui.start()
+    terminal.sendInput(TerminalInput.Key(TerminalKey.PageDown))
+    openSearch(terminal)
+
+    assertEquals(inputs, 2)
+    assertEquals(view.offset, 0)
+    assertEquals(tui.viewportSearchState.map(_.active), Some(false))
+    tui.stop()
+
+  test("active search preserves unsupported-key fallback and Ctrl+C exit"):
+    var focusedInputs = Vector.empty[TerminalInput]
+    val focused       = new Component with Focusable:
+      private var isFocused                                             = false
+      override def render(width: Int): ComponentRender                  = ComponentRender.text("focus")
+      override def focused: Boolean                                     = isFocused
+      override def focused_=(value: Boolean): Unit                      = isFocused = value
+      override def handleInputResult(input: TerminalInput): InputResult =
+        focusedInputs :+= input
+        InputResult.Ignored
+    val view          = ScrollView(Lines(Vector("needle", "tail")), primary = true)
+    val root          = scalatui.components.VStack(Seq(
+      StackEntry(view, StackEntryOptions(grow = 1)),
+      StackEntry(focused, StackEntryOptions(basis = Some(1), maxSize = Some(1)))
+    ))
+    val terminal      = VirtualTerminal(12, 3)
+    val tui           = TUI.fullscreen(terminal, root)
+    tui.setFocus(focused)
+    tui.start()
+    openSearch(terminal)
+    focusedInputs = Vector.empty
+
+    terminal.sendInput(TerminalInput.Key(TerminalKey.Up))
+    terminal.sendInput(TerminalInput.KeyEvent(
+      TerminalKey.Character("c"),
+      KeyModifiers(ctrl = true),
+      scalatui.terminal.KeyEventType.Press
+    ))
+
+    tui.run()
+
+    assertEquals(focusedInputs, Vector(TerminalInput.Key(TerminalKey.Up)))
+    assert(!terminal.isRunning)
+
+  test("opening search renders its status immediately"):
+    val view     = ScrollView(Lines(Vector("needle", "tail")), primary = true)
+    val terminal = VirtualTerminal(12, 3)
+    val tui      = TUI.fullscreen(terminal, view)
+    tui.start()
+
+    openSearch(terminal)
+
+    assert(terminal.screenLines.last.startsWith("Search: "), terminal.screenLines.toString)
+    tui.stop()
+
+  test("search follows height-responsive visibility"):
+    val content  = scalatui.components.VStack(Seq(
+      StackEntry(
+        Lines(Vector("hidden needle")),
+        StackEntryOptions(visible = viewport => viewport.height >= 4)
+      ),
+      StackEntry(Lines(Vector("always")))
+    ))
+    val view     = ScrollView(content, primary = true)
+    val terminal = VirtualTerminal(16, 3)
+    val tui      = TUI.fullscreen(terminal, view)
+
+    tui.start()
+    openSearch(terminal)
+    typeText(terminal, "needle")
+    assertEquals(tui.viewportSearchState.map(_.matchCount), Some(0))
+
+    terminal.resize(16, 5)
+
+    assertEquals(tui.viewportSearchState.map(_.matchCount), Some(1))
     tui.stop()
 
   test("resize rebuilds the width-keyed index and preserves current repeated match"):

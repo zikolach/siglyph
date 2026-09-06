@@ -2021,3 +2021,24 @@ class TUISuite extends munit.FunSuite:
       terminal.output
     )
     assert(terminal.viewportLines.exists(_.contains("wi")), terminal.output)
+
+  test("restart reattaches retained children and overlays"):
+    final class ContextProbe(value: String) extends Component with ContextualComponent:
+      var contexts                                               = Vector.empty[Option[TUIContext]]
+      override def render(width: Int): ComponentRender           = ComponentRender.text(value)
+      override def tuiContext_=(value: Option[TUIContext]): Unit = contexts :+= value
+
+    val terminal = VirtualTerminal(10, 3)
+    val child    = ContextProbe("child")
+    val overlay  = ContextProbe("overlay")
+    val tui      = TUI(terminal)
+    tui.addChild(child)
+    tui.showOverlay(overlay, OverlayOptions(focusCapturing = false))
+
+    tui.start()
+    tui.stop()
+    tui.start()
+
+    assertEquals(child.contexts.map(_.nonEmpty), Vector(true, false, true))
+    assertEquals(overlay.contexts.map(_.nonEmpty), Vector(true, false, true))
+    tui.stop()

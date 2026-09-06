@@ -337,3 +337,33 @@ class LayoutSuite extends munit.FunSuite:
         PromptStart(DocumentPosition(0, 2))
       )
     )
+
+  test("resolved layout coordinates reach origin-aware leaf rendering"):
+    var origin  = Option.empty[ComponentRenderOrigin]
+    var renders = Vector.empty[Option[ComponentRenderOrigin]]
+    val aware   = new Component with RenderOriginAware:
+      override def renderOrigin_=(value: Option[ComponentRenderOrigin]): Unit = origin = value
+      override def render(width: Int): ComponentRender                        =
+        renders :+= origin
+        ComponentRender.text("x")
+    val row     = HStack(Seq(
+      StackEntry(
+        Lines(Vector("a")),
+        StackEntryOptions(basis = Some(2), minSize = 2, maxSize = Some(2))
+      ),
+      StackEntry(
+        aware,
+        StackEntryOptions(basis = Some(2), minSize = 2, maxSize = Some(2))
+      )
+    ))
+    val root    = VStack(Seq(
+      StackEntry(
+        Lines(Vector("one", "two")),
+        StackEntryOptions(basis = Some(2), minSize = 2, maxSize = Some(2))
+      ),
+      StackEntry(row, StackEntryOptions(basis = Some(1), minSize = 1, maxSize = Some(1)))
+    ))
+
+    ViewportLayoutEngine.layout(root, width = 4, height = 3)
+
+    assertEquals(renders.last, Some(ComponentRenderOrigin(row = 2, col = 2)))

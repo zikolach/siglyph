@@ -499,10 +499,12 @@ final class TUI(
     lifecycleLock.synchronized(inputListeners -= listener)
 
   def start(): Unit =
-    val shouldStart = lifecycleLock.synchronized {
+    var reattachRetainedContexts = false
+    val shouldStart              = lifecycleLock.synchronized {
       if (lifecycleState !== TUI.LifecycleState.Stopped) || drainOwned then false
       else
         componentEffectCoordinator.openGeneration()
+        reattachRetainedContexts = contextDetachScheduled
         contextDetachScheduled = false
         exitRequested = false
         runtimeFailure = None
@@ -520,11 +522,13 @@ final class TUI(
         options.screenMode
       ))
       try
+        val contextsToAttach = lifecycleLock.synchronized {
+          if reattachRetainedContexts then retainedContextComponentsLocked()
+          else viewportRoot.filter(_ => !viewportRootContextAttached).toVector
+        }
         componentEffectCoordinator.withLifecycleAdmission {
-          viewportRoot.foreach { component =>
-            attachContext(component)
-            viewportRootContextAttached = true
-          }
+          contextsToAttach.foreach(attachContext)
+          viewportRootContextAttached = viewportRoot.nonEmpty
         }
         Terminal.setMouseTracking(terminal, effectiveMouseTrackingMode)
         terminalServices.write(terminal.start(
@@ -549,7 +553,7 @@ final class TUI(
           )
           if !mouseInputEnabled then
             requestRenderInternal(force = true, clear = rendererPolicy.isAlternateScreen)
-        val enteredRunning = lifecycleLock.synchronized {
+        val enteredRunning   = lifecycleLock.synchronized {
           startupOwner = false
           if lifecycleState === TUI.LifecycleState.Starting then
             lifecycleState = TUI.LifecycleState.Running
@@ -773,6 +777,7 @@ final class TUI(
 
   private def handleInput(input: TerminalInput): Unit =
     if isMouseInputDisabled(input) then ()
+    else if routeGlobalInputListeners(input) !== InputResult.Ignored then ()
     else
       routeViewportInput(input) match
         case Some(result) if result !== InputResult.Ignored => handleInputResult(result)
@@ -780,8 +785,7 @@ final class TUI(
         case None                                           => handleUnroutedInput(input, routeTarget = true)
 
   private def handleUnroutedInput(input: TerminalInput, routeTarget: Boolean): Unit =
-    if routeGlobalInputListeners(input) !== InputResult.Ignored then ()
-    else if isIgnoredKeyRelease(input) then ()
+    if isIgnoredKeyRelease(input) then ()
     else if handlesControlC && isCtrl(input, "c") then requestExit()
     else if exitsOnEscape && (input === TerminalInput.Key(TerminalKey.Escape)) then requestExit()
     else
@@ -1792,7 +1796,8 @@ final class TUI(
           options.keybindings.matches(input, value)
       )
       if primaryScrollView.exists(_.searchState.active) && !command.exists(isSelectionCommand) then
-        Some(routeSearchInput(input))
+        val result = routeSearchInput(input)
+        Option.when(result !== InputResult.Ignored)(result)
       else
         command.map { value =>
           val target        = inputTarget
@@ -1813,6 +1818,7 @@ final class TUI(
 
   private def routePrimaryViewportCommand(command: KeybindingCommand): InputResult =
     primaryScrollView.fold(InputResult.Ignored) { scrollView =>
+      var render  = false
       val handled = command match
         case KeybindingCommand.ViewportLineUp         => scrollView.scrollBy(-1); true
         case KeybindingCommand.ViewportLineDown       => scrollView.scrollBy(1); true
@@ -1831,6 +1837,7 @@ final class TUI(
         case KeybindingCommand.ViewportSearchToggle   =>
           scrollView.openSearch()
           clearSearchPaste()
+          render = true
           true
         case KeybindingCommand.ViewportCopySelection  =>
           copySelection()
@@ -1839,7 +1846,9 @@ final class TUI(
           scrollView.clearSelection()
           true
         case _                                        => false
-      if handled then InputResult.NoRender else InputResult.Ignored
+      if !handled then InputResult.Ignored
+      else if render then InputResult.Render
+      else InputResult.NoRender
     }
 
   private def routeSearchInput(input: TerminalInput): InputResult =
@@ -1862,33 +1871,33 @@ final class TUI(
           scrollView.moveSearchMatch(1, terminal.columns, testRuntimeCounters.recordSearchScans)
           InputResult.Render
         case _                                                                                    =>
-          val oldQuery  = scrollView.searchState.query
-          val nextQuery = input match
+          val oldQuery              = scrollView.searchState.query
+          val (nextQuery, consumed) = input match
             case TerminalInput.KeyEvent(TerminalKey.Character(value), modifiers, eventType)
                 if (eventType !== KeyEventType.Release) && !modifiers.ctrl && !modifiers.alt &&
-                  !modifiers.superKey => Some(scrollView.boundSearchQuery(oldQuery + value))
+                  !modifiers.superKey => Some(scrollView.boundSearchQuery(oldQuery + value)) -> true
             case TerminalInput.KeyEvent(TerminalKey.Backspace, _, eventType)
                 if eventType !== KeyEventType.Release =>
-              Some(Unicode.graphemeClusters(oldQuery).dropRight(1).mkString)
+              Some(Unicode.graphemeClusters(oldQuery).dropRight(1).mkString) -> true
             case TerminalInput.PasteStart                             =>
               searchPasteDecoder.clear()
               searchPasteBuffer.clear()
               searchPasteBuffer.append(oldQuery)
               searchPasteActive = true
-              None
+              None -> true
             case TerminalInput.PasteChunk(chunk) if searchPasteActive =>
               val decoded = searchPasteDecoder.process(chunk)
               val bounded = scrollView.boundSearchQuery(searchPasteBuffer.result() + decoded)
               searchPasteBuffer.clear()
               searchPasteBuffer.append(bounded)
-              None
+              None -> true
             case TerminalInput.PasteEnd if searchPasteActive          =>
               val bounded = scrollView.boundSearchQuery(
                 searchPasteBuffer.result() + searchPasteDecoder.flush()
               )
               clearSearchPaste()
-              Some(bounded)
-            case _                                                    => None
+              Some(bounded) -> true
+            case _                                                    => None -> false
           nextQuery match
             case Some(value) if value !== oldQuery =>
               scrollView.updateSearchQuery(
@@ -1897,7 +1906,8 @@ final class TUI(
                 testRuntimeCounters.recordSearchScans
               )
               InputResult.Render
-            case _                                 => InputResult.NoRender
+            case _ if consumed                     => InputResult.NoRender
+            case _                                 => InputResult.Ignored
     }
 
   override private[scalatui] def clearViewportSearchInput(): Unit =
@@ -1909,10 +1919,12 @@ final class TUI(
     searchPasteActive = false
 
   private def primaryScrollView: Option[ScrollView] =
-    def find(node: LayoutNode): Option[ScrollView] = node.component match
-      case scroll: ScrollView if scroll.primary => Some(scroll)
-      case _                                    => node.children.iterator.flatMap(find).nextOption()
-    latestBaseLayout.flatMap(find)
+    latestBaseLayout.flatMap(primaryScrollViewIn)
+
+  private def primaryScrollViewIn(node: LayoutNode): Option[ScrollView] = node.component match
+    case scroll: ScrollView if scroll.primary => Some(scroll)
+    case _                                    =>
+      node.children.iterator.flatMap(primaryScrollViewIn).nextOption()
 
   private def routeGlobalInputListeners(input: TerminalInput): InputResult =
     val listeners = lifecycleLock.synchronized(inputListeners.toVector)
@@ -1960,7 +1972,7 @@ final class TUI(
               remaining
             )
           )
-          deliveredHorizontal = initial === 0
+          deliveredHorizontal = initial === 0 && result.handled
           applyMouseHandlerResult(target, result)
           handled = handled || result.handled
           remaining = result.wheelRemainder.getOrElse(if result.handled then 0 else remaining)
@@ -1969,15 +1981,15 @@ final class TUI(
     handled || (remaining !== initial)
 
   private def routeMousePress(input: TerminalInput.Mouse, button: MouseButton): Boolean =
-    val now     = options.mouseGestures.clock.nanoTime()
-    val targets = semanticTargetsAt(input.row, input.col)
-    val handled = dispatchSemanticTargets(
+    val now           = options.mouseGestures.clock.nanoTime()
+    val targets       = semanticTargetsAt(input.row, input.col)
+    val handledTarget = firstHandledSemanticTarget(
       targets,
       target => MouseEvent.Press(mouseLocation(target, input), button, input.modifiers)
     )
-    val target  = mouseCapture.orElse(targets.headOption)
+    val target        = mouseCapture.orElse(handledTarget).orElse(targets.headOption)
     mousePress = target.map(TUI.MousePress(_, button, input.row, input.col, now, dragged = false))
-    handled
+    handledTarget.nonEmpty
 
   private def routeMouseMove(
       input: TerminalInput.Mouse,
@@ -2041,7 +2053,13 @@ final class TUI(
       targets: Vector[TUI.MouseTarget],
       event: TUI.MouseTarget => MouseEvent
   ): Boolean =
-    targets.iterator.exists(target => dispatchSemanticTarget(target, event(target)))
+    firstHandledSemanticTarget(targets, event).nonEmpty
+
+  private def firstHandledSemanticTarget(
+      targets: Vector[TUI.MouseTarget],
+      event: TUI.MouseTarget => MouseEvent
+  ): Option[TUI.MouseTarget] =
+    targets.iterator.find(target => dispatchSemanticTarget(target, event(target)))
 
   private def dispatchSemanticTarget(target: TUI.MouseTarget, event: MouseEvent): Boolean =
     target.component match
@@ -2360,12 +2378,15 @@ final class TUI(
       children = node.children.map(translateLayout(_, rowDelta, colDelta))
     )
 
-  private def scheduleContextDetachLocked(): Unit =
-    contextDetachScheduled = true
-    val attached = (committedChildren.map(_.component) ++ overlayStack.map(_.component) ++
+  private def retainedContextComponentsLocked(): Vector[Component] =
+    (committedChildren.map(_.component) ++ overlayStack.map(_.component) ++
       viewportRoot.toVector).foldLeft(Vector.empty[Component]) { (result, component) =>
       if result.exists(_ eq component) then result else result :+ component
     }
+
+  private def scheduleContextDetachLocked(): Unit =
+    contextDetachScheduled = true
+    val attached = retainedContextComponentsLocked()
     componentEffectCoordinator.enqueueCleanup(() => {
       attached.foreach(component => safeRuntimeCallback(detachContext(component)))
       viewportRootContextAttached = false
@@ -2475,16 +2496,21 @@ final class TUI(
     val width                          = positiveDimension(terminal.columns)
     val height                         = positiveDimension(terminal.rows)
     val (baseFrame, composed, layouts) = RuntimeCounterScope.withCounters(testRuntimeCounters) {
-      primaryScrollView.foreach(
-        _.refreshSearch(width, testRuntimeCounters.recordSearchScans)
-      )
-      val renderedBase               = viewportRoot match
+      val initialBase                = viewportRoot match
         case Some(component) =>
           val layout = ViewportLayoutEngine.layout(component, width, height)
           RenderedFrame(layout.render, layout.root.toLayoutNode)
         case None            => root.renderFrame(width)
+      val searchScroll               = primaryScrollViewIn(initialBase.layout)
+      searchScroll.foreach(_.refreshSearch(width, testRuntimeCounters.recordSearchScans))
+      val renderedBase               =
+        if viewportRoot.nonEmpty && searchScroll.exists(_.searchState.active) then
+          val component = viewportRoot.get
+          val layout    = ViewportLayoutEngine.layout(component, width, height)
+          RenderedFrame(layout.render, layout.root.toLayoutNode)
+        else initialBase
       val (rendered, overlayLayouts) = renderOverlays(renderedBase.render, width, height)
-      val withSearch                 = renderSearchLayer(rendered, width, height)
+      val withSearch                 = renderSearchLayer(rendered, width, height, searchScroll)
       (renderedBase, withSearch, overlayLayouts)
     }
     val frame                          = rendererPolicy.prepareFrame(composed.validated(width), width)
@@ -2513,9 +2539,10 @@ final class TUI(
   private def renderSearchLayer(
       frame: ComponentRender,
       width: Int,
-      height: Int
+      height: Int,
+      searchScroll: Option[ScrollView]
   ): ComponentRender =
-    primaryScrollView.filter(_.searchState.active).fold(frame) { scrollView =>
+    searchScroll.filter(_.searchState.active).fold(frame) { scrollView =>
       val state     = scrollView.searchState
       val position  = state.currentMatch.fold("0")(value => value.toString)
       val status    = s"Search: ${state.query} [$position/${state.matchCount}]"
