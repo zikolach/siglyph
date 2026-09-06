@@ -223,8 +223,8 @@ final class TUI(
   private var baseFocusedComponent: Option[Component]                                        = None
   private var exitRequested                                                                  = false
   private var renderRequested                                                                = false
-  private var forceRenderRequested                                                           = false
-  private var clearRequested                                                                 = false
+  private var genericForceRenderRequested                                                    = false
+  private var genericClearRequested                                                          = false
   private var pendingResizeRecoveryGeneration                                                = Option.empty[Long]
   private var runtimeFailure                                                                 = Option.empty[Throwable]
   override private[scalatui] lazy val componentEffectCoordinator: ComponentEffectCoordinator =
@@ -654,8 +654,8 @@ final class TUI(
         lifecycleState === TUI.LifecycleState.Running
       then
         if force then
-          forceRenderRequested = true
-        if clear then clearRequested = true
+          genericForceRenderRequested = true
+        if clear then genericClearRequested = true
         renderRequested = true
     }
 
@@ -1154,8 +1154,6 @@ final class TUI(
       resizeGeneration += 1
       if lifecycleState === TUI.LifecycleState.Running then
         renderRequested = true
-        forceRenderRequested = true
-        clearRequested = true
         pendingResizeRecoveryGeneration = Some(resizeGeneration)
         Some(resizeGeneration)
       else None
@@ -1639,13 +1637,13 @@ final class TUI(
         TUI.Work.Append(operation)
       case TUI.OrdinaryCategory.Render     =>
         renderRequested = false
-        val force              = forceRenderRequested
-        val clear              = clearRequested
+        val genericForce       = genericForceRenderRequested
+        val genericClear       = genericClearRequested
         val recoveryGeneration = pendingResizeRecoveryGeneration
-        forceRenderRequested = false
-        clearRequested = false
+        genericForceRenderRequested = false
+        genericClearRequested = false
         pendingResizeRecoveryGeneration = None
-        TUI.Work.Render(force, clear, recoveryGeneration)
+        TUI.Work.Render(genericForce, genericClear, recoveryGeneration)
 
   private def ordinaryCategoryReadyLocked(category: TUI.OrdinaryCategory): Boolean = category match
     case TUI.OrdinaryCategory.Structural => pendingStructural.nonEmpty
@@ -1777,8 +1775,8 @@ final class TUI(
     pendingStructural.clear()
     desiredChildren = committedChildren
     renderRequested = false
-    forceRenderRequested = false
-    clearRequested = false
+    genericForceRenderRequested = false
+    genericClearRequested = false
     pendingResizeRecoveryGeneration = None
     backgroundColorFlight match
       case Some(flight) if flight.phase === TUI.QueryFlightPhase.Emitted =>
@@ -2519,8 +2517,8 @@ final class TUI(
     case _                                                                          => false
 
   private def renderNow(
-      force: Boolean,
-      clear: Boolean,
+      genericForce: Boolean,
+      genericClear: Boolean,
       recoveryGeneration: Option[Long]
   ): Unit =
     val generation                     = lifecycleLock.synchronized(resizeGeneration)
@@ -2551,10 +2549,9 @@ final class TUI(
     val heightChanged                  = (rendererPolicy.retainedHeight !== 0) &&
       (rendererPolicy.retainedHeight !== height)
     val resizeGeometryChanged          = widthChanged || heightChanged
-    val forceForRender                 =
-      force && (recoveryGeneration.isEmpty || resizeGeometryChanged)
-    val clearForRender                 =
-      clear && (recoveryGeneration.isEmpty || resizeGeometryChanged)
+    val forceForRender                 = genericForce || resizeGeometryChanged
+    val clearForRender                 = genericClear ||
+      (recoveryGeneration.nonEmpty && resizeGeometryChanged)
     val recovery                       = Option.when(
       clearForRender && resizeGeometryChanged && rendererPolicy.retainedFrame.nonEmpty &&
         recoveryGeneration.exists(_ === generation) && options.normalResizeRecovery.nonEmpty &&
@@ -2585,10 +2582,13 @@ final class TUI(
       lifecycleLock.synchronized {
         if lifecycleState === TUI.LifecycleState.Running then
           renderRequested = true
-          forceRenderRequested = true
-          clearRequested = true
-          if recoveryGeneration.nonEmpty then
+          if genericForce then genericForceRenderRequested = true
+          if genericClear then genericClearRequested = true
+          if recoveryGeneration.nonEmpty || (currentGeneration !== generation) then
             pendingResizeRecoveryGeneration = Some(resizeGeneration)
+          else
+            genericForceRenderRequested = true
+            genericClearRequested = true
       }
       recovery.foreach(value =>
         emitResizeRecoveryDiagnostic(
@@ -2796,7 +2796,11 @@ object TUI:
     case Action(action: () => Unit)
     case Control(action: () => Unit)
     case Append(operation: TUI.AppendOperation)
-    case Render(force: Boolean, clear: Boolean, recoveryGeneration: Option[Long])
+    case Render(
+        genericForce: Boolean,
+        genericClear: Boolean,
+        recoveryGeneration: Option[Long]
+    )
     case Cleanup
     case Done
 

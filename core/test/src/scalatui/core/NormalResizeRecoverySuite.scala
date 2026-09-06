@@ -143,6 +143,30 @@ class NormalResizeRecoverySuite extends munit.FunSuite:
     tui.stop()
   }
 
+  test("generic force survives a coalesced same-size resize") {
+    val calls    = AtomicInteger(0)
+    val provider = NormalResizeRecoveryProvider { _ =>
+      calls.incrementAndGet()
+      Vector("history")
+    }
+    val terminal = VirtualTerminal(20, 8)
+    val tui      = running(
+      terminal,
+      MutableFrame(ComponentRender.text("live")),
+      provider
+    )
+
+    tui.requestRender(force = true)
+    assertEquals(terminal.output, "")
+    terminal.resize(20, 8)
+
+    assertEquals(calls.get(), 0)
+    assert(terminal.output.startsWith(TUI.SyncStart + TUI.AutoWrapOff))
+    assert(terminal.output.contains("live"))
+    assert(!terminal.output.contains(TUI.NormalScreenViewportClear))
+    tui.stop()
+  }
+
   test("height growth bounds recovery by the previous viewport capacity") {
     val contexts = ArrayBuffer.empty[NormalResizeRecoveryContext]
     val terminal = VirtualTerminal(20, 5)
