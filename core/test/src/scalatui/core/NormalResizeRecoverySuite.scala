@@ -9,6 +9,7 @@ import scalatui.terminal.{
   Terminal,
   TerminalImageProtocol,
   TerminalInput,
+  TerminalKey,
   VirtualTerminal
 }
 
@@ -23,6 +24,8 @@ class NormalResizeRecoverySuite extends munit.FunSuite:
   private final class ProbeTerminal(initialColumns: Int = 20, initialRows: Int = 8)
       extends Terminal:
     val delegate                                                                   = VirtualTerminal(initialColumns, initialRows)
+    private var reportedColumns                                                    = initialColumns
+    private var reportedRows                                                       = initialRows
     var startCount                                                                 = 0
     val failNextRenderWrite                                                        = AtomicBoolean(false)
     override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
@@ -34,8 +37,8 @@ class NormalResizeRecoverySuite extends munit.FunSuite:
         delegate.write(data)
         throw IllegalStateException("sensitive write failure")
       delegate.write(data)
-    override def columns: Int                                                      = delegate.columns
-    override def rows: Int                                                         = delegate.rows
+    override def columns: Int                                                      = reportedColumns
+    override def rows: Int                                                         = reportedRows
     override def moveBy(lines: Int): Unit                                          = delegate.moveBy(lines)
     override def hideCursor(): Unit                                                = delegate.hideCursor()
     override def showCursor(): Unit                                                = delegate.showCursor()
@@ -43,7 +46,14 @@ class NormalResizeRecoverySuite extends munit.FunSuite:
     override def clearFromCursor(): Unit                                           = delegate.clearFromCursor()
     override def clearScreen(): Unit                                               = delegate.clearScreen()
 
-    def resize(columns: Int, rows: Int): Unit = delegate.resize(columns, rows)
+    def resize(columns: Int, rows: Int): Unit =
+      reportedColumns = columns
+      reportedRows = rows
+      delegate.resize(columns, rows)
+
+    def resizeSilently(columns: Int, rows: Int): Unit =
+      reportedColumns = columns
+      reportedRows = rows
 
   private def options(
       provider: NormalResizeRecoveryProvider,
@@ -164,6 +174,100 @@ class NormalResizeRecoverySuite extends munit.FunSuite:
     assert(terminal.output.startsWith(TUI.SyncStart + TUI.AutoWrapOff))
     assert(terminal.output.contains("live"))
     assert(!terminal.output.contains(TUI.NormalScreenViewportClear))
+    tui.stop()
+  }
+
+  test("coalesced resize invalidation survives a return to committed geometry") {
+    val callbackEntered = CountDownLatch(1)
+    val releaseCallback = CountDownLatch(1)
+    val calls           = AtomicInteger(0)
+    val terminal        = VirtualTerminal(20, 8)
+    val tui             = running(
+      terminal,
+      MutableFrame(ComponentRender.text("live")),
+      NormalResizeRecoveryProvider { _ =>
+        calls.incrementAndGet()
+        Vector("history")
+      }
+    )
+    tui.addInputListener {
+      case TerminalInput.Key(TerminalKey.Character("hold"), _) =>
+        callbackEntered.countDown()
+        releaseCallback.await()
+        InputResult.NoRender
+      case _                                                   => InputResult.NoRender
+    }
+    val owner           = Thread(() =>
+      terminal.sendInput(TerminalInput.Key(TerminalKey.Character("hold")))
+    )
+    owner.start()
+    assert(callbackEntered.await(5, TimeUnit.SECONDS), "input callback did not start")
+
+    terminal.resize(12, 8)
+    terminal.resize(20, 8)
+    releaseCallback.countDown()
+    owner.join(5000)
+
+    assert(!owner.isAlive, "render owner did not finish")
+    assertEquals(calls.get(), 1)
+    assert(terminal.output.contains(TUI.NormalScreenViewportClear))
+    assert(terminal.output.contains("history"))
+    tui.stop()
+  }
+
+  test("geometry change without resize callback clears without recovery") {
+    val calls    = AtomicInteger(0)
+    val terminal = ProbeTerminal(20, 8)
+    val tui      = TUI(
+      terminal,
+      options(NormalResizeRecoveryProvider { _ =>
+        calls.incrementAndGet()
+        Vector("history")
+      })
+    )
+    tui.addChild(MutableFrame(ComponentRender.text("live")))
+    tui.start()
+    terminal.delegate.clearWrites()
+
+    terminal.resizeSilently(12, 8)
+    tui.requestRender()
+    tui.flushRender()
+
+    assertEquals(calls.get(), 0)
+    assert(terminal.delegate.output.contains(TUI.NormalScreenViewportClear))
+    assert(terminal.delegate.output.contains("live"))
+    tui.stop()
+  }
+
+  test("stale observed geometry change preserves clear without recovery") {
+    val calls     = AtomicInteger(0)
+    val terminal  = ProbeTerminal(20, 8)
+    var returnNow = false
+    val live      = new Component:
+      override def render(width: Int): ComponentRender =
+        if returnNow then
+          returnNow = false
+          terminal.resize(20, 8)
+        ComponentRender.text("live")
+    val tui       = TUI(
+      terminal,
+      options(NormalResizeRecoveryProvider { _ =>
+        calls.incrementAndGet()
+        Vector("history")
+      })
+    )
+    tui.addChild(live)
+    tui.start()
+    terminal.delegate.clearWrites()
+
+    terminal.resizeSilently(12, 8)
+    returnNow = true
+    tui.requestRender()
+    tui.flushRender()
+
+    assertEquals(calls.get(), 0)
+    assert(terminal.delegate.output.contains(TUI.NormalScreenViewportClear))
+    assert(terminal.delegate.output.contains("live"))
     tui.stop()
   }
 

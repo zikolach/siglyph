@@ -38,3 +38,12 @@ The TUI runtime SHALL track both terminal width and terminal height changes acro
 #### Scenario: Coalesced resizes recover latest geometry
 - **WHEN** multiple terminal resize notifications invalidate an unpublished recovery/live candidate
 - **THEN** the TUI SHALL emit no stale candidate, preserve the prior committed baseline, and perform recovery for the latest coalesced positive dimensions and generation
+
+#### Scenario: Coalesced resize returns to committed geometry
+- **WHEN** pending resize callbacks change terminal geometry and then return it to the committed width and height before Render work is claimed
+- **THEN** the TUI SHALL retain the resize invalidation, clear the active viewport, and perform configured recovery for the final generation
+
+#### Scenario: Geometry change is observed before its resize callback
+- **WHEN** Render work reads terminal geometry different from the committed frame without callback-originated invalidation
+- **THEN** the TUI SHALL force and clear the redraw for the observed geometry and SHALL NOT invoke the recovery provider
+- **AND** that force and clear intent SHALL survive stale-candidate retry even if a later callback returns to the committed geometry

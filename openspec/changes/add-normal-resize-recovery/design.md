@@ -83,6 +83,17 @@ does not invoke the provider or perform the destructive viewport clear; any coal
 may still repaint through the ordinary owned path.
 
 When Render work is claimed, it snapshots the eligible resize generation. A later resize supersedes that marker. Recovery is attempted only when all of these hold:
+Once any pending callback reports geometry different from the committed render geometry, the runtime
+keeps that invalidation until a redraw commits. A later coalesced callback that returns to the
+committed dimensions does not erase the invalidation because the intermediate terminal resize may
+already have truncated or reflowed viewport content.
+
+The render owner may also observe a geometry delta through `columns` or `rows` before a backend
+resize callback publishes its generation. That delta still requires the configured normal-screen
+resize clear to remove stale rows. The force and clear intent survives a stale candidate even when a
+later callback returns to the committed geometry. It does not invoke recovery because provider
+eligibility remains tied to callback-originated invalidation.
+
 
 - lifecycle is `Running`;
 - a prior live frame is committed;

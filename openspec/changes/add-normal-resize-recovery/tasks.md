@@ -7,7 +7,7 @@
 
 ## 2. Resize eligibility and owner scheduling
 
-- [x] 2.1 Add focused tests showing only a committed width/height delta can invoke recovery, while same-size notifications, startup, append, ordinary input/action/structure/overlay rendering, image cell-size updates, and generic forced redraws cannot.
+- [x] 2.1 Add focused tests showing only committed geometry invalidation can invoke recovery, while same-size notifications, startup, append, ordinary input/action/structure/overlay rendering, image cell-size updates, and generic forced redraws cannot; preserve coalesced intermediate invalidation and clear geometry changes observed without a resize generation.
 - [x] 2.2 Track coalesced geometry-change recovery eligibility and generation separately from existing force/clear flags without consuming ingress capacity or adding a scheduler category.
 - [x] 2.3 Snapshot positive width, height, and resize generation for one recovery Render attempt and preserve existing six-category owner fairness.
 - [x] 2.4 Test and preserve owner serialization, lock separation, non-recursive follow-up work, and absence of concurrent callbacks/component renders while provider code executes.
