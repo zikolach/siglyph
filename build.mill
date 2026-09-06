@@ -86,7 +86,7 @@ private def runScalafmt(check: Boolean): Unit =
 
 private def runScalafix(): Unit =
   runShell("""
-    sources="core/src core/test terminalJvm/src terminalJvm/test terminalNative/src terminalNative/test markdown/src markdown/test image/src image/test extras/src extras/test demo/src asciinemaDemo/src keyTester/src interactiveDemo/src interactiveDemo/test interactiveJvmDemo/src interactiveNativeDemo/src scripts/GenerateUnicodeTables.scala"
+    sources="core/src core/test terminalJvm/src terminalJvm/test terminalNative/src terminalNative/test markdown/src markdown/test image/src image/test extras/src extras/test demo/src asciinemaDemo/src keyTester/src interactiveDemo/src interactiveDemo/test interactiveJvmDemo/src interactiveNativeDemo/src fullscreenDemo/src fullscreenDemo/test fullscreenJvmDemo/src fullscreenNativeDemo/src benchmarks/shared/src benchmarks/jvm/src benchmarks/native/src scripts"
     set -- --syntactic --check --scala-version 3.7.4
     for source in $sources; do
       set -- "$@" --files "$source"
@@ -274,4 +274,54 @@ object interactiveNativeDemo extends SiglyphNativeToolchain {
   def scalaVersion       = "3.7.4"
   def scalaNativeVersion = "0.5.12"
   def moduleDeps         = Seq(terminalNative, interactiveDemoNative)
+}
+
+object fullscreenDemo extends SiglyphModule {
+  def moduleDeps = Seq(core)
+
+  object test extends ScalaTests {
+    def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
+    def testFramework = "munit.Framework"
+  }
+}
+
+object fullscreenDemoNative extends SiglyphNativeToolchain {
+  def scalaVersion       = "3.7.4"
+  def scalaNativeVersion = "0.5.12"
+  def moduleDeps         = Seq(coreNative)
+  def sources            = Task.Sources(workspaceRoot / "fullscreenDemo" / "src")
+
+  object test extends ScalaNativeTests with SiglyphNativeToolchain {
+    def sources       = Task.Sources(workspaceRoot / "fullscreenDemo" / "test" / "src")
+    def mvnDeps       = Seq(mvn"org.scalameta::munit::1.2.0")
+    def testFramework = "munit.Framework"
+  }
+}
+
+object fullscreenJvmDemo extends SiglyphModule {
+  def moduleDeps = Seq(terminalJvm, fullscreenDemo)
+}
+
+object fullscreenNativeDemo extends SiglyphNativeToolchain {
+  def scalaVersion       = "3.7.4"
+  def scalaNativeVersion = "0.5.12"
+  def moduleDeps         = Seq(terminalNative, fullscreenDemoNative)
+}
+
+object benchmarkJvm extends SiglyphModule {
+  def moduleDeps = Seq(core)
+  def sources    = Task.Sources(
+    workspaceRoot / "benchmarks" / "shared" / "src",
+    workspaceRoot / "benchmarks" / "jvm" / "src"
+  )
+}
+
+object benchmarkNative extends SiglyphNativeToolchain {
+  def scalaVersion       = "3.7.4"
+  def scalaNativeVersion = "0.5.12"
+  def moduleDeps         = Seq(coreNative)
+  def sources            = Task.Sources(
+    workspaceRoot / "benchmarks" / "shared" / "src",
+    workspaceRoot / "benchmarks" / "native" / "src"
+  )
 }

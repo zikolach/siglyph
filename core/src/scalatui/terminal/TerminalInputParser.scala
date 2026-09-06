@@ -159,6 +159,7 @@ object TerminalInputParser:
           )
           val action    =
             if (code & 64) !== 0 then MouseAction.Wheel(wheelDirection(code & 3))
+            else if (code & 32) !== 0 then MouseAction.Move(mouseButtonState(code))
             else if suffix === "m" then MouseAction.Release(mouseButton(code))
             else MouseAction.Press(mouseButton(code))
           Some(TerminalInput.Mouse(action, row - 1, col - 1, modifiers))
@@ -246,6 +247,12 @@ object TerminalInputParser:
       case 1 => MouseButton.Middle
       case 2 => MouseButton.Right
       case _ => MouseButton.Other(identity)
+
+  private def mouseButtonState(code: Int): MouseButtonState =
+    val button = mouseButton(code)
+    button match
+      case MouseButton.Other(3) => MouseButtonState.Released
+      case _                    => MouseButtonState.Pressed(button)
 
   private def wheelDirection(code: Int): MouseWheelDirection = code match
     case 0 => MouseWheelDirection.Up

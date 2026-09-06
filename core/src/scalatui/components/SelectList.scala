@@ -1,7 +1,14 @@
 package scalatui.components
 
 import scalatui.ansi.Ansi
-import scalatui.core.{Component, ComponentRender, InputResult, MouseInputHandler}
+import scalatui.core.{
+  Component,
+  ComponentRender,
+  ContextualComponent,
+  InputResult,
+  MouseInputHandler,
+  TUIContext
+}
 import scalatui.matching.FuzzyMatcher
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{
@@ -20,115 +27,148 @@ final class SelectList private (
     items: Vector[SelectItem],
     options: SelectListOptions
 ) extends Component,
+      ContextualComponent,
       MouseInputHandler:
   def this(items: Vector[SelectItem]) = this(items, SelectListOptions())
 
   def this(items: Vector[SelectItem], maxVisible: Int) =
     this(items, SelectListOptions(maxVisible = maxVisible))
 
-  var onSelect: SelectItem => Unit                  = _ => ()
-  var onCancel: () => Unit                          = () => ()
-  var onSelectionChange: Option[SelectItem] => Unit = _ => ()
-  private var selectedIndex                         = 0
-  private var scrollOffset                          = 0
-  private var filterQuery                           = ""
-  private var pasteSession                          = Option.empty[FilterPasteSession]
+  private val stateBoundary                                       = ComponentStateBoundary()
+  private var context                                             = Option.empty[TUIContext]
+  private var selectCallback: SelectItem => Unit                  = _ => ()
+  private var cancelCallback: () => Unit                          = () => ()
+  private var selectionChangeCallback: Option[SelectItem] => Unit = _ => ()
+  private var selectedIndex                                       = 0
+  private var scrollOffset                                        = 0
+  private var filterQuery                                         = ""
+  private var pasteSession                                        = Option.empty[FilterPasteSession]
 
-  def selected: Option[SelectItem] = filteredItems(filterQuery).lift(selectedIndex)
+  def onSelect: SelectItem => Unit                                 = stateBoundary(selectCallback)
+  def onSelect_=(value: SelectItem => Unit): Unit                  = stateBoundary { selectCallback = value }
+  def onCancel: () => Unit                                         = stateBoundary(cancelCallback)
+  def onCancel_=(value: () => Unit): Unit                          = stateBoundary { cancelCallback = value }
+  def onSelectionChange: Option[SelectItem] => Unit                = stateBoundary(selectionChangeCallback)
+  def onSelectionChange_=(value: Option[SelectItem] => Unit): Unit = stateBoundary {
+    selectionChangeCallback = value
+  }
 
-  def query: String = pasteSession.fold(filterQuery)(_.query)
+  def selected: Option[SelectItem] = stateBoundary(filteredItems(filterQuery).lift(selectedIndex))
+
+  def query: String = stateBoundary(pasteSession.fold(filterQuery)(_.query))
+
+  override def tuiContext_=(value: Option[TUIContext]): Unit =
+    stateBoundary.transitionContext(context, value) { _ => context = value }
 
   override def handleMouse(context: MouseInputContext): InputResult = context.input.action match
-    case MouseAction.Wheel(MouseWheelDirection.Up)   => moveSelectionResult(-1)
-    case MouseAction.Wheel(MouseWheelDirection.Down) => moveSelectionResult(1)
+    case MouseAction.Wheel(MouseWheelDirection.Up)   => moveSelectionByResult(-1)
+    case MouseAction.Wheel(MouseWheelDirection.Down) => moveSelectionByResult(1)
     case _                                           => InputResult.Ignored
 
   override def handleInput(input: TerminalInput): Unit =
     handleInputResult(input)
     ()
 
-  override def handleInputResult(input: TerminalInput): InputResult = input match
-    case TerminalInput.PasteStart if options.effectiveFiltering.enabled                  =>
-      val changed = commitPaste()
-      pasteSession = Some(FilterPasteSession(filterQuery))
-      if changed then InputResult.Render else InputResult.NoRender
-    case TerminalInput.PasteChunk(chunk) if options.effectiveFiltering.enabled           =>
-      pasteSession match
-        case Some(session) =>
-          session.append(chunk)
-          InputResult.NoRender
-        case None          => InputResult.Ignored
-    case TerminalInput.PasteEnd if options.effectiveFiltering.enabled                    =>
-      if commitPaste() then InputResult.Render else InputResult.NoRender
-    case TerminalInput.PasteStart | TerminalInput.PasteChunk(_) | TerminalInput.PasteEnd =>
-      InputResult.Ignored
-    case _                                                                               =>
-      val hadPaste  = pasteSession.nonEmpty
-      val committed = commitPaste()
-      val result    = handleNonPasteInput(input)
-      if committed || result === InputResult.Render then InputResult.Render
-      else if hadPaste && result === InputResult.Ignored then InputResult.NoRender
-      else result
+  override def handleInputResult(input: TerminalInput): InputResult =
+    stateBoundary.transition { effects =>
+      input match
+        case TerminalInput.PasteStart if options.effectiveFiltering.enabled                  =>
+          val changed = commitPaste(effects)
+          pasteSession = Some(FilterPasteSession(filterQuery))
+          if changed then InputResult.Render else InputResult.NoRender
+        case TerminalInput.PasteChunk(chunk) if options.effectiveFiltering.enabled           =>
+          pasteSession match
+            case Some(session) =>
+              session.append(chunk)
+              InputResult.NoRender
+            case None          => InputResult.Ignored
+        case TerminalInput.PasteEnd if options.effectiveFiltering.enabled                    =>
+          if commitPaste(effects) then InputResult.Render else InputResult.NoRender
+        case TerminalInput.PasteStart | TerminalInput.PasteChunk(_) | TerminalInput.PasteEnd =>
+          InputResult.Ignored
+        case _                                                                               =>
+          val hadPaste  = pasteSession.nonEmpty
+          val committed = commitPaste(effects)
+          val result    = handleNonPasteInput(input, effects)
+          if committed || result === InputResult.Render then InputResult.Render
+          else if hadPaste && result === InputResult.Ignored then InputResult.NoRender
+          else result
+    }
 
-  private def handleNonPasteInput(input: TerminalInput): InputResult = input match
-    case TerminalInput.Key(TerminalKey.Up, _)     => selectionResult(-1)
-    case TerminalInput.Key(TerminalKey.Down, _)   => selectionResult(1)
-    case TerminalInput.Key(TerminalKey.Enter, _)  =>
-      selected match
-        case Some(item) =>
-          onSelect(item)
-          InputResult.Render
-        case None       => InputResult.NoRender
-    case TerminalInput.Key(TerminalKey.Escape, _) =>
-      onCancel()
-      InputResult.Render
-    case TerminalInput.Key(TerminalKey.Backspace, _)
-        if options.effectiveFiltering.enabled && filterQuery.nonEmpty =>
-      updateFilter(dropLastGrapheme(filterQuery))
-      InputResult.Render
-    case TerminalInput.Key(TerminalKey.Character(text), modifiers)
-        if options.effectiveFiltering.enabled && !modifiers.ctrl && !modifiers.alt && !modifiers.superKey && text.nonEmpty =>
-      updateFilter(filterQuery + text)
-      InputResult.Render
-    case _                                        => InputResult.Ignored
+  private def handleNonPasteInput(input: TerminalInput, effects: ComponentEffects): InputResult =
+    input match
+      case TerminalInput.Key(TerminalKey.Up, _)     => keyboardSelectionResult(-1, effects)
+      case TerminalInput.Key(TerminalKey.Down, _)   => keyboardSelectionResult(1, effects)
+      case TerminalInput.Key(TerminalKey.Enter, _)  =>
+        selected match
+          case Some(item) =>
+            val callback = selectCallback
+            effects.add(() => callback(item))
+            InputResult.Render
+          case None       => InputResult.NoRender
+      case TerminalInput.Key(TerminalKey.Escape, _) =>
+        val callback = cancelCallback
+        effects.add(callback)
+        InputResult.Render
+      case TerminalInput.Key(TerminalKey.Backspace, _)
+          if options.effectiveFiltering.enabled && filterQuery.nonEmpty =>
+        updateFilter(dropLastGrapheme(filterQuery), effects)
+        InputResult.Render
+      case TerminalInput.Key(TerminalKey.Character(text), modifiers)
+          if options.effectiveFiltering.enabled && !modifiers.ctrl && !modifiers.alt && !modifiers.superKey && text.nonEmpty =>
+        updateFilter(filterQuery + text, effects)
+        InputResult.Render
+      case _                                        => InputResult.Ignored
 
-  private def selectionResult(delta: Int): InputResult =
-    val indexBefore  = selectedIndex
-    val scrollBefore = scrollOffset
-    moveSelection(delta)
-    if (selectedIndex !== indexBefore) || (scrollOffset !== scrollBefore) then InputResult.Render
-    else InputResult.NoRender
+  private def keyboardSelectionResult(delta: Int, effects: ComponentEffects): InputResult =
+    moveSelectionResult(delta, effects) match
+      case InputResult.Ignored => InputResult.NoRender
+      case result              => result
 
   /** Move selection up/down by logical items. */
-  def moveSelectionBy(delta: Int): Unit = moveSelection(delta)
+  def moveSelectionBy(delta: Int): Unit =
+    moveSelectionByResult(delta)
+    ()
 
   /** Move selection and return whether a render is needed. */
-  def moveSelectionByResult(delta: Int): InputResult = moveSelectionResult(delta)
+  def moveSelectionByResult(delta: Int): InputResult =
+    stateBoundary.transition(effects => moveSelectionResult(delta, effects))
 
   /** Move selection by a full page of visible rows, clamped to item bounds. */
   def moveSelectionByPage(pagesize: Int, direction: Int): Unit =
     if items.nonEmpty then moveSelectionBy(pagesize * direction)
 
   /** Confirm the currently selected entry, if any. */
-  def confirmSelection(): Unit =
-    selected.foreach(onSelect)
+  def confirmSelection(): Unit = stateBoundary.transition { effects =>
+    filteredItems(filterQuery).lift(selectedIndex).foreach { item =>
+      val callback = selectCallback
+      effects.add(() => callback(item))
+    }
+  }
 
   /** Cancel selection and close the overlay interaction. */
-  def cancelSelection(): Unit = onCancel()
+  def cancelSelection(): Unit = stateBoundary.transition(effects => effects.add(cancelCallback))
 
-  override def render(width: Int): ComponentRender = ComponentRender.text {
-    val safeWidth = math.max(0, width)
-    if safeWidth <= 0 then Vector("")
-    else
+  override def render(width: Int): ComponentRender =
+    val snapshot = stateBoundary {
       val matchingItems = filteredItems(filterQuery)
-      if matchingItems.isEmpty then
+      SelectList.RenderSnapshot(
+        matchingItems,
+        selectedIndex,
+        normalizedScrollOffset(matchingItems.length)
+      )
+    }
+    ComponentRender.text {
+      val safeWidth = math.max(0, width)
+      if safeWidth <= 0 then Vector("")
+      else if snapshot.items.isEmpty then
         Vector(fit(options.theme.noMatchText(options.noMatchText), safeWidth))
-      else
-        renderItems(matchingItems, safeWidth, normalizedScrollOffset(matchingItems.length))
-  }
+      else renderItems(snapshot.items, snapshot.selectedIndex, safeWidth, snapshot.pageOffset)
+    }
 
   private def renderItems(
       matchingItems: Vector[SelectItem],
+      selectedSnapshot: Int,
       safeWidth: Int,
       pageOffset: Int
   ): Vector[String] =
@@ -137,7 +177,7 @@ final class SelectList private (
     val visibleCount = if withScroll then totalRows - 1 else totalRows
     val pageItems    = matchingItems.slice(pageOffset, pageOffset + visibleCount)
     val rows         = pageItems.zipWithIndex.map { case (item, visibleIndex) =>
-      renderRow(item, pageOffset + visibleIndex, safeWidth)
+      renderRow(item, pageOffset + visibleIndex, selectedSnapshot, safeWidth)
     }
     if withScroll then
       val end = math.min(matchingItems.length, pageOffset + visibleCount)
@@ -147,11 +187,7 @@ final class SelectList private (
       )
     else rows
 
-  private def moveSelection(delta: Int): Unit =
-    moveSelectionResult(delta)
-    ()
-
-  private def moveSelectionResult(delta: Int): InputResult =
+  private def moveSelectionResult(delta: Int, effects: ComponentEffects): InputResult =
     val currentItems = filteredItems(filterQuery)
     if currentItems.isEmpty then InputResult.Ignored
     else
@@ -159,7 +195,7 @@ final class SelectList private (
       val beforeIndex = selectedIndex
       selectedIndex = math.max(0, math.min(currentItems.length - 1, selectedIndex + delta))
       ensureVisible(currentItems.length)
-      notifySelectionChange(before, currentItems.lift(selectedIndex))
+      notifySelectionChange(before, currentItems.lift(selectedIndex), effects)
       if selectedIndex === beforeIndex then InputResult.NoRender else InputResult.Render
 
   private def ensureVisible(length: Int): Unit =
@@ -177,7 +213,7 @@ final class SelectList private (
     val maxOffset    = math.max(0, length - visibleCount)
     math.max(0, math.min(offset, maxOffset))
 
-  private def updateFilter(value: String): Unit =
+  private def updateFilter(value: String, effects: ComponentEffects): Unit =
     val previousItems        = filteredItems(filterQuery)
     val selectedBeforeFilter = previousItems.lift(selectedIndex)
     filterQuery = value
@@ -188,10 +224,16 @@ final class SelectList private (
         case index => Some(index)
     ).getOrElse(0)
     ensureVisible(candidates.length)
-    notifySelectionChange(selectedBeforeFilter, candidates.lift(selectedIndex))
+    notifySelectionChange(selectedBeforeFilter, candidates.lift(selectedIndex), effects)
 
-  private def notifySelectionChange(before: Option[SelectItem], after: Option[SelectItem]): Unit =
-    if before !== after then onSelectionChange(after)
+  private def notifySelectionChange(
+      before: Option[SelectItem],
+      after: Option[SelectItem],
+      effects: ComponentEffects
+  ): Unit =
+    if before !== after then
+      val callback = selectionChangeCallback
+      effects.add(() => callback(after))
 
   private def filteredItems(queryValue: String): Vector[SelectItem] =
     options.effectiveFiltering match
@@ -203,14 +245,14 @@ final class SelectList private (
       case SelectListFiltering.Fuzzy       =>
         FuzzyMatcher.filter(queryValue, items)(searchableText).map(_.item)
 
-  private def commitPaste(): Boolean =
+  private def commitPaste(effects: ComponentEffects): Boolean =
     pasteSession match
       case None          => false
       case Some(session) =>
         pasteSession = None
         session.finish()
         if session.changed then
-          updateFilter(session.query)
+          updateFilter(session.query, effects)
           true
         else false
 
@@ -220,8 +262,13 @@ final class SelectList private (
   private def dropLastGrapheme(value: String): String =
     Unicode.graphemeClusters(value).dropRight(1).mkString
 
-  private def renderRow(item: SelectItem, index: Int, width: Int): String =
-    val selected     = index === selectedIndex
+  private def renderRow(
+      item: SelectItem,
+      index: Int,
+      selectedSnapshot: Int,
+      width: Int
+  ): String =
+    val selected     = index === selectedSnapshot
     val prefix       =
       if selected then options.theme.selectedPrefix(options.selectedPrefix)
       else options.theme.normalPrefix(options.normalPrefix)
@@ -247,6 +294,12 @@ final class SelectList private (
     if width <= 0 then "" else Ansi.truncateToWidth(value, width, "")
 
 object SelectList:
+  private final case class RenderSnapshot(
+      items: Vector[SelectItem],
+      selectedIndex: Int,
+      pageOffset: Int
+  )
+
   def apply(items: Vector[SelectItem]): SelectList =
     SelectList(items, SelectListOptions())
 

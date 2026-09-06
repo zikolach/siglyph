@@ -1,6 +1,6 @@
 package scalatui.core
 
-import scalatui.components.Box
+import scalatui.components.{Box, ComponentStateBoundary}
 import scalatui.terminal.{Base64ImagePayload, TerminalImageProtocol}
 
 class ContainerSuite extends munit.FunSuite:
@@ -184,10 +184,28 @@ class ContainerSuite extends munit.FunSuite:
     assertEquals(contexts, Vector(Some(firstTui), None))
 
     inner.addChild(leaf)
+    interceptMessage[IllegalStateException](
+      "A contextual component must detach before attaching to another TUI context"
+    )(outer.tuiContext_=(Some(secondTui)))
+    outer.tuiContext_=(None)
     outer.tuiContext_=(Some(secondTui))
     outer.clear()
 
     assertEquals(
       contexts,
-      Vector(Some(firstTui), None, Some(firstTui), Some(secondTui), None)
+      Vector(Some(firstTui), None, Some(firstTui), None, Some(secondTui), None)
     )
+
+  test("context transition reads current state inside its boundary"):
+    val boundary = ComponentStateBoundary()
+    var lockHeld = false
+
+    boundary.transitionContext(
+      {
+        lockHeld = Thread.holdsLock(boundary)
+        None
+      },
+      None
+    )(_ => ())
+
+    assert(lockHeld)

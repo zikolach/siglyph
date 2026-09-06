@@ -189,6 +189,39 @@ class TerminalInputParserSuite extends munit.FunSuite:
       ))
     )
 
+  test("parses SGR motion button state, extended identity, and fragmentation"):
+    val cases = Vector(
+      "\u001b[<32;3;2M"  -> TerminalInput.Mouse(
+        MouseAction.Move(MouseButtonState.Pressed(MouseButton.Left)),
+        row = 1,
+        col = 2
+      ),
+      "\u001b[<35;3;2M"  -> TerminalInput.Mouse(
+        MouseAction.Move(MouseButtonState.Released),
+        row = 1,
+        col = 2
+      ),
+      "\u001b[<188;3;2M" -> TerminalInput.Mouse(
+        MouseAction.Move(MouseButtonState.Pressed(MouseButton.Other(128))),
+        row = 1,
+        col = 2,
+        modifiers = KeyModifiers(ctrl = true, shift = true, alt = true)
+      )
+    )
+    cases.foreach { (sequence, expected) =>
+      assertEquals(parse(sequence), Vector(expected))
+      val bytes = sequence.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+      (1 until bytes.length).foreach { split =>
+        val buffer = TerminalInputBuffer()
+        assertEquals(
+          buffer.process(TerminalInputChunk(bytes.take(split))) ++
+            buffer.process(TerminalInputChunk(bytes.drop(split))),
+          Vector(expected),
+          s"$sequence split at $split"
+        )
+      }
+    }
+
   test("preserves invalid SGR mouse coordinates as raw input"):
     Vector(
       "\u001b[<0;0;2M",

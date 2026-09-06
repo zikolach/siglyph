@@ -1,6 +1,6 @@
 package scalatui.core
 
-import scalatui.terminal.{MouseInputContext, TerminalInput}
+import scalatui.terminal.{KeybindingCommand, MouseInputContext, TerminalInput}
 
 /**
  * A renderable terminal UI component.
@@ -8,6 +8,17 @@ import scalatui.terminal.{MouseInputContext, TerminalInput}
  * Implementations return ordinary lines, semantic controls, and structured cursor candidates on JVM
  * and Scala Native. Every line and placement must fit within the requested terminal display width,
  * and each placement must use a returned row.
+ *
+ * Built-in mutable components serialize public mutation, input handling, and render snapshots with
+ * one private state boundary on JVM and Scala Native. Application callbacks, providers, styling
+ * hooks, cancellation handles, context operations, and render requests run after that boundary is
+ * released. Detached effects use one bounded local FIFO. Attached effects share the owning TUI
+ * lifecycle's 4096-batch FIFO and single-owner drain. An uncontended call may drain synchronously.
+ * A reentrant or concurrent call returns after state commit and enqueue. Full admission or the TUI
+ * stopping cutoff rejects an effectful transition before mutation. A callback observes the
+ * committed state that triggered it and may reenter component or TUI APIs. Detached descendant
+ * failures reach the active outer drain. Attached failures enter TUI cleanup. Asynchronous results
+ * commit only while their captured request generation is current.
  */
 trait Component:
   /**
@@ -15,7 +26,9 @@ trait Component:
    *
    * Text-only implementations should return `ComponentRender.text`. Ordinary line contents do not
    * grant semantic control or cursor authority. Invalid surviving metadata geometry fails before
-   * terminal output; the TUI does not move, drop, partially encode, or convert it to text.
+   * terminal output; the TUI does not move, drop, partially encode, or convert it to text. This
+   * width-only method remains the unbounded fallback for components that do not implement
+   * [[ViewportLayoutProvider]]. A viewport measures such a component as an intrinsic-height leaf.
    *
    * The TUI serializes rendering with input callbacks and invokes it without holding the runtime
    * lifecycle lock. A render may request or flush another render; that follow-up is coalesced and
@@ -25,6 +38,7 @@ trait Component:
 
   /** Render this component and return retained display-cell bounds for coordinate-aware routing. */
   def renderFrame(width: Int, row: Int = 0, col: Int = 0): RenderedFrame =
+    RuntimeCounterScope.recordComponentRender()
     RenderedFrame.leaf(this, width, row, col)
 
   /** Legacy/simple input hook for components that do not need result control. */
@@ -44,6 +58,20 @@ trait Component:
   def wantsKeyRelease: Boolean = false
 
   def invalidate(): Unit = ()
+
+/**
+ * Optional component capability for typed fullscreen commands.
+ *
+ * A focused component still receives the original [[TerminalInput]] first. The runtime calls this
+ * handler only after the focused target ignores that input and before primary
+ * [[scalatui.components.ScrollView]] fallback. Search implementations can use this contract without
+ * terminal-backend keys or raw escape strings.
+ */
+trait ViewportCommandHandler:
+  self: Component =>
+
+  /** Handle one registered viewport command and report whether routing should continue. */
+  def handleViewportCommand(command: KeybindingCommand): InputResult
 
 /** Component capability for explicit coordinate-routed mouse input handling. */
 trait MouseInputHandler:

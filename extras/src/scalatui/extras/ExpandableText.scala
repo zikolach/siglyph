@@ -1,6 +1,7 @@
 package scalatui.extras
 
 import scalatui.ansi.Ansi
+import scalatui.components.ComponentStateBoundary
 import scalatui.core.{Component, ComponentRender}
 import scalatui.syntax.Equality.*
 
@@ -26,42 +27,55 @@ final class ExpandableText(
     theme: ExpandableTextTheme = ExpandableTextTheme()
 ) extends Component
     with Expandable:
+  private val stateBoundary = ComponentStateBoundary()
   private var expandedState = initiallyExpanded
   private var cachedWidth   = -1
   private var cachedState   = !initiallyExpanded
   private var cachedContent = ""
   private var cachedLines   = Vector.empty[String]
+  private var revision      = 0L
 
   /** Current expansion state. */
-  def expanded: Boolean = expandedState
+  def expanded: Boolean = stateBoundary(expandedState)
 
-  override def setExpanded(expanded: Boolean): Unit =
+  override def setExpanded(expanded: Boolean): Unit = stateBoundary {
     if expandedState !== expanded then
       expandedState = expanded
-      invalidate()
+      invalidateLocked()
+  }
 
-  override def invalidate(): Unit =
-    cachedWidth = -1
-    cachedLines = Vector.empty
+  override def invalidate(): Unit = stateBoundary(invalidateLocked())
 
-  override def render(width: Int): ComponentRender = ComponentRender.text(renderLines(width))
-
-  private def renderLines(width: Int): Vector[String] =
-    val content = if expandedState then expandedText() else collapsedText()
-    if cachedWidth === width && cachedState === expandedState && cachedContent === content then
-      cachedLines
-    else
-      cachedWidth = width
-      cachedState = expandedState
-      cachedContent = content
-      cachedLines = renderText(
+  override def render(width: Int): ComponentRender =
+    val (expandedSnapshot, token) = stateBoundary((expandedState, revision))
+    val content                   = if expandedSnapshot then expandedText() else collapsedText()
+    val cached                    = stateBoundary {
+      Option.when(
+        cachedWidth === width && cachedState === expandedSnapshot && cachedContent === content
+      )(cachedLines)
+    }
+    ComponentRender.text(cached.getOrElse {
+      val rendered = renderText(
         content,
         width,
         paddingX,
         paddingY,
-        if expandedState then theme.expanded else theme.collapsed
+        if expandedSnapshot then theme.expanded else theme.collapsed
       )
-      cachedLines
+      stateBoundary {
+        if revision === token then
+          cachedWidth = width
+          cachedState = expandedSnapshot
+          cachedContent = content
+          cachedLines = rendered
+      }
+      rendered
+    })
+
+  private def invalidateLocked(): Unit =
+    revision += 1
+    cachedWidth = -1
+    cachedLines = Vector.empty
 
   private def renderText(
       content: String,

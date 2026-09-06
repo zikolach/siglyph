@@ -1,6 +1,10 @@
 package scalatui.core
 
-import scalatui.terminal.ImageCellDimensions
+import scalatui.terminal.{
+  ImageCellDimensions,
+  TerminalCapabilities,
+  TerminalCapabilityOverrides
+}
 
 /** Anchor point used when an overlay does not specify an absolute or percentage position. */
 enum OverlayAnchor derives CanEqual:
@@ -101,6 +105,11 @@ trait OverlayHost:
 
 /** Runtime services that components can use without depending on terminal backends. */
 trait TUIContext:
+  /** Ordered component-effect coordinator. Standalone contexts get one private detached queue. */
+  private[scalatui] lazy val componentEffectCoordinator
+      : scalatui.components.ComponentEffectCoordinator =
+    scalatui.components.ComponentEffectCoordinator.detached()
+
   /**
    * Terminal cell dimensions owned by this runtime session.
    *
@@ -108,6 +117,12 @@ trait TUIContext:
    * deterministic image-layout fallback used before a terminal reports its cell geometry.
    */
   def imageCellDimensions: ImageCellDimensions = ImageCellDimensions()
+
+  /** Immutable effective terminal capabilities selected for this TUI session. */
+  def terminalCapabilities: TerminalCapabilities = TerminalCapabilities.Conservative
+
+  /** Overrides used to resolve this session, including hard disabled ceilings. */
+  def terminalCapabilityOverrides: TerminalCapabilityOverrides = TerminalCapabilityOverrides()
 
   /** Queue a coalesced render intent. Force intent is preserved when requests merge. */
   def requestRender(force: Boolean = false): Unit
@@ -119,6 +134,7 @@ trait TUIContext:
   def flushRender(): Unit
   def requestExit(): Unit
   def setFocus(component: Component | Null): Unit
+  private[scalatui] def clearViewportSearchInput(): Unit = ()
   def overlays: OverlayHost
 
 /** Component mix-in for receiving or clearing a TUI context when attached to a runtime. */
@@ -148,6 +164,7 @@ final class ComponentFrameBuilder(width: Int, startRow: Int = 0, startCol: Int =
   private val renderedLines            = Vector.newBuilder[String]
   private val renderedControls         = Vector.newBuilder[TerminalControlPlacement]
   private val renderedCursorPlacements = Vector.newBuilder[CursorPlacement]
+  private val documentMarkers          = Vector.newBuilder[DocumentMarker]
   private val nodes                    = Vector.newBuilder[LayoutNode]
   private var localRow                 = 0
 
@@ -185,7 +202,8 @@ final class ComponentFrameBuilder(width: Int, startRow: Int = 0, startCol: Int =
   def result(): ComponentRender = ComponentRender(
     renderedLines.result(),
     renderedControls.result(),
-    renderedCursorPlacements.result()
+    renderedCursorPlacements.result(),
+    DocumentMetadata(documentMarkers.result())
   )
 
   /** Return accumulated typed output and child layout nodes under `component`. */
@@ -208,4 +226,11 @@ final class ComponentFrameBuilder(width: Int, startRow: Int = 0, startCol: Int =
     frame.cursorPlacements.foreach(placement =>
       renderedCursorPlacements += placement.translated(rowOffset = localRow)
     )
+    frame.documentMetadata.markers.foreach {
+      case PromptStart(position) =>
+        documentMarkers += PromptStart(DocumentPosition(
+          position.row + localRow,
+          position.column
+        ))
+    }
     localRow += frame.lines.length

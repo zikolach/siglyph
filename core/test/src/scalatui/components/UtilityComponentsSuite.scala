@@ -627,7 +627,7 @@ class UtilityComponentsSuite extends munit.FunSuite:
     assertEquals(loader.cancelled, true)
     assertEquals(loader.cancel(), false)
     assertEquals(calls, 1)
-    assertEquals(context.renderRequests.get(), 0)
+    assertEquals(context.renderRequests.get(), 1)
 
   test("cancellable loader ignores non-cancel input and keeps inherited rendering width-safe"):
     val loader = CancellableLoader(LoaderOptions(

@@ -91,6 +91,15 @@ class UnicodeSuite extends munit.FunSuite:
       )
     }
 
+  test("search normalization uses Unicode 17 simple lowercase mappings"):
+    assertEquals(Unicode.normalizedSearchText("\u1C89\uA7CB"), "\u1C8A\u0264")
+
+  test("bounded search normalization rejects decomposition expansion beyond its byte limit"):
+    val value = "\u01FA".repeat(1000)
+
+    assert(value.getBytes("UTF-8").length < 4096)
+    assertEquals(Unicode.normalizedSearchTextBounded(value, 4096), None)
+
   test("preserves existing display-width expectations"):
     assertEquals(Unicode.stringWidth("hello"), 5)
     assertEquals(Unicode.stringWidth("表"), 2)

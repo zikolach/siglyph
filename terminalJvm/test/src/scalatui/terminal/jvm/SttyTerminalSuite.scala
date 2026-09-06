@@ -1,11 +1,16 @@
 package scalatui.terminal.jvm
 
-import scalatui.terminal.{KittyKeyboardProtocol, KittyKeyboardProtocolState, Terminal}
+import scalatui.terminal.{
+  KittyKeyboardProtocol,
+  KittyKeyboardProtocolState,
+  Terminal,
+  TerminalMouseTrackingMode
+}
 import scalatui.syntax.Equality.*
 
 import java.io.{ByteArrayOutputStream, IOException, InputStream, OutputStream, PrintStream}
 import java.util.concurrent.{CountDownLatch, TimeUnit}
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
 
 class SttyTerminalSuite extends munit.FunSuite:
   test("title and progress support writes terminal protocol sequences"):
@@ -244,6 +249,25 @@ class SttyTerminalSuite extends munit.FunSuite:
     assert(restarted, "old resize worker did not terminate before restart deadline")
     terminal.stop()
 
+  test("JVM cleanup disables the mouse mode enabled by start"):
+    val output   = ByteArrayOutputStream()
+    val terminal = SttyTerminal(
+      input = InputStream.nullInputStream(),
+      output = output,
+      columnsOverride = Some(80),
+      rowsOverride = Some(24),
+      sizeQuery = () => Some(24 -> 80)
+    )
+    Terminal.setMouseTracking(terminal, TerminalMouseTrackingMode.Drag)
+    terminal.start(_ => (), () => ())
+    Terminal.setMouseTracking(terminal, TerminalMouseTrackingMode.Basic)
+
+    terminal.stop()
+
+    val written = output.toString(java.nio.charset.StandardCharsets.UTF_8)
+    assert(written.contains(Terminal.MouseProtocol.disable(TerminalMouseTrackingMode.Drag)))
+    assert(!written.contains(Terminal.MouseProtocol.disable(TerminalMouseTrackingMode.Basic)))
+
   test("cleanup retries only the failed JVM obligation and rejects restart until it succeeds"):
     Vector("kitty", "paste", "input", "termios").foreach { failedObligation =>
       val terminal = SttyTerminal(
@@ -430,3 +454,141 @@ class SttyTerminalSuite extends munit.FunSuite:
 
     terminal.sttyFailureForTesting = _ => None
     terminal.stop()
+
+  test("JVM resize worker reports one active failure and restores state"):
+    val sizeQueries    = AtomicInteger(0)
+    val observed       = CountDownLatch(1)
+    val releaseRead    = CountDownLatch(1)
+    val output         = ByteArrayOutputStream()
+    val input          = new InputStream:
+      override def read(): Int                                              = -1
+      override def read(buffer: Array[Byte], offset: Int, length: Int): Int =
+        try releaseRead.await()
+        catch case _: InterruptedException => ()
+        -1
+    val terminal       = SttyTerminal(
+      input = input,
+      output = output,
+      columnsOverride = Some(80),
+      rowsOverride = Some(24),
+      sizeQuery = () =>
+        if sizeQueries.getAndIncrement() === 0 then Some(24 -> 80)
+        else throw RuntimeException("resize failed")
+    )
+    val failures       = scala.collection.mutable.ArrayBuffer.empty[Throwable]
+    val callbackThread = AtomicReference[Thread]()
+    val caller         = Thread.currentThread()
+    terminal.start(
+      _ => (),
+      () => (),
+      error => {
+        callbackThread.set(Thread.currentThread())
+        failures.synchronized(failures += error)
+        observed.countDown()
+      }
+    )
+
+    assert(
+      observed.await(5, TimeUnit.SECONDS),
+      s"sizeQueries=${sizeQueries.get()}, failures=${failures.synchronized(failures.map(_.getMessage).toVector)}"
+    )
+    releaseRead.countDown()
+    terminal.stop()
+
+    assert(callbackThread.get() ne caller)
+    assertEquals(
+      failures.synchronized(failures.toVector.map(_.getMessage)),
+      Vector("resize failed")
+    )
+    val written = output.toString(java.nio.charset.StandardCharsets.UTF_8)
+    assert(written.contains("\u001b[?2004h"), written)
+    assert(written.contains("\u001b[?2004l"), written)
+
+  test("same-generation JVM input and resize failures publish after cleanup starts"):
+    val inputFailure  = RuntimeException("input failed")
+    val resizeFailure = RuntimeException("resize failed")
+    val failuresReady = CountDownLatch(2)
+    val claimsReady   = CountDownLatch(2)
+    val observed      = CountDownLatch(2)
+    val firstCallback = AtomicBoolean(true)
+    val sizeQueries   = AtomicInteger(0)
+    val output        = ByteArrayOutputStream()
+    val terminal      = SttyTerminal(
+      input = InputStream.nullInputStream(),
+      output = output,
+      columnsOverride = Some(80),
+      rowsOverride = Some(24),
+      sizeQuery = () =>
+        if sizeQueries.getAndIncrement() === 0 then Some(24 -> 80)
+        else
+          failuresReady.countDown()
+          var ready = false
+          while !ready do
+            try ready = failuresReady.await(5, TimeUnit.SECONDS)
+            catch case _: InterruptedException => ()
+          throw resizeFailure
+    )
+    terminal.workerFailureForTesting = worker =>
+      if worker === "input" then
+        failuresReady.countDown()
+        var ready = false
+        while !ready do
+          try ready = failuresReady.await(5, TimeUnit.SECONDS)
+          catch case _: InterruptedException => ()
+        Some(inputFailure)
+      else None
+    terminal.workerFailureClaimedForTesting = _ =>
+      claimsReady.countDown()
+      var ready = false
+      while !ready do
+        try ready = claimsReady.await(5, TimeUnit.SECONDS)
+        catch case _: InterruptedException => ()
+    val failures      = scala.collection.mutable.ArrayBuffer.empty[Throwable]
+    terminal.start(
+      _ => (),
+      () => (),
+      error =>
+        failures.synchronized(failures += error)
+        try
+          if firstCallback.compareAndSet(true, false) then terminal.stop()
+        finally observed.countDown()
+    )
+
+    assert(observed.await(5, TimeUnit.SECONDS))
+    terminal.stop()
+
+    assertEquals(
+      failures.synchronized(failures.toSet),
+      Set[Throwable](inputFailure, resizeFailure)
+    )
+    val written = output.toString(java.nio.charset.StandardCharsets.UTF_8)
+    assert(written.contains("\u001b[?2004l"), written)
+
+  test("JVM resize failure after explicit stop is not reported"):
+    val sizeQueries = AtomicInteger(0)
+    val entered     = CountDownLatch(1)
+    val release     = CountDownLatch(1)
+    val failures    = AtomicInteger(0)
+    val terminal    = SttyTerminal(
+      input = InputStream.nullInputStream(),
+      output = ByteArrayOutputStream(),
+      columnsOverride = Some(80),
+      rowsOverride = Some(24),
+      sizeQuery = () =>
+        if sizeQueries.getAndIncrement() === 0 then Some(24 -> 80)
+        else
+          entered.countDown()
+          var released = false
+          while !released do
+            try released = release.await(5, TimeUnit.SECONDS)
+            catch case _: InterruptedException => ()
+          throw RuntimeException("stale resize failure")
+    )
+    terminal.start(_ => (), () => (), _ => failures.incrementAndGet())
+    assert(entered.await(5, TimeUnit.SECONDS))
+
+    terminal.stop()
+    release.countDown()
+    Thread.sleep(100)
+
+    assertEquals(failures.get(), 0)

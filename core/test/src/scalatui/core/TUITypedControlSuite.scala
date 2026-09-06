@@ -433,7 +433,7 @@ class TUITypedControlSuite extends munit.FunSuite:
     assert(!terminal.output.contains(TUI.SyncStart), terminal.output)
     assert(!terminal.output.contains(encode(control)), terminal.output)
 
-  test("partially clipped overlay failure retains bounded redacted diagnostics"):
+  test("partially clipped overlay image is safely omitted without leaking metadata"):
     val sensitivePayload = "QUJD".repeat(2048)
     val sensitiveName    = "secret-overlay-filename-".repeat(512)
     val control          = TerminalImageProtocol.encodeITerm2(
@@ -457,14 +457,58 @@ class TUITypedControlSuite extends munit.FunSuite:
       )
     )
 
-    val failure = intercept[IllegalArgumentException](tui.start())
+    tui.start()
 
-    assert(!terminal.output.contains(TUI.SyncStart), terminal.output)
+    assert(terminal.output.contains(TUI.SyncStart), terminal.output)
     assert(!terminal.output.contains(encode(control)), terminal.output)
-    assert(!terminal.isRunning)
-    assert(failure.getMessage.length < 512, failure.getMessage.length.toString)
-    assert(!failure.toString.contains("QUJDQUJD"), failure.toString)
-    assert(!failure.toString.contains("secret-overlay-filename-"), failure.toString)
+    assert(!terminal.output.contains("QUJDQUJD"), terminal.output)
+    assert(!terminal.output.contains("secret-overlay-filename-"), terminal.output)
+    tui.stop()
+
+  test("clipping drops out-of-frame cleanup anchors"):
+    val image     = kittyControl("AAAA", imageId = 37)
+    val cleanup   = TerminalRenderControl.cleanupForReplacement(image).get
+    val placement = TerminalControlPlacement(row = 2, column = 0, cleanup)
+
+    assertEquals(
+      TypedControlClipping.clipPlacement(placement, ClipRect(0, 0, width = 10, height = 2)),
+      None
+    )
+    assertEquals(
+      TypedControlClipping.clipPlacement(
+        placement.copy(row = 1),
+        ClipRect(0, 0, width = 10, height = 2)
+      ),
+      Some(placement.copy(row = 1))
+    )
+
+  test("attempted stop cleanup invalidates Kitty placement reuse but retains retry debt"):
+    val image     = kittyControl("AAAA", imageId = 38)
+    val placement = TerminalControlPlacement(row = 0, column = 0, image)
+    val frame     = PreparedFrame(
+      Vector(""),
+      None,
+      Vector(placement),
+      DocumentMetadata.empty
+    )
+    val retention = FullscreenKittyRetention(KittyImageRetentionOptions())
+    val accepted  = retention.update(frame, previous = None, repaintAll = false).frame
+    val cleanup   = retention.stopCleanup()
+
+    retention.recordStopCleanupAttempt()
+
+    assertEquals(cleanup.size, 1)
+    assertEquals(
+      cleanup.head.details,
+      scalatui.terminal.TerminalRenderControlDetails.KittyCleanup(Some(38))
+    )
+    assertEquals(retention.ownershipCount, 1)
+    val afterAttempt = retention.update(frame, previous = Some(accepted), repaintAll = true).frame
+    assert(
+      afterAttempt.controls.head.control.details
+        .isInstanceOf[scalatui.terminal.TerminalRenderControlDetails.KittyImage]
+    )
+    assertEquals(retention.stopCleanup().size, 1)
 
   test("invalid final control placement fails before synchronized frame output"):
     val control  = kittyControl("AAAA", imageId = 24, width = 2)

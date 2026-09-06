@@ -126,20 +126,27 @@ object Unicode:
     builder.result()
 
   def graphemeClusters(value: String): Vector[String] =
-    if value.isEmpty then Vector.empty
-    else
+    val out = Vector.newBuilder[String]
+    foreachGraphemeWhile(value) { grapheme =>
+      out += grapheme
+      true
+    }
+    out.result()
+
+  /** Scan complete grapheme clusters without first allocating a collection for the whole input. */
+  private[scalatui] def foreachGraphemeWhile(value: String)(consume: String => Boolean): Unit =
+    if value.nonEmpty then
       val engine       = GraphemeBoundaryEngine()
-      val out          = Vector.newBuilder[String]
       var clusterStart = 0
       var index        = 0
-      while index < value.length do
+      var continue     = true
+      while index < value.length && continue do
         val codePoint = value.codePointAt(index)
         if engine.accept(codePoint) && index > clusterStart then
-          out += value.substring(clusterStart, index)
+          continue = consume(value.substring(clusterStart, index))
           clusterStart = index
         index += Character.charCount(codePoint)
-      out += value.substring(clusterStart)
-      out.result()
+      if continue then consume(value.substring(clusterStart))
 
   /** Return the first final grapheme boundary at or after a UTF-16 insertion boundary. */
   private[scalatui] def graphemeCursorAfterCodeUnit(
@@ -153,6 +160,67 @@ object Unicode:
       end += clusters(index).length
       index += 1
     index
+
+  /** Canonically decompose and lowercase text for JVM and Scala Native search comparison. */
+  private[scalatui] def normalizedSearchText(value: String): String =
+    normalizedSearchTextBounded(value, Int.MaxValue).getOrElse("")
+
+  /** Normalize only when complete input and output fit the supplied UTF-8 work bound. */
+  private[scalatui] def normalizedSearchTextBounded(
+      value: String,
+      maxUtf8Bytes: Int
+  ): Option[String] =
+    require(
+      UnicodeNormalizationTables.version === version,
+      "Unicode normalization and grapheme tables must use the same version"
+    )
+    if maxUtf8Bytes < 0 then None
+    else
+      val values    = scala.collection.mutable.ArrayBuffer.empty[(Int, Int, Int)]
+      var inputByte = 0L
+      var segment   = 0
+      var order     = 0
+      var valid     = true
+
+      def append(codePoint: Int): Unit =
+        if valid then
+          if codePoint >= 0xac00 && codePoint <= 0xd7a3 then
+            val syllableIndex = codePoint - 0xac00
+            append(0x1100 + syllableIndex / 588)
+            append(0x1161 + (syllableIndex % 588) / 28)
+            val trailing      = syllableIndex % 28
+            if trailing > 0 then append(0x11a7 + trailing)
+          else
+            UnicodeNormalizationTables.decomposition(codePoint) match
+              case Some(parts) => parts.foreach(append)
+              case None        =>
+                if values.length >= maxUtf8Bytes then valid = false
+                else
+                  val combiningClass = UnicodeNormalizationTables.combiningClass(codePoint)
+                  if combiningClass === 0 && values.nonEmpty then segment += 1
+                  values += ((codePoint, segment, order))
+                  order += 1
+
+      var index = 0
+      while index < value.length && valid do
+        val codePoint = value.codePointAt(index)
+        inputByte += utf8Bytes(codePoint)
+        if inputByte > maxUtf8Bytes.toLong then valid = false
+        else append(codePoint)
+        index += Character.charCount(codePoint)
+      if !valid then None
+      else
+        val ordered     = values.sortBy { case (codePoint, group, original) =>
+          (group, UnicodeNormalizationTables.combiningClass(codePoint), original)
+        }
+        val builder     = java.lang.StringBuilder()
+        var outputBytes = 0L
+        val iterator    = ordered.iterator
+        while iterator.hasNext && outputBytes <= maxUtf8Bytes.toLong do
+          val codePoint = UnicodeNormalizationTables.lowercase(iterator.next()._1)
+          outputBytes += utf8Bytes(codePoint)
+          if outputBytes <= maxUtf8Bytes.toLong then builder.appendCodePoint(codePoint)
+        Option.when(outputBytes <= maxUtf8Bytes.toLong)(builder.toString)
 
   def graphemeWidth(cluster: String): Int =
     if cluster === "\t" then 3
@@ -177,6 +245,29 @@ object Unicode:
     else if UnicodeTables.isRegionalIndicator(codePoint) then 2
     else if UnicodeTables.isEmojiPresentation(codePoint) then 2
     else 1
+
+  private def appendCanonicalDecomposition(
+      codePoint: Int,
+      target: scala.collection.mutable.ArrayBuffer[Int]
+  ): Unit =
+    if codePoint >= 0xac00 && codePoint <= 0xd7a3 then
+      val syllableIndex = codePoint - 0xac00
+      val leading       = 0x1100 + syllableIndex / 588
+      val vowel         = 0x1161 + (syllableIndex % 588) / 28
+      val trailing      = syllableIndex           % 28
+      target += leading
+      target += vowel
+      if trailing > 0 then target += 0x11a7 + trailing
+    else
+      UnicodeNormalizationTables.decomposition(codePoint) match
+        case Some(parts) => parts.foreach(appendCanonicalDecomposition(_, target))
+        case None        => target += codePoint
+
+  private def utf8Bytes(codePoint: Int): Int =
+    if codePoint <= 0x7f then 1
+    else if codePoint <= 0x7ff then 2
+    else if codePoint <= 0xffff then 3
+    else 4
 
   private def foreachCodePoint(value: String)(consume: Int => Unit): Unit =
     var index = 0

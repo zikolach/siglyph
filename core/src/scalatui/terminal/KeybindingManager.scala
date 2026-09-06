@@ -6,10 +6,15 @@ import scalatui.syntax.Equality.*
  * Scopes for keybinding command IDs.
  */
 enum KeybindingScope derives CanEqual:
-  case Editor, Input, Select
+  case Editor, Input, Select, Viewport
 
 /**
- * Public command identifiers for the shared keybinding manager.
+ * Public backend-independent command identifiers shared by JVM and Scala Native.
+ *
+ * Viewport commands cover line, half-page, page, document edge, typed prompt, search, copy, and
+ * clear-selection actions. A command with no default key remains registered for application
+ * binding. Focused search, overlays, and components retain routing priority before primary
+ * [[scalatui.components.ScrollView]] fallback.
  */
 enum KeybindingCommand(val id: String, val scope: KeybindingScope) derives CanEqual:
   // Editor commands
@@ -60,6 +65,40 @@ enum KeybindingCommand(val id: String, val scope: KeybindingScope) derives CanEq
   case SelectConfirm  extends KeybindingCommand("tui.select.confirm", KeybindingScope.Select)
   case SelectCancel   extends KeybindingCommand("tui.select.cancel", KeybindingScope.Select)
 
+  // Fullscreen viewport commands
+  case ViewportPageUp
+      extends KeybindingCommand("tui.altScreen.pageUp", KeybindingScope.Viewport)
+  case ViewportPageDown
+      extends KeybindingCommand("tui.altScreen.pageDown", KeybindingScope.Viewport)
+  case ViewportHalfPageUp
+      extends KeybindingCommand("tui.altScreen.halfPageUp", KeybindingScope.Viewport)
+  case ViewportHalfPageDown
+      extends KeybindingCommand("tui.altScreen.halfPageDown", KeybindingScope.Viewport)
+  case ViewportLineUp
+      extends KeybindingCommand("tui.altScreen.lineUp", KeybindingScope.Viewport)
+  case ViewportLineDown
+      extends KeybindingCommand("tui.altScreen.lineDown", KeybindingScope.Viewport)
+  case ViewportDocumentStart
+      extends KeybindingCommand("tui.altScreen.top", KeybindingScope.Viewport)
+  case ViewportDocumentEnd
+      extends KeybindingCommand("tui.altScreen.bottom", KeybindingScope.Viewport)
+  case ViewportPreviousPrompt
+      extends KeybindingCommand("tui.altScreen.previousPrompt", KeybindingScope.Viewport)
+  case ViewportNextPrompt
+      extends KeybindingCommand("tui.altScreen.nextPrompt", KeybindingScope.Viewport)
+  case ViewportSearchToggle
+      extends KeybindingCommand("tui.altScreen.search", KeybindingScope.Viewport)
+  case ViewportSearchNext
+      extends KeybindingCommand("tui.altScreen.searchNext", KeybindingScope.Viewport)
+  case ViewportSearchPrevious
+      extends KeybindingCommand("tui.altScreen.searchPrevious", KeybindingScope.Viewport)
+  case ViewportSearchClose
+      extends KeybindingCommand("tui.altScreen.searchClose", KeybindingScope.Viewport)
+  case ViewportCopySelection
+      extends KeybindingCommand("tui.altScreen.copySelection", KeybindingScope.Viewport)
+  case ViewportClearSelection
+      extends KeybindingCommand("tui.altScreen.clearSelection", KeybindingScope.Viewport)
+
 /**
  * One terminal key combination.
  */
@@ -89,11 +128,15 @@ object KeybindingCommand:
   def fromId(id: String): Option[KeybindingCommand] = byId.get(id)
 
 /**
- * Backend-independent keybinding defaults and user override resolver.
+ * Backend-independent keybinding defaults and user override resolver for JVM and Scala Native.
+ *
+ * A supplied command entry replaces that command's defaults. An empty key vector intentionally
+ * leaves the command unbound. Conflicts are reported by [[getConflicts]] and are not resolved by
+ * silently changing either claim. The manager stores typed keys and emits no terminal sequences.
  */
 final class KeybindingManager(
     private val userBindings: Map[KeybindingCommand, Vector[KeyDescriptor]] = Map.empty
-):
+) derives CanEqual:
   private val resolved: Map[KeybindingCommand, Vector[KeyDescriptor]] =
     KeybindingCommand.values.map { command =>
       command ->
@@ -390,5 +433,73 @@ object KeybindingManager:
           KeyDescriptor(TerminalKey.Character("c"), KeyModifiers(ctrl = true))
         ),
         "Cancel selection"
-      )
+      ),
+    KeybindingCommand.ViewportPageUp           ->
+      KeybindingDefinition(
+        Vector(KeyDescriptor(TerminalKey.PageUp)),
+        "Scroll viewport up one page"
+      ),
+    KeybindingCommand.ViewportPageDown         ->
+      KeybindingDefinition(
+        Vector(KeyDescriptor(TerminalKey.PageDown)),
+        "Scroll viewport down one page"
+      ),
+    KeybindingCommand.ViewportHalfPageUp       ->
+      KeybindingDefinition(Vector.empty, "Scroll viewport up half a page"),
+    KeybindingCommand.ViewportHalfPageDown     ->
+      KeybindingDefinition(Vector.empty, "Scroll viewport down half a page"),
+    KeybindingCommand.ViewportLineUp           ->
+      KeybindingDefinition(Vector.empty, "Scroll viewport up one line"),
+    KeybindingCommand.ViewportLineDown         ->
+      KeybindingDefinition(Vector.empty, "Scroll viewport down one line"),
+    KeybindingCommand.ViewportDocumentStart    ->
+      KeybindingDefinition(Vector(KeyDescriptor(TerminalKey.Home)), "Scroll viewport to start"),
+    KeybindingCommand.ViewportDocumentEnd      ->
+      KeybindingDefinition(Vector(KeyDescriptor(TerminalKey.End)), "Scroll viewport to end"),
+    KeybindingCommand.ViewportPreviousPrompt   ->
+      KeybindingDefinition(
+        Vector(
+          KeyDescriptor(TerminalKey.Up, KeyModifiers(ctrl = true, shift = true)),
+          KeyDescriptor(TerminalKey.Up, KeyModifiers(ctrl = true))
+        ),
+        "Jump to previous semantic prompt"
+      ),
+    KeybindingCommand.ViewportNextPrompt       ->
+      KeybindingDefinition(
+        Vector(
+          KeyDescriptor(TerminalKey.Down, KeyModifiers(ctrl = true, shift = true)),
+          KeyDescriptor(TerminalKey.Down, KeyModifiers(ctrl = true))
+        ),
+        "Jump to next semantic prompt"
+      ),
+    KeybindingCommand.ViewportSearchToggle     ->
+      KeybindingDefinition(
+        Vector(KeyDescriptor(TerminalKey.Character("f"), KeyModifiers(ctrl = true, shift = true))),
+        "Toggle primary viewport search"
+      ),
+    KeybindingCommand.ViewportSearchNext       ->
+      KeybindingDefinition(
+        Vector(
+          KeyDescriptor(TerminalKey.Enter),
+          KeyDescriptor(TerminalKey.Character("g"), KeyModifiers(ctrl = true))
+        ),
+        "Select next viewport search match"
+      ),
+    KeybindingCommand.ViewportSearchPrevious   ->
+      KeybindingDefinition(
+        Vector(
+          KeyDescriptor(TerminalKey.Enter, KeyModifiers(shift = true)),
+          KeyDescriptor(
+            TerminalKey.Character("g"),
+            KeyModifiers(ctrl = true, shift = true)
+          )
+        ),
+        "Select previous viewport search match"
+      ),
+    KeybindingCommand.ViewportSearchClose      ->
+      KeybindingDefinition(Vector(KeyDescriptor(TerminalKey.Escape)), "Close viewport search"),
+    KeybindingCommand.ViewportCopySelection    ->
+      KeybindingDefinition(Vector.empty, "Copy viewport selection"),
+    KeybindingCommand.ViewportClearSelection   ->
+      KeybindingDefinition(Vector.empty, "Clear viewport selection")
   )

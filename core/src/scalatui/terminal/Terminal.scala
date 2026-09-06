@@ -1,12 +1,14 @@
 package scalatui.terminal
 
+import scalatui.syntax.Equality.*
+
 /**
  * Backend abstraction for terminal lifecycle, input, output, and dimensions.
  *
- * [[start]] MUST return without synchronously invoking either registered callback on its calling
+ * [[start]] MUST return without synchronously invoking any registered callback on its calling
  * stack. A backend may deliver callbacks independently from another thread, including before
  * [[start]] returns. Output, cursor, title, progress, drain, and protocol methods MUST also return
- * without synchronously invoking registered input or resize callbacks.
+ * without synchronously invoking registered callbacks.
  */
 trait Terminal:
   /**
@@ -16,6 +18,24 @@ trait Terminal:
    * Callback delivery may begin independently on another thread before this method returns.
    */
   def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit
+
+  /**
+   * Start terminal control and register input, resize, and worker-failure callback delivery.
+   *
+   * The default implementation preserves source compatibility by delegating to the two-callback
+   * overload. Backends that own workers override this overload and report unexpected active-worker
+   * failures through `onFailure`. EOF, interruption caused by [[stop]], and stale-generation
+   * termination are normal outcomes. Each worker reports at most once per active generation, while
+   * independent workers may each report once. A failure claimed while its generation is active is
+   * still delivered if another failure callback starts cleanup. No callback runs synchronously on
+   * this method's calling stack.
+   */
+  def start(
+      onInput: TerminalInput => Unit,
+      onResize: () => Unit,
+      onFailure: Throwable => Unit
+  ): Unit = start(onInput, onResize)
+
   def stop(): Unit
 
   def write(data: String): Unit
@@ -46,15 +66,49 @@ trait TerminalTitleSupport:
   /** Set the title without synchronously delivering registered input or resize callbacks. */
   def setTitle(title: String): Unit
 
+/** Xterm mouse tracking mode selected for one terminal lifecycle. */
+enum TerminalMouseTrackingMode derives CanEqual:
+  case Disabled, Basic, Drag, AllMotion
+
+/** Typed per-TUI mouse tracking request. */
+final case class TerminalMouseTrackingOptions(
+    mode: TerminalMouseTrackingMode,
+    allowAllMotionInMultiplexer: Boolean = false
+) derives CanEqual
+
+object TerminalMouseTrackingOptions:
+  /**
+   * Resolve legacy basic input and an optional typed request. All-motion degrades to button-motion
+   * in tmux and screen unless this TUI instance explicitly permits all-motion forwarding.
+   */
+  def resolve(
+      legacyMouseInput: Boolean,
+      request: Option[TerminalMouseTrackingOptions],
+      env: Map[String, String] = sys.env
+  ): TerminalMouseTrackingMode =
+    val requested   = request.map(_.mode).getOrElse(
+      if legacyMouseInput then TerminalMouseTrackingMode.Basic
+      else TerminalMouseTrackingMode.Disabled
+    )
+    val multiplexer = env.contains("TMUX") || env.get("TERM").exists(value =>
+      value.startsWith("tmux") || value.startsWith("screen")
+    )
+    if requested === TerminalMouseTrackingMode.AllMotion && multiplexer &&
+      !request.exists(_.allowAllMotionInMultiplexer)
+    then TerminalMouseTrackingMode.Drag
+    else requested
+
 /** Optional terminal capability for backends that own mouse reporting lifecycle. */
 trait TerminalMouseProtocolSupport:
-  /**
-   * Configure whether backend start/stop should enable and disable terminal mouse reporting.
-   *
-   * This records lifecycle intent. It does not immediately write terminal protocol sequences for an
-   * already running backend.
-   */
+  /** Configure legacy basic reporting intent for a later backend start. */
   def mouseReportingEnabled_=(enabled: Boolean): Unit
+
+  /**
+   * Configure the minimum tracking mode for a later backend start. Existing implementations retain
+   * source compatibility and map every enabled mode to basic reporting.
+   */
+  def mouseTrackingMode_=(mode: TerminalMouseTrackingMode): Unit =
+    mouseReportingEnabled_=(mode !== TerminalMouseTrackingMode.Disabled)
 
 /** Optional terminal capability for backends that can set terminal progress state. */
 trait TerminalProgressSupport:
@@ -71,14 +125,30 @@ object Terminal:
   private[terminal] val ProgressActiveSequence: String = "\u001b]9;4;3\u0007"
   private[terminal] val ProgressClearSequence: String  = "\u001b]9;4;0\u0007"
 
-  /** Xterm normal mouse tracking and SGR coordinate protocol sequences. */
+  /** Xterm mouse tracking and SGR coordinate protocol sequences. */
   object MouseProtocol:
-    val EnableNormalTracking: String  = "\u001b[?1000h"
-    val DisableNormalTracking: String = "\u001b[?1000l"
-    val EnableSgrCoordinates: String  = "\u001b[?1006h"
-    val DisableSgrCoordinates: String = "\u001b[?1006l"
-    val Enable: String                = EnableNormalTracking + EnableSgrCoordinates
-    val Disable: String               = DisableNormalTracking + DisableSgrCoordinates
+    val EnableNormalTracking: String        = "\u001b[?1000h"
+    val DisableNormalTracking: String       = "\u001b[?1000l"
+    val EnableButtonMotionTracking: String  = "\u001b[?1002h"
+    val DisableButtonMotionTracking: String = "\u001b[?1002l"
+    val EnableAllMotionTracking: String     = "\u001b[?1003h"
+    val DisableAllMotionTracking: String    = "\u001b[?1003l"
+    val EnableSgrCoordinates: String        = "\u001b[?1006h"
+    val DisableSgrCoordinates: String       = "\u001b[?1006l"
+    val Enable: String                      = EnableNormalTracking + EnableSgrCoordinates
+    val Disable: String                     = DisableNormalTracking + DisableSgrCoordinates
+
+    def enable(mode: TerminalMouseTrackingMode): String = mode match
+      case TerminalMouseTrackingMode.Disabled  => ""
+      case TerminalMouseTrackingMode.Basic     => EnableNormalTracking + EnableSgrCoordinates
+      case TerminalMouseTrackingMode.Drag      => EnableButtonMotionTracking + EnableSgrCoordinates
+      case TerminalMouseTrackingMode.AllMotion => EnableAllMotionTracking + EnableSgrCoordinates
+
+    def disable(mode: TerminalMouseTrackingMode): String = mode match
+      case TerminalMouseTrackingMode.Disabled  => ""
+      case TerminalMouseTrackingMode.Basic     => DisableNormalTracking + DisableSgrCoordinates
+      case TerminalMouseTrackingMode.Drag      => DisableButtonMotionTracking + DisableSgrCoordinates
+      case TerminalMouseTrackingMode.AllMotion => DisableAllMotionTracking + DisableSgrCoordinates
 
   /**
    * Set the terminal window title when the backend supports title operations.
@@ -99,11 +169,19 @@ object Terminal:
    * This records lifecycle intent on supporting backends. It does not immediately write terminal
    * protocol sequences for an already running backend.
    */
-  def setMouseReporting(terminal: Terminal, enabled: Boolean): Boolean = terminal match
-    case mouse: TerminalMouseProtocolSupport =>
-      mouse.mouseReportingEnabled_=(enabled)
-      true
-    case _                                   => false
+  def setMouseReporting(terminal: Terminal, enabled: Boolean): Boolean =
+    setMouseTracking(
+      terminal,
+      if enabled then TerminalMouseTrackingMode.Basic else TerminalMouseTrackingMode.Disabled
+    )
+
+  /** Configure one typed mouse tracking mode for backend lifecycle start and stop. */
+  def setMouseTracking(terminal: Terminal, mode: TerminalMouseTrackingMode): Boolean =
+    terminal match
+      case mouse: TerminalMouseProtocolSupport =>
+        mouse.mouseTrackingMode_=(mode)
+        true
+      case _                                   => false
 
   /**
    * Set terminal progress state when the backend supports progress operations.

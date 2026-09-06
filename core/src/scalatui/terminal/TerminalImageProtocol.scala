@@ -225,6 +225,45 @@ object TerminalImageProtocol:
     TerminalRenderControl.kittyImage(payload, imageId, widthCells, heightCells)
 
   /**
+   * Place retained Kitty image data without retaining or retransmitting its payload.
+   *
+   * The owning TUI may use this only after it has transmitted the same runtime-owned `imageId`.
+   * Positive placement geometry is validated before a closed control is returned.
+   */
+  private[scalatui] def placeKittyImage(
+      imageId: Int,
+      widthCells: Int,
+      heightCells: Int
+  ): TerminalRenderControl =
+    TerminalRenderControl.kittyPlacement(imageId, widthCells, heightCells)
+
+  /**
+   * Validate a visible cell rectangle for one typed image control.
+   *
+   * A complete footprint returns the original control. A fully clipped footprint and every partial
+   * Kitty or iTerm2 footprint return `None`. Cell geometry alone cannot validate Kitty source-pixel
+   * cropping, and iTerm2 has no equivalent safe relocation and cleanup contract. This method never
+   * rewrites protocol bytes or returns part of a control.
+   */
+  private[scalatui] def clipImage(
+      control: TerminalRenderControl,
+      clippedTop: Int,
+      clippedLeft: Int,
+      visibleWidth: Int,
+      visibleRows: Int
+  ): Option[TerminalRenderControl] =
+    require(clippedTop >= 0, "Clipped image top must be non-negative")
+    require(clippedLeft >= 0, "Clipped image left must be non-negative")
+    require(visibleWidth >= 0, "Visible image width must be non-negative")
+    require(visibleRows >= 0, "Visible image rows must be non-negative")
+    require(clippedLeft <= control.width - visibleWidth, "Visible image width exceeds footprint")
+    require(clippedTop <= control.rows - visibleRows, "Visible image rows exceed footprint")
+    Option.when(
+      visibleWidth > 0 && visibleRows > 0 && clippedTop === 0 && clippedLeft === 0 &&
+        visibleWidth === control.width && visibleRows === control.rows
+    )(control)
+
+  /**
    * Construct a typed iTerm2 inline image control with unchanged validated payload text.
    *
    * A present filename is standard-base64 encoded from UTF-8 bytes. An absent filename emits no
@@ -251,6 +290,10 @@ object TerminalImageProtocol:
     capabilities.images.collect { case ImageProtocol.Kitty =>
       TerminalRenderControl.kittyCleanup(Some(imageId))
     }
+
+  /** Delete every placement for one retained Kitty image while preserving transmitted data. */
+  private[scalatui] def deleteKittyPlacements(imageId: Int): TerminalRenderControl =
+    TerminalRenderControl.kittyPlacementCleanup(imageId)
 
   /**
    * Return a typed Kitty delete-all control, or `None` when Kitty cleanup is unsupported. Encoding

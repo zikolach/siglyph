@@ -172,6 +172,9 @@ object Ansi:
   /** Maximum complete SGR or OSC 8 sequence size recognized for execution, in UTF-8 bytes. */
   val MaxRecognizedMetadataBytes: Int = 4096
 
+  /** Maximum UTF-8 source bytes scanned for one selectable grapheme. */
+  private[scalatui] val MaxSelectionGraphemeUtf8Bytes: Int = 4096
+
   /**
    * Extract a complete supported escape at `offset` when its complete UTF-8 encoding, including the
    * introducer and terminator, is at most [[MaxRecognizedMetadataBytes]]. Unsupported, private,
@@ -187,6 +190,75 @@ object Ansi:
     val builder = new StringBuilder
     scan(value)(_ => (), builder.append)
     builder.result()
+
+  /** Return selectable plain text while discarding terminal metadata and control candidates. */
+  private[scalatui] def selectionText(value: String): String =
+    val builder = new StringBuilder
+    foreachScannedPart(value) {
+      case _: ScannedMetadata                 => ()
+      case ScannedPrintable(start, end, text) =>
+        val codePoint = value.codePointAt(start)
+        val control   = codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f) || end - start >
+          Character.charCount(codePoint)
+        if !control then builder.append(text)
+    }
+    builder.result()
+
+  /**
+   * Scan selectable graphemes without retaining ANSI metadata, typed controls, or a plain-text copy
+   * of the complete input. Stops after the first callback that returns false.
+   */
+  private[scalatui] def foreachSelectionGraphemeWhile(
+      value: String
+  )(consume: String => Boolean): Boolean =
+    foreachSelectionGraphemeWhile(value, Int.MaxValue, Int.MaxValue)(consume)
+
+  /** Scan only complete graphemes and controls within the supplied source-work bounds. */
+  private[scalatui] def foreachSelectionGraphemeWhile(
+      value: String,
+      maxGraphemes: Int,
+      maxInputUtf8Bytes: Int
+  )(consume: String => Boolean): Boolean =
+    val engine         = GraphemeBoundaryEngine()
+    val cluster        = StringBuilder()
+    var index          = 0
+    var printableBytes = 0L
+    var metadataBytes  = 0L
+    var emitted        = 0
+    var clusterBytes   = 0L
+    var continue       = maxGraphemes > 0 && maxInputUtf8Bytes > 0
+    while index < value.length && continue do
+      boundedControlCandidate(
+        value,
+        index,
+        MaxRecognizedMetadataBytes.toLong - metadataBytes
+      ) match
+        case BoundedCandidate.Complete(end, bytes) =>
+          metadataBytes += bytes
+          index = end
+        case BoundedCandidate.Oversized            => continue = false
+        case BoundedCandidate.NotCandidate         =>
+          val codePoint   = value.codePointAt(index)
+          val bytes       = utf8BytesForCodePoint(codePoint)
+          val end         = index + Character.charCount(codePoint)
+          val control     = codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f)
+          val boundary    = !control && engine.accept(codePoint) && cluster.nonEmpty
+          if boundary then
+            continue = emitted < maxGraphemes && consume(cluster.result())
+            emitted += 1
+            cluster.clear()
+            clusterBytes = 0L
+          val clusterFits = control || clusterBytes + bytes <= MaxSelectionGraphemeUtf8Bytes.toLong
+          if continue && printableBytes + bytes <= maxInputUtf8Bytes.toLong && clusterFits then
+            printableBytes += bytes
+            if !control then
+              clusterBytes += bytes
+              cluster.appendAll(Character.toChars(codePoint))
+            index = end
+          else continue = false
+    if continue && cluster.nonEmpty && emitted < maxGraphemes then
+      continue = consume(cluster.result())
+    continue && index >= value.length
 
   /** Preserve supported executable metadata and make every other terminal control visible. */
   private[scalatui] def sanitize(value: String): String =
@@ -406,6 +478,53 @@ object Ansi:
             visibleControlText(new String(Character.toChars(codePoint)))
           ))
           index = end
+
+  private enum BoundedCandidate:
+    case NotCandidate
+    case Complete(end: Int, bytes: Int)
+    case Oversized
+
+  private def boundedControlCandidate(
+      value: String,
+      offset: Int,
+      remainingInputBytes: Long
+  ): BoundedCandidate =
+    if !startsUnterminatedCandidate(value, offset) then BoundedCandidate.NotCandidate
+    else
+      val escForm  = value.charAt(offset) === '\u001b'
+      val marker   = if escForm then value.charAt(offset + 1) else value.charAt(offset)
+      val csi      = marker === '['
+      val osc      = marker === ']' || marker === '\u009d'
+      var index    = offset
+      var bytes    = 0
+      var complete = false
+      while index < value.length && !complete && bytes <= MaxRecognizedMetadataBytes &&
+        bytes.toLong <= remainingInputBytes
+      do
+        val codePoint = value.codePointAt(index)
+        val charCount = Character.charCount(codePoint)
+        bytes += utf8BytesForCodePoint(codePoint)
+        val next      = index + charCount
+        if csi && index > offset + (if escForm then 1 else 0) &&
+          codePoint >= 0x40 && codePoint <= 0x7e
+        then complete = true
+        else if !csi && ((osc && codePoint === 0x07) || codePoint === 0x9c ||
+            (codePoint === 0x1b && next < value.length && value.charAt(next) === '\\'))
+        then
+          if codePoint === 0x1b then
+            bytes += 1
+            index = next
+          complete = true
+        index += charCount
+      if bytes > MaxRecognizedMetadataBytes || bytes.toLong > remainingInputBytes || !complete then
+        BoundedCandidate.Oversized
+      else BoundedCandidate.Complete(index, bytes)
+
+  private def utf8BytesForCodePoint(codePoint: Int): Int =
+    if codePoint <= 0x7f then 1
+    else if codePoint <= 0x7ff then 2
+    else if codePoint <= 0xffff then 3
+    else 4
 
   private def candidateAt(value: String, offset: Int): Option[Candidate] =
     if offset < 0 || offset >= value.length then None

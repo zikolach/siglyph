@@ -35,6 +35,13 @@ import scalatui.unicode.Unicode
  * unit but retains its logical ownership and application content, places the cursor at visual
  * column zero, and emits no replacement or partial cluster.
  *
+ * Public mutation methods serialize with input handling and render snapshots on JVM and Scala
+ * Native. Each text mutation commits before `onChange` runs. Submit callbacks receive the committed
+ * submit text. Change and submit callbacks, autocomplete provider calls, completion application,
+ * cancellation handles, overlay operations, and TUI render requests run after the editor state
+ * boundary is released. Callbacks may reenter Editor or TUI APIs. Autocomplete completions commit
+ * only while their captured request generation, text, and cursor remain current.
+ *
  * @param initialText
  *   starting logical editor contents
  * @param options
@@ -46,53 +53,72 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
       ContextualComponent,
       RenderOriginAware,
       MouseInputHandler:
-  private var buffer                                             = EditorBuffer(initialText)
-  private var isFocused                                          = false
-  private var context                                            = Option.empty[TUIContext]
-  private var provider                                           = options.autocompleteProvider
-  private var currentAutocompleteHandle                          = Option.empty[AutocompleteRequestHandle]
-  private var pendingAutocompleteRefresh                         = Option.empty[AutocompleteRequestHandle]
-  private var pendingAutocompleteRefreshToken                    = 0L
-  private var currentAutocompleteOverlay                         = Option.empty[OverlayHandle]
-  private var currentAutocomplete                                = Option.empty[Editor.AutocompleteState]
-  private var autocompleteRequestToken                           = 0L
-  private var currentRenderOrigin                                = Option.empty[ComponentRenderOrigin]
-  private var lastRenderedVisualHeight                           = 0
-  private var lastRenderedWidth                                  = 1
-  var enterBehavior: EditorEnterBehavior                         = options.enterBehavior
-  var onChange: String => Unit                                   = options.onChange
-  var onSubmit: String => Unit                                   = options.onSubmit
-  var autocompleteMaxVisible: Int                                = math.max(1, options.autocompleteMaxVisible)
-  var autocompleteTrigger: EditorAutocompleteTrigger             = options.autocompleteTrigger
-  private var autocompletePlacement: EditorAutocompletePlacement = options.autocompletePlacement
-  private val autocompleteDebouncer                              = options.autocompleteDebouncer
-  private val keybindings                                        = options.keybindings
-  private val undoStack                                          = UndoStack[EditorBuffer.Snapshot]()
-  private val killRing                                           = KillRing()
-  private var lastAction                                         = Option.empty[Editor.Action]
-  private var yankBaseSnapshot                                   = Option.empty[EditorBuffer.Snapshot]
-  private var history                                            = Vector.empty[String]
-  private var historyIndex                                       = -1
-  private val maxHistorySize                                     = 100
-  private var jumpMode                                           = Option.empty[Editor.JumpDirection]
-  private var pasteSession                                       = Option.empty[Editor.PasteSession]
+  private val stateBoundary                                         = ComponentStateBoundary()
+  private var buffer                                                = EditorBuffer(initialText)
+  private var isFocused                                             = false
+  private var context                                               = Option.empty[TUIContext]
+  private var provider                                              = options.autocompleteProvider
+  private var currentAutocompleteHandle                             = Option.empty[AutocompleteRequestHandle]
+  private var autocompleteAwaitingHandle                            = Option.empty[Long]
+  private var pendingAutocompleteRefresh                            = Option.empty[AutocompleteRequestHandle]
+  private var pendingAutocompleteRefreshToken                       = 0L
+  private var currentAutocompleteOverlay                            = Option.empty[OverlayHandle]
+  private var currentAutocomplete                                   = Option.empty[Editor.AutocompleteState]
+  private var autocompleteRequestToken                              = 0L
+  private var currentRenderOrigin                                   = Option.empty[ComponentRenderOrigin]
+  private var lastRenderedVisualHeight                              = 0
+  private var lastRenderedWidth                                     = 1
+  private var currentEnterBehavior: EditorEnterBehavior             = options.enterBehavior
+  private var changeCallback: String => Unit                        = options.onChange
+  private var submitCallback: String => Unit                        = options.onSubmit
+  private var currentAutocompleteMaxVisible: Int                    = math.max(1, options.autocompleteMaxVisible)
+  private var currentAutocompleteTrigger: EditorAutocompleteTrigger = options.autocompleteTrigger
+  private var autocompletePlacement: EditorAutocompletePlacement    = options.autocompletePlacement
+  private val autocompleteDebouncer                                 = options.autocompleteDebouncer
+  private val keybindings                                           = options.keybindings
+  private val undoStack                                             = UndoStack[EditorBuffer.Snapshot]()
+  private val killRing                                              = KillRing()
+  private var lastAction                                            = Option.empty[Editor.Action]
+  private var yankBaseSnapshot                                      = Option.empty[EditorBuffer.Snapshot]
+  private var history                                               = Vector.empty[String]
+  private var historyIndex                                          = -1
+  private val maxHistorySize                                        = 100
+  private var jumpMode                                              = Option.empty[Editor.JumpDirection]
+  private var pasteSession                                          = Option.empty[Editor.PasteSession]
 
   /** Current editor text joined with `\n` separators. */
-  def text: String = synchronized(buffer.text)
+  def text: String = stateBoundary(buffer.text)
 
   /** Current logical buffer lines. */
-  def lines: Vector[String] = synchronized(buffer.lines)
+  def lines: Vector[String] = stateBoundary(buffer.lines)
 
   /** Current logical grapheme-cluster cursor position. */
-  def cursor: EditorCursor = synchronized(buffer.cursor)
+  def cursor: EditorCursor = stateBoundary(buffer.cursor)
+
+  def enterBehavior: EditorEnterBehavior                            = stateBoundary(currentEnterBehavior)
+  def enterBehavior_=(value: EditorEnterBehavior): Unit             = stateBoundary {
+    currentEnterBehavior = value
+  }
+  def onChange: String => Unit                                      = stateBoundary(changeCallback)
+  def onChange_=(value: String => Unit): Unit                       = stateBoundary { changeCallback = value }
+  def onSubmit: String => Unit                                      = stateBoundary(submitCallback)
+  def onSubmit_=(value: String => Unit): Unit                       = stateBoundary { submitCallback = value }
+  def autocompleteMaxVisible: Int                                   = stateBoundary(currentAutocompleteMaxVisible)
+  def autocompleteMaxVisible_=(value: Int): Unit                    = stateBoundary {
+    currentAutocompleteMaxVisible = value
+  }
+  def autocompleteTrigger: EditorAutocompleteTrigger                = stateBoundary(currentAutocompleteTrigger)
+  def autocompleteTrigger_=(value: EditorAutocompleteTrigger): Unit = stateBoundary {
+    currentAutocompleteTrigger = value
+  }
 
   /** Current autocomplete provider, if configured. */
-  def autocompleteProvider: Option[AutocompleteProvider] = synchronized(provider)
+  def autocompleteProvider: Option[AutocompleteProvider] = stateBoundary(provider)
 
   /** Update autocomplete suggestion placement strategy. */
-  def setAutocompletePlacement(value: EditorAutocompletePlacement): Unit = synchronized {
+  def setAutocompletePlacement(value: EditorAutocompletePlacement): Unit = transition { effects =>
     autocompletePlacement = value
-    refreshAutocompleteOverlayPlacement(requestRender = true)
+    deferAutocompleteOverlayPlacement(effects, requestRender = true)
   }
 
   /** Use explicit placement options for the autocomplete suggestion overlay. */
@@ -100,14 +126,14 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     setAutocompletePlacement(EditorAutocompletePlacement.Custom(value))
 
   /** Replace the autocomplete provider and close any active autocomplete UI. */
-  def setAutocompleteProvider(value: Option[AutocompleteProvider]): Unit = synchronized {
-    cancelAutocomplete()
+  def setAutocompleteProvider(value: Option[AutocompleteProvider]): Unit = transition { effects =>
+    cancelAutocompleteLocked(effects)
     provider = value
   }
 
   /** Replace all editor text and place the cursor at the end. */
-  def setText(value: String): Unit = synchronized {
-    cancelAutocomplete()
+  def setText(value: String): Unit = transition { effects =>
+    cancelAutocompleteLocked(effects)
     buffer = EditorBuffer(value)
     resetEditingAction()
     historyIndex = -1
@@ -121,23 +147,23 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
    * call, `onChange` is invoked when text changes, active autocomplete is refreshed, and an
    * attached TUI context is asked to render changed visible state.
    */
-  def insertAtCursor(text: String): Unit = synchronized {
-    val result = mutate(_.insert(text), refreshAutocomplete = false)
+  def insertAtCursor(text: String): Unit = transition { effects =>
+    val result = mutate(_.insert(text), effects, refreshAutocomplete = false)
     if result !== InputResult.NoRender then
-      refreshAutocompleteIfActive()
-      context.foreach(_.requestRender())
+      deferRefreshAutocompleteIfActive(effects)
+      deferRenderRequest(effects)
   }
 
   /** Move the editor cursor, clamped to valid logical buffer bounds. */
-  def setCursor(cursor: EditorCursor): Unit = synchronized {
-    cancelAutocomplete()
+  def setCursor(cursor: EditorCursor): Unit = transition { effects =>
+    cancelAutocompleteLocked(effects)
     buffer.setCursor(cursor)
     resetEditingAction()
     historyIndex = -1
   }
 
   /** Add a value to history browsing. */
-  def addToHistory(value: String): Unit = synchronized {
+  def addToHistory(value: String): Unit = stateBoundary {
     val text = value.trim
     if text.isEmpty then ()
     else if history.headOption.forall(_ !== text) then
@@ -146,92 +172,59 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
   }
 
   /** Undo the most recent editor mutation, returning whether state changed. */
-  def undo(): Boolean = synchronized {
-    undoStack.pop() match
-      case Some(snapshot) =>
-        val before = buffer.text
-        buffer.restore(snapshot)
-        resetEditingAction()
-        historyIndex = -1
-        if buffer.text !== before then onChange(buffer.text)
-        true
-      case None           => false
-  }
+  def undo(): Boolean = transition(undoLocked)
 
   /** Yank the most recent killed text into the editor. */
-  def yank(): Boolean = synchronized {
-    killRing.peek match
-      case Some(text) =>
-        val base    = buffer.snapshot
-        val changed = mutate(_.insert(text), refreshAutocomplete = false)
-        if changed !== InputResult.NoRender then
-          yankBaseSnapshot = Some(base)
-          lastAction = Some(Editor.Action.Yank)
-          true
-        else false
-      case None       => false
-  }
+  def yank(): Boolean = transition(yankLocked)
 
   /** Replace the previous yank with the next kill-ring candidate. */
-  def yankPop(): Boolean = synchronized {
-    if !lastAction.contains(Editor.Action.Yank) || killRing.length <= 1 then false
-    else
-      yankBaseSnapshot match
-        case None       => false
-        case Some(base) =>
-          pushUndoSnapshot(base)
-          buffer.restore(base)
-          killRing.rotate()
-          val text = killRing.peek.getOrElse("")
-          buffer.insert(text)
-          historyIndex = -1
-          resetEditingAction()
-          onChange(buffer.text)
-          refreshAutocompleteIfActive()
-          true
-  }
+  def yankPop(): Boolean = transition(yankPopLocked)
 
   /** Expand all compact large-paste markers into their original logical text. */
-  def expandPasteMarkers(): Unit = synchronized {
+  def expandPasteMarkers(): Unit = transition { effects =>
     val before = buffer.text
     buffer.expandPasteMarkersInBuffer()
-    if buffer.text !== before then onChange(buffer.text)
+    if buffer.text !== before then deferChange(effects, buffer.text)
   }
 
-  override def tuiContext_=(value: Option[TUIContext]): Unit = synchronized {
-    if value.isEmpty then cancelAutocomplete()
-    context = value
-  }
+  override def tuiContext_=(value: Option[TUIContext]): Unit =
+    stateBoundary.transitionContext(context, value) { effects =>
+      if value.isEmpty then cancelAutocompleteLocked(effects)
+      context = value
+    }
 
-  override def renderOrigin_=(value: Option[ComponentRenderOrigin]): Unit = synchronized {
+  override def renderOrigin_=(value: Option[ComponentRenderOrigin]): Unit = stateBoundary {
     currentRenderOrigin = value
   }
 
-  override def focused: Boolean = synchronized(isFocused)
+  override def focused: Boolean = stateBoundary(isFocused)
 
-  override def focused_=(value: Boolean): Unit = synchronized { isFocused = value }
+  override def focused_=(value: Boolean): Unit = stateBoundary { isFocused = value }
 
   override def handleInput(input: TerminalInput): Unit =
     handleInputResult(input)
     ()
 
   override def handleInputResult(input: TerminalInput): InputResult =
-    synchronized(handleInputLocked(input))
+    transition(effects => handleInputLocked(input, effects))
 
-  override def handleMouse(context: MouseInputContext): InputResult = synchronized {
+  override def handleMouse(context: MouseInputContext): InputResult = transition { effects =>
     context.input.action match
-      case MouseAction.Wheel(MouseWheelDirection.Up)   => pageScroll(-1)
-      case MouseAction.Wheel(MouseWheelDirection.Down) => pageScroll(1)
+      case MouseAction.Wheel(MouseWheelDirection.Up)   => pageScroll(-1, effects)
+      case MouseAction.Wheel(MouseWheelDirection.Down) => pageScroll(1, effects)
       case _                                           => InputResult.Ignored
   }
 
-  override def render(width: Int): ComponentRender = synchronized {
-    val plan             = EditorLayout.renderPlan(buffer, width)
-    lastRenderedVisualHeight = plan.layout.lines.length
-    lastRenderedWidth = width
+  override def render(width: Int): ComponentRender =
+    val snapshot         = stateBoundary {
+      Editor.RenderSnapshot(buffer.snapshot, isFocused, currentAutocomplete.isEmpty)
+    }
+    val renderBuffer     = EditorBuffer("")
+    renderBuffer.restore(snapshot.buffer)
+    val plan             = EditorLayout.renderPlan(renderBuffer, width)
     val cursorPlacements = Vector.newBuilder[CursorPlacement]
     val lines            = plan.rows.zipWithIndex.map { (row, index) =>
-      if focused && currentAutocomplete.isEmpty && index === plan.layout.cursor.row then
+      if snapshot.focused && snapshot.autocompleteEmpty && index === plan.layout.cursor.row then
         if row.omitted then
           if width > 0 then cursorPlacements += CursorPlacement(index, 0)
           ""
@@ -241,31 +234,52 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
           line
       else row.normalText(width)
     }
-    refreshAutocompleteOverlayPlacement(requestRender = false)
+    val placementEffect  = stateBoundary {
+      lastRenderedVisualHeight = plan.layout.lines.length
+      lastRenderedWidth = width
+      autocompleteOverlayPlacementEffect(requestRender = false)
+    }
+    placementEffect.foreach(_.apply())
     ComponentRender(lines, Vector.empty, cursorPlacements.result())
-  }
 
-  private def handleInputLocked(input: TerminalInput): InputResult =
+  private def transition[A](operation: Editor.Effects => A): A =
+    stateBoundary.transition(operation)
+
+  private def deferChange(effects: Editor.Effects, value: String): Unit =
+    val callback = changeCallback
+    effects.add(() => callback(value))
+
+  private def deferRenderRequest(effects: Editor.Effects): Unit =
+    context.foreach(renderContext => effects.add(() => renderContext.requestRender()))
+
+  private def deferRefreshAutocompleteIfActive(effects: Editor.Effects): Unit =
+    if currentAutocomplete.nonEmpty || currentAutocompleteHandle.nonEmpty || pendingAutocompleteRefresh.nonEmpty
+    then effects.add(() => scheduleAutocompleteRefresh())
+
+  private def deferAutocompleteRequest(effects: Editor.Effects, force: Boolean): Unit =
+    effects.add(() => requestAutocomplete(force))
+
+  private def handleInputLocked(input: TerminalInput, effects: Editor.Effects): InputResult =
     val pasteCommit = input match
       case TerminalInput.PasteStart | TerminalInput.PasteChunk(_) | TerminalInput.PasteEnd =>
         InputResult.Ignored
       case _ if pasteSession.nonEmpty                                                      =>
-        commitPaste()
+        commitPaste(effects)
       case _                                                                               =>
         InputResult.Ignored
     val result      =
       if currentAutocomplete.nonEmpty then
-        handleAutocompleteInput(input)
+        handleAutocompleteInput(input, effects)
       else
         input match
           case _ if keybindings.matches(input, KeybindingCommand.InputTab) && provider.nonEmpty =>
-            requestAutocomplete(force = true)
+            deferAutocompleteRequest(effects, force = true)
             InputResult.Render
           case _                                                                                =>
-            handleEditingInput(input)
+            handleEditingInput(input, effects)
     combineInputResults(pasteCommit, result)
 
-  private def handleAutocompleteInput(input: TerminalInput): InputResult =
+  private def handleAutocompleteInput(input: TerminalInput, effects: Editor.Effects): InputResult =
     currentAutocomplete match
       case Some(state) if state.suggestions.items.nonEmpty                   =>
         if keybindings.matches(
@@ -273,88 +287,106 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
             KeybindingCommand.SelectCancel
           ) || keybindings.matches(input, KeybindingCommand.InputCopy)
         then
-          cancelAutocomplete()
+          cancelAutocompleteLocked(effects)
           InputResult.Render
         else if keybindings.matches(input, KeybindingCommand.SelectUp) then
-          state.list.moveSelectionBy(-1)
-          refreshAutocompleteOverlayPlacement(requestRender = true)
+          deferAutocompleteSelectionMove(effects, state, -1)
           InputResult.Render
         else if keybindings.matches(input, KeybindingCommand.SelectDown) then
-          state.list.moveSelectionBy(1)
-          refreshAutocompleteOverlayPlacement(requestRender = true)
+          deferAutocompleteSelectionMove(effects, state, 1)
           InputResult.Render
         else if keybindings.matches(input, KeybindingCommand.SelectPageUp) then
-          state.list.moveSelectionByPage(math.max(1, autocompleteMaxVisible), -1)
-          refreshAutocompleteOverlayPlacement(requestRender = true)
+          deferAutocompleteSelectionMove(
+            effects,
+            state,
+            -math.max(1, currentAutocompleteMaxVisible)
+          )
           InputResult.Render
         else if keybindings.matches(input, KeybindingCommand.SelectPageDown) then
-          state.list.moveSelectionByPage(math.max(1, autocompleteMaxVisible), 1)
-          refreshAutocompleteOverlayPlacement(requestRender = true)
+          deferAutocompleteSelectionMove(
+            effects,
+            state,
+            math.max(1, currentAutocompleteMaxVisible)
+          )
           InputResult.Render
         else if keybindings.matches(input, KeybindingCommand.SelectConfirm) then
-          handleAutocompleteSelection(submitOnSlash = true)
+          handleAutocompleteSelection(submitOnSlash = true, effects)
         else if keybindings.matches(input, KeybindingCommand.InputTab) then
-          acceptAutocomplete()
+          acceptAutocomplete(effects)
         else
-          handleEditingInput(input)
+          handleEditingInput(input, effects)
       case Some(_)
           if keybindings.matches(
             input,
             KeybindingCommand.SelectCancel
           ) || keybindings.matches(input, KeybindingCommand.InputCopy) =>
-        cancelAutocomplete()
+        cancelAutocompleteLocked(effects)
         InputResult.Render
       case Some(_) if keybindings.matches(input, KeybindingCommand.InputTab) =>
-        requestAutocomplete(force = true)
+        deferAutocompleteRequest(effects, force = true)
         InputResult.Render
       case Some(_)                                                           =>
-        handleEditingInput(input)
+        handleEditingInput(input, effects)
       case None                                                              =>
-        handleEditingInput(input)
+        handleEditingInput(input, effects)
 
-  private def handleEditingInput(input: TerminalInput): InputResult =
+  private def deferAutocompleteSelectionMove(
+      effects: Editor.Effects,
+      autocompleteState: Editor.AutocompleteState,
+      delta: Int
+  ): Unit = effects.add(() => {
+    autocompleteState.list.moveSelectionBy(delta)
+    transition(currentEffects =>
+      if currentAutocomplete.exists(_ eq autocompleteState) then
+        deferAutocompleteOverlayPlacement(currentEffects, requestRender = true)
+    )
+  })
+
+  private def handleEditingInput(input: TerminalInput, effects: Editor.Effects): InputResult =
     if jumpMode.nonEmpty then
-      handleJumpInput(input)
+      handleJumpInput(input, effects)
     else
       input match {
         case TerminalInput.Key(TerminalKey.Enter, modifiers)                                    =>
-          handleEnter(modifiers)
+          handleEnter(modifiers, effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorCursorUp)                  =>
           val layout = EditorLayout.fromBuffer(buffer, math.max(1, lastRenderedWidth))
-          if shouldUseHistoryUp(layout) then navigateHistory(-1) else move(_.moveUp())
+          if shouldUseHistoryUp(layout) then navigateHistory(-1, effects)
+          else move(_.moveUp(), effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorCursorDown)                =>
           val layout = EditorLayout.fromBuffer(buffer, math.max(1, lastRenderedWidth))
-          if shouldUseHistoryDown(layout) then navigateHistory(1) else move(_.moveDown())
+          if shouldUseHistoryDown(layout) then navigateHistory(1, effects)
+          else move(_.moveDown(), effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorPageUp)                    =>
-          pageScroll(-1)
+          pageScroll(-1, effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorPageDown)                  =>
-          pageScroll(1)
+          pageScroll(1, effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorDeleteCharForward)         =>
-          mutate(_.delete())
+          mutate(_.delete(), effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorDeleteWordForward)         =>
-          killDeleteWordForwards()
+          killDeleteWordForwards(effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorDeleteWordBackward)        =>
-          killDeleteWordBackwards()
+          killDeleteWordBackwards(effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorDeleteCharBackward)        =>
-          move(_.backspace())
+          move(_.backspace(), effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorUndo)                      =>
-          if undo() then InputResult.Render else InputResult.NoRender
+          if undoLocked(effects) then InputResult.Render else InputResult.NoRender
         case _ if keybindings.matches(input, KeybindingCommand.EditorYank)                      =>
-          if yank() then InputResult.Render else InputResult.NoRender
+          if yankLocked(effects) then InputResult.Render else InputResult.NoRender
         case _ if keybindings.matches(input, KeybindingCommand.EditorYankPop)                   =>
-          if yankPop() then InputResult.Render else InputResult.NoRender
+          if yankPopLocked(effects) then InputResult.Render else InputResult.NoRender
         case _ if keybindings.matches(input, KeybindingCommand.EditorCursorWordLeft)            =>
-          move(_.moveWordBackwards())
+          move(_.moveWordBackwards(), effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorCursorWordRight)           =>
-          move(_.moveWordForwards())
+          move(_.moveWordForwards(), effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorCursorLeft)                =>
-          move(_.moveLeft())
+          move(_.moveLeft(), effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorCursorRight)               =>
-          move(_.moveRight())
+          move(_.moveRight(), effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorCursorLineStart)           =>
-          move(_.moveToLineStart())
+          move(_.moveToLineStart(), effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorCursorLineEnd)             =>
-          move(_.moveToLineEnd())
+          move(_.moveToLineEnd(), effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorJumpForward)               =>
           jumpMode = Some(Editor.JumpDirection.Forward)
           InputResult.NoRender
@@ -362,65 +394,65 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
           jumpMode = Some(Editor.JumpDirection.Backward)
           InputResult.NoRender
         case _ if keybindings.matches(input, KeybindingCommand.InputSubmit)                     =>
-          submit()
+          submit(effects)
         case _ if keybindings.matches(input, KeybindingCommand.InputTab)                        =>
           if provider.nonEmpty then
-            requestAutocomplete(force = true)
+            deferAutocompleteRequest(effects, force = true)
             InputResult.Render
           else InputResult.NoRender
         case _ if keybindings.matches(input, KeybindingCommand.InputNewLine)                    =>
-          mutate(_.insertNewline())
+          mutate(_.insertNewline(), effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorDeleteToLineStart)         =>
-          killDeleteToStartOfLine()
+          killDeleteToStartOfLine(effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorDeleteToLineEnd)           =>
-          killDeleteToEndOfLine()
+          killDeleteToEndOfLine(effects)
         case TerminalInput.PasteStart                                                           =>
-          val previous = commitPaste()
+          val previous = commitPaste(effects)
           pasteSession = Some(Editor.PasteSession(buffer.snapshot))
           previous
         case TerminalInput.PasteChunk(chunk)                                                    =>
           pasteSession.foreach(_.process(chunk))
           InputResult.NoRender
         case TerminalInput.PasteEnd                                                             =>
-          commitPaste()
+          commitPaste(effects)
         case TerminalInput.Key(TerminalKey.Character(text), modifiers)
             if !modifiers.ctrl && !modifiers.alt && !modifiers.superKey =>
-          val result = mutate(_.insert(text), refreshAutocomplete = false)
-          maybeTriggerAutocompleteAfterText(text)
+          val result = mutate(_.insert(text), effects, refreshAutocomplete = false)
+          maybeTriggerAutocompleteAfterText(text, effects)
           result
         case TerminalInput.Key(TerminalKey.Backspace, modifiers)
             if modifiers.alt || modifiers.ctrl =>
-          killDeleteWordBackwards()
+          killDeleteWordBackwards(effects)
         case TerminalInput.Key(TerminalKey.Backspace, _)                                        =>
-          move(_.backspace())
+          move(_.backspace(), effects)
         case TerminalInput.Key(TerminalKey.Delete, modifiers) if modifiers.alt                  =>
-          killDeleteWordForwards()
+          killDeleteWordForwards(effects)
         case TerminalInput.Key(TerminalKey.Delete, _)                                           =>
-          mutate(_.delete())
+          mutate(_.delete(), effects)
         case TerminalInput.Key(TerminalKey.Home, _)                                             =>
-          move(_.moveToLineStart())
+          move(_.moveToLineStart(), effects)
         case TerminalInput.Key(TerminalKey.End, _)                                              =>
-          move(_.moveToLineEnd())
+          move(_.moveToLineEnd(), effects)
         case TerminalInput.Key(TerminalKey.PageUp, _)                                           =>
-          pageScroll(-1)
+          pageScroll(-1, effects)
         case TerminalInput.Key(TerminalKey.PageDown, _)                                         =>
-          pageScroll(1)
+          pageScroll(1, effects)
         case TerminalInput.Key(TerminalKey.Left, modifiers) if modifiers.alt || modifiers.ctrl  =>
-          move(_.moveWordBackwards())
+          move(_.moveWordBackwards(), effects)
         case TerminalInput.Key(TerminalKey.Right, modifiers) if modifiers.alt || modifiers.ctrl =>
-          move(_.moveWordForwards())
+          move(_.moveWordForwards(), effects)
         case TerminalInput.Key(TerminalKey.Left, _)                                             =>
-          move(_.moveLeft())
+          move(_.moveLeft(), effects)
         case TerminalInput.Key(TerminalKey.Right, _)                                            =>
-          move(_.moveRight())
+          move(_.moveRight(), effects)
         case TerminalInput.Key(TerminalKey.Up, _)                                               =>
-          move(_.moveUp())
+          move(_.moveUp(), effects)
         case TerminalInput.Key(TerminalKey.Down, _)                                             =>
-          move(_.moveDown())
+          move(_.moveDown(), effects)
         case _                                                                                  => InputResult.Ignored
       }
 
-  private def commitPaste(): InputResult =
+  private def commitPaste(effects: Editor.Effects): InputResult =
     pasteSession match
       case None          => InputResult.NoRender
       case Some(session) =>
@@ -438,8 +470,8 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
           pushUndoSnapshot(session.baseSnapshot)
           resetEditingAction()
           historyIndex = -1
-          onChange(buffer.text)
-          refreshAutocompleteIfActive()
+          deferChange(effects, buffer.text)
+          deferRefreshAutocompleteIfActive(effects)
           InputResult.Render
 
   private def combineInputResults(first: InputResult, second: InputResult): InputResult =
@@ -451,36 +483,40 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
       case (InputResult.Handled(false), InputResult.Handled(false))        => InputResult.NoRender
       case (InputResult.Ignored, InputResult.Ignored)                      => InputResult.Ignored
 
-  private def handleEnter(modifiers: KeyModifiers): InputResult = enterBehavior match
-    case EditorEnterBehavior.SubmitOnEnter(newlineModifiers) =>
-      if newlineModifiers.contains_(modifiers) then mutate(_.insertNewline())
-      else if modifiers.isEmpty then submit()
-      else InputResult.Ignored
-    case EditorEnterBehavior.NewlineOnEnter(submitModifiers) =>
-      if submitModifiers.contains_(modifiers) then submit()
-      else if modifiers.isEmpty || (modifiers === KeyModifiers(shift = true)) then
-        mutate(_.insertNewline())
-      else InputResult.Ignored
+  private def handleEnter(modifiers: KeyModifiers, effects: Editor.Effects): InputResult =
+    currentEnterBehavior match
+      case EditorEnterBehavior.SubmitOnEnter(newlineModifiers) =>
+        if newlineModifiers.contains_(modifiers) then mutate(_.insertNewline(), effects)
+        else if modifiers.isEmpty then submit(effects)
+        else InputResult.Ignored
+      case EditorEnterBehavior.NewlineOnEnter(submitModifiers) =>
+        if submitModifiers.contains_(modifiers) then submit(effects)
+        else if modifiers.isEmpty || (modifiers === KeyModifiers(shift = true)) then
+          mutate(_.insertNewline(), effects)
+        else InputResult.Ignored
 
-  private def submit(): InputResult =
-    cancelAutocomplete()
-    onSubmit(buffer.submitText)
+  private def submit(effects: Editor.Effects): InputResult =
+    cancelAutocompleteLocked(effects)
+    val submitted = buffer.submitText
+    val callback  = submitCallback
+    effects.add(() => callback(submitted))
     undoStack.clear()
     resetEditingAction()
     InputResult.Render
 
-  private def move(operation: EditorBuffer => Unit): InputResult =
+  private def move(operation: EditorBuffer => Unit, effects: Editor.Effects): InputResult =
     val before = buffer.cursor
     operation(buffer)
     if buffer.cursor === before then InputResult.NoRender
     else
       historyIndex = -1
       resetEditingAction()
-      refreshAutocompleteIfActive()
+      deferRefreshAutocompleteIfActive(effects)
       InputResult.Render
 
   private def mutate(
       operation: EditorBuffer => Unit,
+      effects: Editor.Effects,
       refreshAutocomplete: Boolean = true
   ): InputResult =
     val snapshot     = buffer.snapshot
@@ -493,11 +529,51 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
       pushUndoSnapshot(snapshot)
       resetEditingAction()
       historyIndex = -1
-      onChange(buffer.text)
+      deferChange(effects, buffer.text)
     if changed then
-      if refreshAutocomplete then refreshAutocompleteIfActive()
+      if refreshAutocomplete then deferRefreshAutocompleteIfActive(effects)
       InputResult.Render
     else InputResult.NoRender
+
+  private def undoLocked(effects: Editor.Effects): Boolean =
+    undoStack.pop() match
+      case Some(snapshot) =>
+        val before = buffer.text
+        buffer.restore(snapshot)
+        resetEditingAction()
+        historyIndex = -1
+        if buffer.text !== before then deferChange(effects, buffer.text)
+        true
+      case None           => false
+
+  private def yankLocked(effects: Editor.Effects): Boolean =
+    killRing.peek match
+      case Some(text) =>
+        val base    = buffer.snapshot
+        val changed = mutate(_.insert(text), effects, refreshAutocomplete = false)
+        if changed !== InputResult.NoRender then
+          yankBaseSnapshot = Some(base)
+          lastAction = Some(Editor.Action.Yank)
+          true
+        else false
+      case None       => false
+
+  private def yankPopLocked(effects: Editor.Effects): Boolean =
+    if !lastAction.contains(Editor.Action.Yank) || killRing.length <= 1 then false
+    else
+      yankBaseSnapshot match
+        case None       => false
+        case Some(base) =>
+          pushUndoSnapshot(base)
+          buffer.restore(base)
+          killRing.rotate()
+          val text = killRing.peek.getOrElse("")
+          buffer.insert(text)
+          historyIndex = -1
+          resetEditingAction()
+          deferChange(effects, buffer.text)
+          deferRefreshAutocompleteIfActive(effects)
+          true
 
   private def shouldUseHistoryUp(layout: EditorLayout): Boolean =
     buffer.text.isEmpty || (historyIndex >= 0 && layout.cursor.row === 0)
@@ -505,7 +581,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
   private def shouldUseHistoryDown(layout: EditorLayout): Boolean =
     historyIndex >= 0 && (buffer.lines.length === 1 || layout.cursor.row === layout.lines.length - 1)
 
-  private def navigateHistory(direction: Int): InputResult =
+  private def navigateHistory(direction: Int, effects: Editor.Effects): InputResult =
     if history.isEmpty then InputResult.NoRender
     else
       val newIndex = historyIndex - direction
@@ -513,53 +589,58 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
       else
         if historyIndex === -1 && newIndex >= 0 then pushUndoSnapshot()
         historyIndex = newIndex
-        if historyIndex === -1 then setTextInternal("")
-        else setTextInternal(history(historyIndex), cursorAtLineStart = true)
+        if historyIndex === -1 then setTextInternal("", effects)
+        else setTextInternal(history(historyIndex), effects, cursorAtLineStart = true)
 
-  private def setTextInternal(text: String, cursorAtLineStart: Boolean = false): InputResult =
+  private def setTextInternal(
+      text: String,
+      effects: Editor.Effects,
+      cursorAtLineStart: Boolean = false
+  ): InputResult =
     val before = buffer.text
     buffer = EditorBuffer(text)
     if cursorAtLineStart then buffer.setCursor(EditorCursor(0, 0))
     if before === buffer.text then InputResult.NoRender
     else
       resetEditingAction()
-      onChange(buffer.text)
+      deferChange(effects, buffer.text)
       InputResult.Render
 
-  private def killDeleteWordBackwards(): InputResult =
+  private def killDeleteWordBackwards(effects: Editor.Effects): InputResult =
     val cs      = buffer.clustersForLine(buffer.cursor.line)
     val deleted =
       if buffer.cursor.column > 0 then
         val start = WordNavigation.findWordBackward(cs, buffer.cursor.column, buffer.isPasteMarker)
         cs.slice(start, buffer.cursor.column).mkString
       else ""
-    performKill(deleted, prepend = true)(_.deleteWordBackwards())
+    performKill(deleted, prepend = true, effects)(_.deleteWordBackwards())
 
-  private def killDeleteWordForwards(): InputResult =
+  private def killDeleteWordForwards(effects: Editor.Effects): InputResult =
     val cs      = buffer.clustersForLine(buffer.cursor.line)
     val deleted =
       if buffer.cursor.column < cs.length then
         val end = WordNavigation.findWordForward(cs, buffer.cursor.column, buffer.isPasteMarker)
         cs.slice(buffer.cursor.column, end).mkString
       else ""
-    performKill(deleted, prepend = false)(_.deleteWordForwards())
+    performKill(deleted, prepend = false, effects)(_.deleteWordForwards())
 
-  private def killDeleteToStartOfLine(): InputResult =
+  private def killDeleteToStartOfLine(effects: Editor.Effects): InputResult =
     val cs      = buffer.clustersForLine(buffer.cursor.line)
     val deleted = cs.take(buffer.cursor.column).mkString
-    performKill(deleted, prepend = true)(_.deleteToStartOfLine())
+    performKill(deleted, prepend = true, effects)(_.deleteToStartOfLine())
 
-  private def killDeleteToEndOfLine(): InputResult =
+  private def killDeleteToEndOfLine(effects: Editor.Effects): InputResult =
     val cs      = buffer.clustersForLine(buffer.cursor.line)
     val deleted = cs.drop(buffer.cursor.column).mkString
-    performKill(deleted, prepend = false)(_.deleteToEndOfLine())
+    performKill(deleted, prepend = false, effects)(_.deleteToEndOfLine())
 
   private def performKill(
       deleted: String,
-      prepend: Boolean
+      prepend: Boolean,
+      effects: Editor.Effects
   )(operation: EditorBuffer => Unit): InputResult =
     val wasKill = lastAction.contains(Editor.Action.Kill)
-    val result  = mutate(operation)
+    val result  = mutate(operation, effects)
     if (result !== InputResult.NoRender) && deleted.nonEmpty then
       killRing.push(deleted, prepend = prepend, accumulate = wasKill)
       lastAction = Some(Editor.Action.Kill)
@@ -573,7 +654,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     lastAction = None
     yankBaseSnapshot = None
 
-  private def handleJumpInput(input: TerminalInput): InputResult =
+  private def handleJumpInput(input: TerminalInput, effects: Editor.Effects): InputResult =
     if keybindings.matches(input, KeybindingCommand.EditorJumpForward) ||
       keybindings.matches(input, KeybindingCommand.EditorJumpBackward)
     then
@@ -584,17 +665,21 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
         case Some(text) =>
           val direction = jumpMode.get
           jumpMode = None
-          if jumpToChar(text, direction) then InputResult.Render else InputResult.NoRender
+          if jumpToChar(text, direction, effects) then InputResult.Render else InputResult.NoRender
         case None       =>
           jumpMode = None
-          handleEditingInput(input)
+          handleEditingInput(input, effects)
 
   private def printableCharacter(input: TerminalInput): Option[String] = input match
     case TerminalInput.Key(TerminalKey.Character(text), modifiers)
         if !modifiers.ctrl && !modifiers.alt && !modifiers.superKey => Some(text)
     case _ => None
 
-  private def jumpToChar(text: String, direction: Editor.JumpDirection): Boolean =
+  private def jumpToChar(
+      text: String,
+      direction: Editor.JumpDirection,
+      effects: Editor.Effects
+  ): Boolean =
     val lines = buffer.lines
     if lines.isEmpty || text.isEmpty then false
     else
@@ -614,10 +699,8 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
               if isForward then buffer.cursor.column + 1 else buffer.cursor.column
             else 0
           val idx          =
-            if isForward then
-              lineClusters.indexOf(text, start)
-            else
-              lineClusters.lastIndexOf(text, math.max(0, start))
+            if isForward then lineClusters.indexOf(text, start)
+            else lineClusters.lastIndexOf(text, math.max(0, start))
           if idx >= 0 then
             moved = true
             foundLine = line
@@ -627,22 +710,26 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
       if moved then
         val before = buffer.cursor
         buffer.setCursor(EditorCursor(foundLine, foundCol))
-        refreshAutocompleteIfActive()
+        deferRefreshAutocompleteIfActive(effects)
         if buffer.cursor !== before then
           resetEditingAction()
           true
         else false
       else false
 
-  private def pageScroll(direction: Int): InputResult =
+  private def pageScroll(direction: Int, effects: Editor.Effects): InputResult =
     val plan       = EditorLayout.renderPlan(buffer, math.max(1, lastRenderedWidth))
     val pageSize   = 5
     val targetRow  = plan.layout.cursor.row + direction * pageSize
     val boundedRow = math.max(0, math.min(plan.layout.lines.length - 1, targetRow))
     if boundedRow === plan.layout.cursor.row then InputResult.NoRender
-    else moveToVisualLine(plan, boundedRow)
+    else moveToVisualLine(plan, boundedRow, effects)
 
-  private def moveToVisualLine(plan: EditorRenderPlan, targetRow: Int): InputResult =
+  private def moveToVisualLine(
+      plan: EditorRenderPlan,
+      targetRow: Int,
+      effects: Editor.Effects
+  ): InputResult =
     val targetLine   = plan.layout.lines(targetRow)
     val targetCursor = EditorCursor(
       targetLine.logicalLine,
@@ -653,89 +740,129 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     if before === targetCursor then InputResult.NoRender
     else
       resetEditingAction()
-      refreshAutocompleteIfActive()
+      deferRefreshAutocompleteIfActive(effects)
       InputResult.Render
 
-  private def maybeTriggerAutocompleteAfterText(inserted: String): Unit =
-    if provider.nonEmpty && autocompleteTrigger.triggerSlash && (inserted === "/") && currentLineBeforeCursor === "/"
-    then
-      requestAutocomplete(force = false)
-    else refreshAutocompleteIfActive()
-
-  private def refreshAutocompleteIfActive(): Unit =
-    if currentAutocomplete.nonEmpty || currentAutocompleteHandle.nonEmpty || pendingAutocompleteRefresh.nonEmpty
-    then scheduleAutocompleteRefresh()
+  private def maybeTriggerAutocompleteAfterText(inserted: String, effects: Editor.Effects): Unit =
+    if provider.nonEmpty && currentAutocompleteTrigger.triggerSlash && (inserted === "/") && currentLineBeforeCursor === "/"
+    then deferAutocompleteRequest(effects, force = false)
+    else deferRefreshAutocompleteIfActive(effects)
 
   private def scheduleAutocompleteRefresh(): Unit =
-    if provider.nonEmpty then
-      cancelAutocompleteRequest()
-      cancelPendingAutocompleteRefresh()
-      pendingAutocompleteRefreshToken += 1
-      val refreshToken = pendingAutocompleteRefreshToken
-      val scheduled    = autocompleteDebouncer.schedule { () =>
-        val start = Editor.this.synchronized {
-          if refreshToken === pendingAutocompleteRefreshToken then
-            pendingAutocompleteRefresh = None
-            prepareAutocompleteRequestLocked(force = false)
-          else None
-        }
-        start.foreach(_.apply())
-      }
-      if !scheduled.ranSynchronously then pendingAutocompleteRefresh = Some(scheduled.handle)
-
-  private def requestAutocomplete(force: Boolean): Unit =
-    cancelPendingAutocompleteRefresh()
-    requestAutocompleteNow(force)
-
-  private def requestAutocompleteNow(force: Boolean): Unit =
-    prepareAutocompleteRequestLocked(force).foreach(_.apply())
-
-  private def prepareAutocompleteRequestLocked(force: Boolean): Option[() => Unit] =
-    provider.map { autocompleteProvider =>
-      cancelAutocompleteRequest()
-      autocompleteRequestToken += 1
-      val token     = autocompleteRequestToken
-      val snapshot  = Editor.AutocompleteSnapshot(buffer.lines, buffer.cursor, buffer.text)
-      val request   = AutocompleteRequest(snapshot.lines, snapshot.cursor, force)
-      var completed = false
-      val callback  = new AutocompleteCallback:
-        override def complete(result: Option[AutocompleteSuggestions]): Unit =
-          val (overlayOperation, renderContext) = Editor.this.synchronized {
-            if isCurrentAutocompleteRequest(token, snapshot) then
-              completed = true
-              currentAutocompleteHandle = None
-              val operation = result.filter(_.items.nonEmpty) match
-                case Some(suggestions)
-                    if shouldAutoApplySingleForcedCompletion(request, suggestions) =>
-                  prepareApplyAutocompleteLocked(autocompleteProvider, suggestions, snapshot)
-                case Some(suggestions) =>
-                  prepareShowAutocompleteLocked(suggestions, snapshot, token)
-                case None              => prepareCloseAutocompleteOverlayLocked()
-              (operation, context)
-            else (None, None)
-          }
-          overlayOperation.foreach(_.apply())
-          renderContext.foreach(_.requestRender())
-
-        override def fail(error: Throwable): Unit =
-          val (overlayOperation, renderContext) = Editor.this.synchronized {
-            if isCurrentAutocompleteRequest(token, snapshot) then
-              completed = true
-              currentAutocompleteHandle = None
-              (prepareCloseAutocompleteOverlayLocked(), context)
-            else (None, None)
-          }
-          overlayOperation.foreach(_.apply())
-          renderContext.foreach(_.requestRender())
-      () =>
-        val handle = autocompleteProvider.requestSuggestions(request, callback)
-        Editor.this.synchronized {
-          val current = isCurrentAutocompleteRequest(token, snapshot)
-          if current && !completed then
-            currentAutocompleteHandle = Some(handle)
-          else if !current then handle.cancel()
-        }
+    val refreshToken = transition { effects =>
+      if provider.nonEmpty then
+        cancelAutocompleteRequestLocked(effects)
+        cancelPendingAutocompleteRefreshLocked(effects)
+        pendingAutocompleteRefreshToken += 1
+        Some(pendingAutocompleteRefreshToken)
+      else None
     }
+    refreshToken.foreach { token =>
+      val scheduled = autocompleteDebouncer.schedule(() => runScheduledAutocompleteRefresh(token))
+      if !scheduled.ranSynchronously then
+        val accepted = stateBoundary {
+          if token === pendingAutocompleteRefreshToken then
+            pendingAutocompleteRefresh = Some(scheduled.handle)
+            true
+          else false
+        }
+        if !accepted then scheduled.handle.cancel()
+    }
+
+  private def runScheduledAutocompleteRefresh(refreshToken: Long): Unit =
+    val start = stateBoundary {
+      if refreshToken === pendingAutocompleteRefreshToken then
+        pendingAutocompleteRefresh = None
+        true
+      else false
+    }
+    if start then requestAutocompleteNow(force = false)
+
+  private def requestAutocomplete(force: Boolean): Unit = transition { effects =>
+    cancelPendingAutocompleteRefreshLocked(effects)
+    prepareAutocompleteRequestLocked(force, effects).foreach(start =>
+      effects.add(() => startAutocompleteRequest(start))
+    )
+  }
+
+  private def requestAutocompleteNow(force: Boolean): Unit = transition { effects =>
+    prepareAutocompleteRequestLocked(force, effects).foreach(start =>
+      effects.add(() => startAutocompleteRequest(start))
+    )
+  }
+
+  private def prepareAutocompleteRequestLocked(
+      force: Boolean,
+      effects: Editor.Effects
+  ): Option[Editor.AutocompleteStart] =
+    provider.map { autocompleteProvider =>
+      cancelAutocompleteRequestLocked(effects)
+      autocompleteRequestToken += 1
+      val token    = autocompleteRequestToken
+      val snapshot = Editor.AutocompleteSnapshot(buffer.lines, buffer.cursor, buffer.text)
+      autocompleteAwaitingHandle = Some(token)
+      Editor.AutocompleteStart(
+        autocompleteProvider,
+        AutocompleteRequest(snapshot.lines, snapshot.cursor, force),
+        snapshot,
+        token
+      )
+    }
+
+  private def startAutocompleteRequest(start: Editor.AutocompleteStart): Unit =
+    val callback     = new AutocompleteCallback:
+      override def complete(result: Option[AutocompleteSuggestions]): Unit =
+        completeAutocomplete(start, result)
+      override def fail(error: Throwable): Unit                            = failAutocomplete(start)
+    val handle       = start.provider.requestSuggestions(start.request, callback)
+    val cancelHandle = stateBoundary {
+      val current = isCurrentAutocompleteRequest(start.token, start.snapshot)
+      if current && autocompleteAwaitingHandle.contains(start.token) then
+        autocompleteAwaitingHandle = None
+        currentAutocompleteHandle = Some(handle)
+      !current
+    }
+    if cancelHandle then handle.cancel()
+
+  private def completeAutocomplete(
+      start: Editor.AutocompleteStart,
+      result: Option[AutocompleteSuggestions]
+  ): Unit = transition { effects =>
+    if isCurrentAutocompleteRequest(start.token, start.snapshot) then
+      autocompleteAwaitingHandle = None
+      currentAutocompleteHandle = None
+      result.filter(_.items.nonEmpty) match
+        case Some(suggestions)
+            if shouldAutoApplySingleForcedCompletion(start.request, suggestions) =>
+          suggestions.items.headOption.foreach { item =>
+            effects.add(() =>
+              applyAutocompleteCompletion(
+                start.provider,
+                CompletionRequest(
+                  start.snapshot.lines,
+                  start.snapshot.cursor,
+                  item,
+                  suggestions.prefix
+                ),
+                start.token,
+                start.snapshot,
+                submitAfter = false
+              )
+            )
+          }
+        case Some(suggestions) =>
+          prepareShowAutocompleteLocked(suggestions, start.snapshot, start.token, effects)
+        case None              => closeAutocompleteOverlayLocked(effects)
+      deferRenderRequest(effects)
+  }
+
+  private def failAutocomplete(start: Editor.AutocompleteStart): Unit = transition { effects =>
+    if isCurrentAutocompleteRequest(start.token, start.snapshot) then
+      autocompleteAwaitingHandle = None
+      currentAutocompleteHandle = None
+      closeAutocompleteOverlayLocked(effects)
+      deferRenderRequest(effects)
+  }
 
   private def isCurrentAutocompleteRequest(
       token: Long,
@@ -743,56 +870,43 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
   ): Boolean =
     (token === autocompleteRequestToken) && (buffer.text === snapshot.text) && (buffer.cursor === snapshot.cursor)
 
-  private def showAutocomplete(
-      suggestions: AutocompleteSuggestions,
-      snapshot: Editor.AutocompleteSnapshot
-  ): Unit =
-    prepareShowAutocompleteLocked(
-      suggestions,
-      snapshot,
-      autocompleteRequestToken
-    ).foreach(_.apply())
-
   private def prepareShowAutocompleteLocked(
       suggestions: AutocompleteSuggestions,
       snapshot: Editor.AutocompleteSnapshot,
-      token: Long
-  ): Option[() => Unit] =
+      token: Long,
+      effects: Editor.Effects
+  ): Unit =
     val list             = SelectList(
       suggestions.items.map(item => SelectItem(item.value, item.label, item.description)),
-      autocompleteMaxVisible
+      currentAutocompleteMaxVisible
     )
     val overlayComponent = Editor.AutocompleteOverlay(this, list)
-    val state            = Editor.AutocompleteState(suggestions, snapshot, list, overlayComponent)
-    currentAutocomplete = Some(state)
-    val options          = currentOverlayOptions
+    currentAutocomplete =
+      Some(Editor.AutocompleteState(suggestions, snapshot, list, overlayComponent))
+    val overlayOptions   = currentOverlayOptions
     currentAutocompleteOverlay match
       case Some(handle) =>
-        Some { () =>
-          val current = Editor.this.synchronized {
-            isCurrentAutocompleteRequest(
-              token,
-              snapshot
-            ) && currentAutocomplete.exists(_.overlay eq overlayComponent)
+        effects.add(() => {
+          val current = stateBoundary {
+            isCurrentAutocompleteRequest(token, snapshot) &&
+            currentAutocomplete.exists(_.overlay eq overlayComponent)
           }
-          if current then handle.update(overlayComponent, Some(options))
-        }
+          if current then handle.update(overlayComponent, Some(overlayOptions))
+        })
       case None         =>
         val renderContext = context
-        Some { () =>
-          val shown      = renderContext.map(_.overlays.showOverlay(overlayComponent, options))
-          val staleShown = Editor.this.synchronized {
-            if isCurrentAutocompleteRequest(
-                token,
-                snapshot
-              ) && currentAutocomplete.exists(_.overlay eq overlayComponent)
+        effects.add(() => {
+          val shown = renderContext.map(_.overlays.showOverlay(overlayComponent, overlayOptions))
+          val stale = stateBoundary {
+            if isCurrentAutocompleteRequest(token, snapshot) &&
+              currentAutocomplete.exists(_.overlay eq overlayComponent)
             then
               currentAutocompleteOverlay = shown
               None
             else shown
           }
-          staleShown.foreach(_.hide())
-        }
+          stale.foreach(_.hide())
+        })
 
   private def shouldAutoApplySingleForcedCompletion(
       request: AutocompleteRequest,
@@ -800,100 +914,136 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
   ): Boolean =
     request.force && options.autoApplySingleForcedCompletion && suggestions.items.length === 1
 
-  private def prepareApplyAutocompleteLocked(
+  private def acceptAutocomplete(effects: Editor.Effects): InputResult =
+    handleAutocompleteSelection(submitOnSlash = false, effects)
+
+  private def handleAutocompleteSelection(
+      submitOnSlash: Boolean = false,
+      effects: Editor.Effects
+  ): InputResult =
+    (provider, currentAutocomplete) match
+      case (Some(autocompleteProvider), Some(autocompleteState))
+          if isCurrentAutocompleteRequest(autocompleteRequestToken, autocompleteState.snapshot) =>
+        effects.add(() =>
+          applySelectedAutocomplete(
+            autocompleteProvider,
+            autocompleteState,
+            submitOnSlash
+          )
+        )
+        InputResult.Render
+      case _ =>
+        cancelAutocompleteLocked(effects)
+        InputResult.Render
+
+  private def applySelectedAutocomplete(
       autocompleteProvider: AutocompleteProvider,
-      suggestions: AutocompleteSuggestions,
-      snapshot: Editor.AutocompleteSnapshot
-  ): Option[() => Unit] =
-    suggestions.items.headOption match
-      case Some(item) =>
+      autocompleteState: Editor.AutocompleteState,
+      submitOnSlash: Boolean
+  ): Unit =
+    val selectedItem = autocompleteState.selectedItem
+    transition { effects =>
+      selectedItem match
+        case Some(item)
+            if currentAutocomplete.exists(_ eq autocompleteState) &&
+              isCurrentAutocompleteRequest(autocompleteRequestToken, autocompleteState.snapshot) =>
+          val snapshot    = Editor.AutocompleteSnapshot(buffer.lines, buffer.cursor, buffer.text)
+          autocompleteRequestToken += 1
+          val token       = autocompleteRequestToken
+          val request     = CompletionRequest(
+            snapshot.lines,
+            snapshot.cursor,
+            item,
+            autocompleteState.suggestions.prefix
+          )
+          cancelPendingAutocompleteRefreshLocked(effects)
+          cancelAutocompleteRequestHandleLocked(effects)
+          closeAutocompleteOverlayLocked(effects)
+          val submitAfter = submitOnSlash && autocompleteState.suggestions.prefix.startsWith("/")
+          effects.add(() =>
+            applyAutocompleteCompletion(
+              autocompleteProvider,
+              request,
+              token,
+              snapshot,
+              submitAfter
+            )
+          )
+        case _ => cancelAutocompleteLocked(effects)
+    }
+
+  private def applyAutocompleteCompletion(
+      autocompleteProvider: AutocompleteProvider,
+      request: CompletionRequest,
+      token: Long,
+      snapshot: Editor.AutocompleteSnapshot,
+      submitAfter: Boolean
+  ): Unit =
+    val result = autocompleteProvider.applyCompletion(request)
+    transition { effects =>
+      if isCurrentAutocompleteRequest(token, snapshot) then
         val beforeText = buffer.text
-        val result     = autocompleteProvider.applyCompletion(CompletionRequest(
-          snapshot.lines,
-          snapshot.cursor,
-          item,
-          suggestions.prefix
-        ))
         buffer = EditorBuffer.fromLines(result.lines, result.cursor)
-        currentAutocompleteHandle = None
         autocompleteRequestToken += 1
         if buffer.text !== beforeText then
           resetEditingAction()
           historyIndex = -1
-          onChange(buffer.text)
-        prepareCloseAutocompleteOverlayLocked()
-      case None       => prepareCloseAutocompleteOverlayLocked()
+          deferChange(effects, buffer.text)
+        if submitAfter then effects.add(() => transition(submit))
+        else deferRenderRequest(effects)
+    }
 
-  private def acceptAutocomplete(): InputResult =
-    handleAutocompleteSelection(submitOnSlash = false)
+  private def cancelAutocompleteLocked(effects: Editor.Effects): Unit =
+    cancelPendingAutocompleteRefreshLocked(effects)
+    cancelAutocompleteRequestLocked(effects)
+    closeAutocompleteOverlayLocked(effects)
 
-  private def handleAutocompleteSelection(submitOnSlash: Boolean = false): InputResult =
-    (provider, currentAutocomplete.flatMap(_.selectedItem)) match
-      case (Some(autocompleteProvider), Some(item))
-          if currentAutocomplete.exists(state =>
-            isCurrentAutocompleteRequest(autocompleteRequestToken, state.snapshot)
-          ) =>
-        val beforeText = buffer.text
-        val state      = currentAutocomplete.get
-        val result     = autocompleteProvider.applyCompletion(CompletionRequest(
-          buffer.lines,
-          buffer.cursor,
-          item,
-          state.suggestions.prefix
-        ))
-        buffer = EditorBuffer.fromLines(result.lines, result.cursor)
-        closeAutocompleteOverlay()
-        cancelAutocompleteRequest()
-        if buffer.text !== beforeText then onChange(buffer.text)
-        if submitOnSlash && state.suggestions.prefix.startsWith("/") then submit()
-        else InputResult.Render
-      case _ =>
-        cancelAutocomplete()
-        InputResult.Render
-
-  private def cancelAutocomplete(): Unit =
-    cancelPendingAutocompleteRefresh()
-    cancelAutocompleteRequest()
-    closeAutocompleteOverlay()
-
-  private def cancelPendingAutocompleteRefresh(): Unit =
+  private def cancelPendingAutocompleteRefreshLocked(effects: Editor.Effects): Unit =
     pendingAutocompleteRefreshToken += 1
-    pendingAutocompleteRefresh.foreach(_.cancel())
+    pendingAutocompleteRefresh.foreach(handle => effects.add(() => handle.cancel()))
     pendingAutocompleteRefresh = None
 
-  private def cancelAutocompleteRequest(): Unit =
+  private def cancelAutocompleteRequestLocked(effects: Editor.Effects): Unit =
     autocompleteRequestToken += 1
-    currentAutocompleteHandle.foreach(_.cancel())
+    autocompleteAwaitingHandle = None
+    cancelAutocompleteRequestHandleLocked(effects)
+
+  private def cancelAutocompleteRequestHandleLocked(effects: Editor.Effects): Unit =
+    currentAutocompleteHandle.foreach(handle => effects.add(() => handle.cancel()))
     currentAutocompleteHandle = None
 
-  private def closeAutocompleteOverlay(): Unit =
-    prepareCloseAutocompleteOverlayLocked().foreach(_.apply())
-
-  private def prepareCloseAutocompleteOverlayLocked(): Option[() => Unit] =
+  private def closeAutocompleteOverlayLocked(effects: Editor.Effects): Unit =
     currentAutocomplete = None
-    val handle = currentAutocompleteOverlay
+    currentAutocompleteOverlay.foreach(handle => effects.add(() => handle.hide()))
     currentAutocompleteOverlay = None
-    handle.map(overlay => () => overlay.hide())
 
   private def currentLineBeforeCursor: String =
     Unicode.graphemeClusters(buffer.lines(buffer.cursor.line)).take(buffer.cursor.column).mkString
 
-  private def refreshAutocompleteOverlayPlacement(requestRender: Boolean): Unit =
-    currentAutocomplete.foreach { state =>
-      currentAutocompleteOverlay.foreach(_.update(
-        state.overlay,
-        Some(currentOverlayOptions),
-        requestRender = requestRender
-      ))
-    }
+  private def deferAutocompleteOverlayPlacement(
+      effects: Editor.Effects,
+      requestRender: Boolean
+  ): Unit = autocompleteOverlayPlacementEffect(requestRender).foreach(effects.add)
 
-  private def renderCurrentAutocompleteOverlay(width: Int): ComponentRender = synchronized {
-    currentAutocomplete.map(_.list.render(width)).getOrElse(ComponentRender.empty)
-  }
+  private def autocompleteOverlayPlacementEffect(requestRender: Boolean): Option[() => Unit] =
+    for
+      autocompleteState <- currentAutocomplete
+      handle            <- currentAutocompleteOverlay
+      overlayOptions     = currentOverlayOptions
+    yield () =>
+      handle.update(
+        autocompleteState.overlay,
+        Some(overlayOptions),
+        requestRender = requestRender
+      )
+
+  private def renderCurrentAutocompleteOverlay(width: Int): ComponentRender =
+    val list = stateBoundary(currentAutocomplete.map(_.list))
+    list.map(_.render(width)).getOrElse(ComponentRender.empty)
 
   private def currentOverlayOptions: OverlayOptions =
     val base = autocompletePlacement match
-      case EditorAutocompletePlacement.AdjacentToEditor =>
+      case EditorAutocompletePlacement.AdjacentToEditor      =>
         currentRenderOrigin match
           case Some(origin) =>
             OverlayOptions(
@@ -903,10 +1053,27 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
               focusCapturing = true
             )
           case None         => EditorOptions.FallbackAutocompleteOverlayOptions
-      case EditorAutocompletePlacement.Custom(options)  => options
-    base.copy(maxHeight = base.maxHeight.orElse(Some(OverlaySize.Absolute(autocompleteMaxVisible))))
+      case EditorAutocompletePlacement.Custom(customOptions) => customOptions
+    base.copy(maxHeight =
+      base.maxHeight.orElse(Some(OverlaySize.Absolute(currentAutocompleteMaxVisible)))
+    )
 
 object Editor:
+  private type Effects = ComponentEffects
+
+  private final case class RenderSnapshot(
+      buffer: EditorBuffer.Snapshot,
+      focused: Boolean,
+      autocompleteEmpty: Boolean
+  )
+
+  private final case class AutocompleteStart(
+      provider: AutocompleteProvider,
+      request: AutocompleteRequest,
+      snapshot: AutocompleteSnapshot,
+      token: Long
+  )
+
   private final class PasteSession(val baseSnapshot: EditorBuffer.Snapshot):
     private val decoder         = scalatui.terminal.TerminalUtf8Decoder()
     private val graphemeCounter = Unicode.IncrementalGraphemeCounter()
@@ -1000,21 +1167,16 @@ object Editor:
         MouseInputHandler:
     override def render(width: Int): ComponentRender = owner.renderCurrentAutocompleteOverlay(width)
 
-    override def handleMouse(context: MouseInputContext): InputResult = owner.synchronized {
-      context.input.action match
-        case MouseAction.Wheel(MouseWheelDirection.Up)   =>
-          val result = list.moveSelectionByResult(-1)
-          if result === InputResult.Render then
-            owner.refreshAutocompleteOverlayPlacement(requestRender = true)
-          result
-        case MouseAction.Wheel(MouseWheelDirection.Down) =>
-          val result = list.moveSelectionByResult(1)
-          if result === InputResult.Render then
-            owner.refreshAutocompleteOverlayPlacement(requestRender = true)
-          result
+    override def handleMouse(context: MouseInputContext): InputResult =
+      val result = context.input.action match
+        case MouseAction.Wheel(MouseWheelDirection.Up)   => list.moveSelectionByResult(-1)
+        case MouseAction.Wheel(MouseWheelDirection.Down) => list.moveSelectionByResult(1)
         case _                                           => InputResult.Ignored
-    }
+      if result === InputResult.Render then
+        owner.transition(effects =>
+          owner.deferAutocompleteOverlayPlacement(effects, requestRender = true)
+        )
+      result
 
-    override def handleInputResult(input: TerminalInput): InputResult = owner.synchronized {
-      owner.handleAutocompleteInput(input)
-    }
+    override def handleInputResult(input: TerminalInput): InputResult =
+      owner.transition(effects => owner.handleAutocompleteInput(input, effects))

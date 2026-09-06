@@ -118,6 +118,51 @@ class KeybindingManagerSuite extends munit.FunSuite:
     ))
   }
 
+  test("registers portable viewport defaults and keeps conflict-prone actions unbound") {
+    val manager = KeybindingManager()
+    val unbound = Vector(
+      KeybindingCommand.ViewportHalfPageUp,
+      KeybindingCommand.ViewportHalfPageDown,
+      KeybindingCommand.ViewportLineUp,
+      KeybindingCommand.ViewportLineDown,
+      KeybindingCommand.ViewportCopySelection,
+      KeybindingCommand.ViewportClearSelection
+    )
+
+    assert(unbound.forall(manager.getResolvedKeys(_).isEmpty))
+    assert(manager.matches(
+      TerminalInput.Key(TerminalKey.PageDown),
+      KeybindingCommand.ViewportPageDown
+    ))
+    assert(manager.matches(
+      TerminalInput.Key(TerminalKey.Character("f"), KeyModifiers(ctrl = true, shift = true)),
+      KeybindingCommand.ViewportSearchToggle
+    ))
+    assertEquals(
+      KeybindingCommand.fromId("tui.altScreen.copySelection"),
+      Some(KeybindingCommand.ViewportCopySelection)
+    )
+  }
+
+  test("reports conflicts between configurable viewport bindings") {
+    val key     = KeyDescriptor(TerminalKey.Character("d"), KeyModifiers(ctrl = true))
+    val manager = KeybindingManager(Map(
+      KeybindingCommand.ViewportLineDown     -> Vector(key),
+      KeybindingCommand.ViewportHalfPageDown -> Vector(key)
+    ))
+
+    assertEquals(
+      manager.getConflicts,
+      Vector(KeybindingConflict(
+        key,
+        Vector(
+          KeybindingCommand.ViewportHalfPageDown,
+          KeybindingCommand.ViewportLineDown
+        )
+      ))
+    )
+  }
+
   test("keeps defaults for unspecified commands") {
     val manager = KeybindingManager.fromRawBindings(
       Map(

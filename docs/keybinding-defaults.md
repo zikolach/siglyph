@@ -35,6 +35,25 @@ This table summarizes the default keybinding commands used by the editor/input/k
 | `tui.select.pageDown` | Select | `PageDown` |
 | `tui.select.confirm` | Select | `Enter` |
 | `tui.select.cancel` | Select | `Escape`, `Ctrl+C` |
+| `tui.altScreen.pageUp` | Viewport | `PageUp` |
+| `tui.altScreen.pageDown` | Viewport | `PageDown` |
+| `tui.altScreen.halfPageUp` | Viewport | unbound |
+| `tui.altScreen.halfPageDown` | Viewport | unbound |
+| `tui.altScreen.lineUp` | Viewport | unbound |
+| `tui.altScreen.lineDown` | Viewport | unbound |
+| `tui.altScreen.top` | Viewport | `Home` |
+| `tui.altScreen.bottom` | Viewport | `End` |
+| `tui.altScreen.previousPrompt` | Viewport | `Ctrl+Shift+Up`, `Ctrl+Up` |
+| `tui.altScreen.nextPrompt` | Viewport | `Ctrl+Shift+Down`, `Ctrl+Down` |
+| `tui.altScreen.search` | Viewport | `Ctrl+Shift+F` |
+| `tui.altScreen.searchNext` | Viewport search | `Enter`, `Ctrl+G` |
+| `tui.altScreen.searchPrevious` | Viewport search | `Shift+Enter`, `Ctrl+Shift+G` |
+| `tui.altScreen.searchClose` | Viewport search | `Escape` |
+| `tui.altScreen.copySelection` | Viewport | unbound |
+| `tui.altScreen.clearSelection` | Viewport | unbound |
+
+Focused search handles its commands first. Focused overlays and components then receive input before
+primary `ScrollView` fallback. Applications must bind copy and clear-selection explicitly.
 
 ## Parser limitations / closest supported behavior
 

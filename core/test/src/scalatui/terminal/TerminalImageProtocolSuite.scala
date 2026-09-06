@@ -47,6 +47,31 @@ class TerminalImageProtocolSuite extends munit.FunSuite:
       s"\u001b]1337;File=name=cGljLnBuZw==;inline=1;width=${iterm.width};height=${iterm.rows}:AAAA\u0007"
     )
 
+  test("typed clipping keeps complete images and omits unrepresentable partial images"):
+    val kitty = TerminalImageProtocol.encodeKitty(payload("AAAA"), 7, 4, 3)
+    val iterm = TerminalImageProtocol.encodeITerm2(payload("AAAA"), None, 4, 3)
+
+    Vector(kitty, iterm).foreach { control =>
+      assertEquals(TerminalImageProtocol.clipImage(control, 0, 0, 4, 3), Some(control))
+      assertEquals(TerminalImageProtocol.clipImage(control, 0, 0, 4, 2), None)
+      assertEquals(TerminalImageProtocol.clipImage(control, 0, 1, 3, 3), None)
+      assertEquals(TerminalImageProtocol.clipImage(control, 3, 0, 4, 0), None)
+    }
+
+  test("Kitty retained placement and placement cleanup are typed and payload-free"):
+    val placement = TerminalImageProtocol.placeKittyImage(9, 2, 3)
+    val cleanup   = TerminalImageProtocol.deleteKittyPlacements(9)
+
+    assertEquals(
+      TerminalRenderControlEncoder.encode(placement),
+      "\u001b_Ga=p,i=9,c=2,r=3,C=1\u001b\\"
+    )
+    assertEquals(
+      TerminalRenderControlEncoder.encode(cleanup),
+      "\u001b_Ga=d,d=i,i=9\u001b\\"
+    )
+    assert(!placement.toString.contains("AAAA"), placement.toString)
+
   test("preserves valid payload spelling and emits only the intended frame terminator"):
     val padded   = payload("TQ==")
     val unpadded = payload("TQ")

@@ -19,15 +19,26 @@ class StreamTerminal(
     initialRows: Int = StreamTerminal.envInt("LINES").getOrElse(24)
 ) extends Terminal,
       TerminalInputDrainSupport:
-  @volatile private var inputHandler: TerminalInput => Unit = _ => ()
-  @volatile private var running                             = false
-  private var inputThread: Thread | Null                    = null
-  private var flushThread: Thread | Null                    = null
-  private val inputBuffer                                   = TerminalInputBuffer()
-  private val inputDelivery                                 = OrderedInputDelivery()
-  private var inputGeneration                               = 0L
+  @volatile private var inputHandler: TerminalInput => Unit                  = _ => ()
+  @volatile private var running                                              = false
+  private var inputThread: Thread | Null                                     = null
+  private var flushThread: Thread | Null                                     = null
+  private val inputBuffer                                                    = TerminalInputBuffer()
+  private val inputDelivery                                                  = OrderedInputDelivery()
+  private var inputGeneration                                                = 0L
+  private var inputFailureGeneration                                         = -1L
+  private var flushFailureGeneration                                         = -1L
+  private[terminal] var workerFailureForTesting: String => Option[Throwable] = _ => None
+  private[terminal] var workerFailureClaimedForTesting: String => Unit       = _ => ()
 
-  override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit = synchronized {
+  override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
+    start(onInput, onResize, _ => ())
+
+  override def start(
+      onInput: TerminalInput => Unit,
+      onResize: () => Unit,
+      onFailure: Throwable => Unit
+  ): Unit = synchronized {
     if running then throw IllegalStateException("StreamTerminal is already running")
     reapInputThread()
     reapFlushThread()
@@ -43,8 +54,14 @@ class StreamTerminal(
     inputGeneration = inputDelivery.start(inputBuffer.clear())
     running = true
     val generation = inputGeneration
-    val thread     = Thread(() => readLoop(generation), "siglyph-stream-terminal-input")
-    val flusher    = Thread(() => flushLoop(generation), "siglyph-stream-terminal-flush")
+    val thread     = Thread(
+      () => readLoop(generation, onFailure),
+      "siglyph-stream-terminal-input"
+    )
+    val flusher    = Thread(
+      () => flushLoop(generation, onFailure),
+      "siglyph-stream-terminal-flush"
+    )
     thread.setDaemon(true)
     flusher.setDaemon(true)
     inputThread = thread
@@ -84,33 +101,57 @@ class StreamTerminal(
   override def clearFromCursor(): Unit = write("\u001b[J")
   override def clearScreen(): Unit     = write("\u001b[2J\u001b[H")
 
-  private def readLoop(generation: Long): Unit =
+  private def readLoop(generation: Long, onFailure: Throwable => Unit): Unit =
     try
       val buffer = Array.ofDim[Byte](4096)
       while inputDelivery.isActive(generation) do
-        try
-          val read = input.read(buffer)
-          if read < 0 then
-            flushPending(generation)
-            terminateGeneration(generation)
-          else if read === 0 then flushPending(generation)
-          else
-            val chunk = TerminalInputChunk(buffer, 0, read)
-            parseAndDeliver(generation, inputBuffer.process(chunk))
-        catch case _: InterruptedException => terminateGeneration(generation)
+        workerFailureForTesting("input").foreach(throw _)
+        val read = input.read(buffer)
+        if read < 0 then
+          flushPending(generation)
+          terminateGeneration(generation)
+        else if read === 0 then flushPending(generation)
+        else
+          val chunk = TerminalInputChunk(buffer, 0, read)
+          parseAndDeliver(generation, inputBuffer.process(chunk))
+    catch case error: Throwable => reportFailure(generation, "input", error, onFailure)
     finally
       terminateGeneration(generation)
       clearInputThread(Thread.currentThread())
 
-  private def flushLoop(generation: Long): Unit =
+  private def flushLoop(generation: Long, onFailure: Throwable => Unit): Unit =
     try
       while inputDelivery.isActive(generation) do
-        try
-          Thread.sleep(StreamTerminal.IncompleteEscapeFlushMillis)
-          flushPending(generation)
-        catch
-          case _: InterruptedException => terminateGeneration(generation)
+        Thread.sleep(StreamTerminal.IncompleteEscapeFlushMillis)
+        workerFailureForTesting("flush").foreach(throw _)
+        flushPending(generation)
+    catch case error: Throwable => reportFailure(generation, "flush", error, onFailure)
     finally clearFlushThread(Thread.currentThread())
+
+  private def reportFailure(
+      generation: Long,
+      worker: String,
+      error: Throwable,
+      onFailure: Throwable => Unit
+  ): Unit =
+    if claimWorkerFailure(generation, worker) then
+      try workerFailureClaimedForTesting(worker)
+      catch case _: Throwable => ()
+      try onFailure(error)
+      catch case _: Throwable => ()
+
+  private def claimWorkerFailure(generation: Long, worker: String): Boolean = synchronized {
+    if !running || (inputGeneration !== generation) then false
+    else
+      worker match
+        case "input" if inputFailureGeneration !== generation =>
+          inputFailureGeneration = generation
+          true
+        case "flush" if flushFailureGeneration !== generation =>
+          flushFailureGeneration = generation
+          true
+        case _                                                => false
+  }
 
   private def flushPending(generation: Long): Unit =
     parseAndDeliver(generation, inputBuffer.flush())
@@ -119,10 +160,13 @@ class StreamTerminal(
     inputDelivery.parseAndDeliver(generation, parse)(inputHandler)
 
   private def terminateGeneration(generation: Long): Unit =
-    if inputDelivery.stop(generation, inputBuffer.clear()) then
-      synchronized {
-        if inputGeneration === generation then running = false
-      }
+    val terminate = synchronized {
+      if running && (inputGeneration === generation) then
+        running = false
+        true
+      else false
+    }
+    if terminate then inputDelivery.stop(generation, inputBuffer.clear())
 
   private def reapInputThread(): Unit =
     if Option(inputThread).exists(!_.isAlive) then inputThread = null

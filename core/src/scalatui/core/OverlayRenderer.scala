@@ -85,6 +85,7 @@ object OverlayRenderer:
         val viewportStart    = math.max(0, minHeight - termHeight)
         var controls         = validatedBase.controls
         var cursorPlacements = validatedBase.cursorPlacements
+        var documentMarkers  = validatedBase.documentMetadata.markers
 
         validatedOverlays.foreach { case (frame, layout) =>
           val finalRow = viewportStart + layout.row
@@ -94,6 +95,10 @@ object OverlayRenderer:
             cursorIntersectsOverlay(_, finalRow, layout, frame.lines.length)
           )
           cursorPlacements ++= frame.cursorPlacements.map(_.translated(finalRow, layout.col))
+          documentMarkers = documentMarkers.filterNot(marker =>
+            markerIntersectsOverlay(marker, finalRow, layout, frame.lines.length)
+          )
+          documentMarkers ++= frame.documentMetadata.translated(finalRow, layout.col).markers
           frame.lines.zipWithIndex.foreach { case (line, offset) =>
             val index = finalRow + offset
             if index >= 0 && index < lineBuffer.length then
@@ -102,8 +107,23 @@ object OverlayRenderer:
           }
         }
 
-        ComponentRender(lineBuffer.toVector, controls, cursorPlacements)
+        ComponentRender(
+          lineBuffer.toVector,
+          controls,
+          cursorPlacements,
+          DocumentMetadata(documentMarkers)
+        )
     result.validated(terminalWidth)
+
+  private def markerIntersectsOverlay(
+      marker: DocumentMarker,
+      overlayRow: Int,
+      layout: ResolvedOverlay,
+      overlayHeight: Int
+  ): Boolean =
+    val position = marker.position
+    position.row >= overlayRow && position.row < overlayRow + overlayHeight &&
+    position.column >= layout.col && position.column <= layout.col + layout.width
 
   private def cursorIntersectsOverlay(
       placement: CursorPlacement,

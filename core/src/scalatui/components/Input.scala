@@ -7,7 +7,9 @@ import scalatui.core.{
   CursorPlacement,
   FakeCursorRender,
   Focusable,
-  InputResult
+  InputResult,
+  ContextualComponent,
+  TUIContext
 }
 import scalatui.editing.{KillRing, UndoStack, WordNavigation}
 import scalatui.syntax.Equality.*
@@ -32,27 +34,36 @@ import scalatui.unicode.Unicode
 final class Input(
     initialValue: String = "",
     keybindings: KeybindingManager = KeybindingManager()
-) extends Component, Focusable:
-  var onSubmit: String => Unit = _ => ()
-  private var currentValue     = initialValue
-  private var cursorCluster    = Unicode.graphemeClusters(initialValue).length
-  private var isFocused        = false
-  private var pasteSession     = Option.empty[Input.PasteSession]
-  private val undoStack        = UndoStack[Input.State]()
-  private val killRing         = KillRing()
-  private var lastAction       = Option.empty[Input.Action]
-  private var yankBaseState    = Option.empty[Input.State]
+) extends Component, Focusable, ContextualComponent:
+  private val stateBoundary  = ComponentStateBoundary()
+  private var context        = Option.empty[TUIContext]
+  private var submitCallback = (_: String) => ()
+  private var currentValue   = initialValue
+  private var cursorCluster  = Unicode.graphemeClusters(initialValue).length
+  private var isFocused      = false
+  private var pasteSession   = Option.empty[Input.PasteSession]
+  private val undoStack      = UndoStack[Input.State]()
+  private val killRing       = KillRing()
+  private var lastAction     = Option.empty[Input.Action]
+  private var yankBaseState  = Option.empty[Input.State]
 
-  def value: String = pasteSession.fold(currentValue)(_.value)
+  def onSubmit: String => Unit                = stateBoundary(submitCallback)
+  def onSubmit_=(value: String => Unit): Unit = stateBoundary { submitCallback = value }
 
-  def setValue(value: String): Unit =
+  def value: String = stateBoundary(pasteSession.fold(currentValue)(_.value))
+
+  override def tuiContext_=(value: Option[TUIContext]): Unit =
+    stateBoundary.transitionContext(context, value) { _ => context = value }
+
+  def setValue(value: String): Unit = stateBoundary {
     pasteSession = None
     currentValue = value
     cursorCluster = Unicode.graphemeClusters(value).length
     resetAction()
+  }
 
   /** Undo the most recent editing snapshot, returning whether state changed. */
-  def undo(): Boolean =
+  def undo(): Boolean = stateBoundary {
     finishPaste()
     undoStack.pop() match
       case Some(Input.State(value, cursor)) =>
@@ -61,6 +72,7 @@ final class Input(
         resetAction()
         true
       case None                             => false
+  }
 
   /**
    * Insert the most recent killed text and retain the exact pre-yank state for yank-pop.
@@ -68,7 +80,7 @@ final class Input(
    * @return
    *   whether state changed
    */
-  def yank(): Boolean =
+  def yank(): Boolean = stateBoundary {
     finishPaste()
     killRing.peek match
       case Some(text) =>
@@ -79,9 +91,10 @@ final class Input(
         yankBaseState = Some(base)
         true
       case None       => false
+  }
 
   /** Replace the most recent yank from its exact pre-yank state with the next kill-ring entry. */
-  def yankPop(): Boolean =
+  def yankPop(): Boolean = stateBoundary {
     finishPaste()
     if !lastAction.contains(Input.Action.Yank) || killRing.length <= 1 then false
     else
@@ -95,44 +108,48 @@ final class Input(
           lastAction = Some(Input.Action.Yank)
           yankBaseState = Some(base)
           true
+  }
 
-  override def focused: Boolean                = isFocused
-  override def focused_=(value: Boolean): Unit = isFocused = value
+  override def focused: Boolean                = stateBoundary(isFocused)
+  override def focused_=(value: Boolean): Unit = stateBoundary { isFocused = value }
 
   override def handleInput(input: TerminalInput): Unit =
     handleInputResult(input)
     ()
 
   override def handleInputResult(input: TerminalInput): InputResult =
-    input match
-      case TerminalInput.PasteStart        =>
-        val finalized = finishPaste()
-        startPaste()
-        if finalized.exposedChanged then InputResult.Render else InputResult.NoRender
-      case TerminalInput.PasteChunk(chunk) =>
-        pasteSession match
-          case Some(session) =>
-            val acceptedBefore = session.acceptedCharacterCount
-            session.append(chunk)
-            if session.acceptedCharacterCount !== acceptedBefore then InputResult.Render
-            else InputResult.NoRender
-          case None          => InputResult.Ignored
-      case TerminalInput.PasteEnd          =>
-        if finishPaste().exposedChanged then InputResult.Render else InputResult.NoRender
-      case _                               =>
-        val finalized = finishPaste()
-        val result    = handleNonPasteInput(input)
-        if finalized.exposedChanged || result === InputResult.Render then InputResult.Render
-        else if finalized.hadSession && result === InputResult.Ignored then InputResult.NoRender
-        else result
+    stateBoundary.transition { effects =>
+      input match
+        case TerminalInput.PasteStart        =>
+          val finalized = finishPaste()
+          startPaste()
+          if finalized.exposedChanged then InputResult.Render else InputResult.NoRender
+        case TerminalInput.PasteChunk(chunk) =>
+          pasteSession match
+            case Some(session) =>
+              val acceptedBefore = session.acceptedCharacterCount
+              session.append(chunk)
+              if session.acceptedCharacterCount !== acceptedBefore then InputResult.Render
+              else InputResult.NoRender
+            case None          => InputResult.Ignored
+        case TerminalInput.PasteEnd          =>
+          if finishPaste().exposedChanged then InputResult.Render else InputResult.NoRender
+        case _                               =>
+          val finalized = finishPaste()
+          val result    = handleNonPasteInput(input, effects)
+          if finalized.exposedChanged || result === InputResult.Render then InputResult.Render
+          else if finalized.hadSession && result === InputResult.Ignored then InputResult.NoRender
+          else result
+    }
 
   override def render(width: Int): ComponentRender =
-    val cs            = clusters
-    val visibleCursor = pasteSession.fold(cursorCluster)(_.cursorCluster)
-    val before        = cs.take(visibleCursor).mkString
-    val at            = cs.lift(visibleCursor).getOrElse(" ")
-    val after         = cs.drop(visibleCursor + 1).mkString
-    if isFocused then
+    val (cs, visibleCursor, focusedSnapshot) = stateBoundary {
+      (clusters, pasteSession.fold(cursorCluster)(_.cursorCluster), isFocused)
+    }
+    val before                               = cs.take(visibleCursor).mkString
+    val at                                   = cs.lift(visibleCursor).getOrElse(" ")
+    val after                                = cs.drop(visibleCursor + 1).mkString
+    if focusedSnapshot then
       val rendered = FakeCursorRender.render(before, at, after, width)
       ComponentRender(
         Vector(rendered.line),
@@ -166,7 +183,7 @@ final class Input(
           resetAction()
         Input.PasteFinalization(hadSession = true, exposedChanged = exposedChanged)
 
-  private def handleNonPasteInput(input: TerminalInput): InputResult =
+  private def handleNonPasteInput(input: TerminalInput, effects: ComponentEffects): InputResult =
     if keybindings.matches(input, KeybindingCommand.EditorUndo) then
       mutationResult(undo())
     else if keybindings.matches(input, KeybindingCommand.EditorDeleteWordBackward) then
@@ -198,7 +215,9 @@ final class Input(
     else if keybindings.matches(input, KeybindingCommand.EditorCursorLineEnd) then
       mutationResult(moveToEnd())
     else if keybindings.matches(input, KeybindingCommand.InputSubmit) then
-      onSubmit(currentValue)
+      val submitted = currentValue
+      val callback  = submitCallback
+      effects.add(() => callback(submitted))
       InputResult.Render
     else if keybindings.matches(input, KeybindingCommand.InputNewLine) then
       mutationResult(insert("\n"))

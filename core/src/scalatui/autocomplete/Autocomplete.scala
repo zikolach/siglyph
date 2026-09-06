@@ -62,7 +62,12 @@ final case class CompletionRequest(
 /** Resulting editor state after applying a completion. */
 final case class CompletionResult(lines: Vector[String], cursor: EditorCursor) derives CanEqual
 
-/** Cancellable handle for an in-flight autocomplete lookup. */
+/**
+ * Cancellable handle for an in-flight autocomplete lookup.
+ *
+ * Editor invokes `cancel` after releasing its component state boundary. Implementations may call
+ * application code or complete other work synchronously.
+ */
 trait AutocompleteRequestHandle:
   def cancel(): Unit
 
@@ -75,7 +80,13 @@ trait AutocompleteCallback:
   def complete(result: Option[AutocompleteSuggestions]): Unit
   def fail(error: Throwable): Unit
 
-/** Autocomplete provider contract with an async-capable cancellable callback boundary. */
+/**
+ * Autocomplete provider contract with an async-capable cancellable callback boundary.
+ *
+ * Editor invokes both methods without holding component, TUI lifecycle, or terminal-write locks.
+ * `requestSuggestions` may complete its callback before returning. Later callback completion is
+ * accepted only when the request generation and captured editor state remain current.
+ */
 trait AutocompleteProvider:
   def requestSuggestions(
       request: AutocompleteRequest,

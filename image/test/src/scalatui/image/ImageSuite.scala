@@ -1,15 +1,19 @@
 package scalatui.image
 
 import scalatui.ansi.Ansi
-import scalatui.components.Box
+import scalatui.components.{Box, ScrollView, StackEntry, StackEntryOptions, VStack}
 import scalatui.core.{
   AppendResult,
   Component,
+  ComponentRender,
   Container,
+  KittyImageRetentionOptions,
   NormalResizeClearPolicy,
   OverlayOptions,
+  OverlaySize,
   TUI,
-  TUIOptions
+  TUIOptions,
+  TerminalControlPlacement
 }
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{
@@ -21,17 +25,22 @@ import scalatui.terminal.{
   ImageProtocol,
   ImageRenderOptions,
   TerminalCapabilities,
+  TerminalCapabilityOverride,
+  TerminalCapabilityOverrides,
   TerminalImageProtocol,
   TerminalInput,
   TerminalInputChunk,
   TerminalRawKind,
   TerminalRawTermination,
+  Terminal,
   TerminalRenderControl,
   TerminalRenderControlEncoder,
   VirtualTerminal
 }
 
 import java.nio.file.Files
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicReference
 
 class ImageSuite extends munit.FunSuite:
   private val imageCapabilities = TerminalCapabilities(
@@ -147,6 +156,79 @@ class ImageSuite extends munit.FunSuite:
 
     assertEquals(direct.render(1).lines.length, 2)
     assertEquals(nested.render(1).lines.length, 2)
+
+  test("session-aware image uses forced attached protocol and detached fallback"):
+    val image = Image.withSessionCapabilities(payload("AAAA"), ImageDimensions(1, 1))
+    assertEquals(image.render(10).controls, Vector.empty)
+
+    val terminal = VirtualTerminal(10, 10)
+    val tui      = TUI(
+      terminal,
+      TUIOptions(capabilityOverrides =
+        TerminalCapabilityOverrides(
+          images = TerminalCapabilityOverride.Forced(ImageProtocol.Kitty)
+        )
+      )
+    )
+    tui.addChild(image)
+    tui.start()
+
+    assert(terminal.output.contains("\u001b_Ga=T"), terminal.output)
+    tui.stop()
+
+  test("session Disabled is a hard image ceiling while other fixed choices remain local"):
+    val disabledImage = runtimeImage()
+    val disabledTerm  = VirtualTerminal(10, 10)
+    val disabledTui   = TUI(
+      disabledTerm,
+      TUIOptions(capabilityOverrides =
+        TerminalCapabilityOverrides(
+          images = TerminalCapabilityOverride.Disabled
+        )
+      )
+    )
+    disabledTui.addChild(disabledImage)
+    disabledTui.start()
+    assert(!disabledTerm.output.contains("\u001b_G"), disabledTerm.output)
+    disabledTui.stop()
+
+    val fixedImage = runtimeImage()
+    val forcedTerm = VirtualTerminal(10, 10)
+    val forcedTui  = TUI(
+      forcedTerm,
+      TUIOptions(capabilityOverrides =
+        TerminalCapabilityOverrides(
+          images = TerminalCapabilityOverride.Forced(ImageProtocol.ITerm2)
+        )
+      )
+    )
+    forcedTui.addChild(fixedImage)
+    forcedTui.start()
+    assert(forcedTerm.output.contains("\u001b_Ga=T"), forcedTerm.output)
+    assert(!forcedTerm.output.contains("\u001b]1337;File="), forcedTerm.output)
+    forcedTui.stop()
+
+  test("concurrent session-aware images keep protocol output isolated"):
+    val kittyTerminal = VirtualTerminal(10, 10)
+    val itermTerminal = VirtualTerminal(10, 10)
+    val kittyTui      = imageSession(kittyTerminal, ImageProtocol.Kitty)
+    val itermTui      = imageSession(itermTerminal, ImageProtocol.ITerm2)
+    val release       = CountDownLatch(1)
+    val failure       = AtomicReference[Throwable | Null](null)
+    val kittyThread   = Thread(() => runImageSession(kittyTui, release, failure))
+    val itermThread   = Thread(() => runImageSession(itermTui, release, failure))
+
+    kittyThread.start()
+    itermThread.start()
+    release.countDown()
+    kittyThread.join()
+    itermThread.join()
+    Option(failure.get()).foreach(throw _)
+
+    assert(kittyTerminal.output.contains("\u001b_Ga=T"), kittyTerminal.output)
+    assert(!kittyTerminal.output.contains("\u001b]1337;File="), kittyTerminal.output)
+    assert(itermTerminal.output.contains("\u001b]1337;File="), itermTerminal.output)
+    assert(!itermTerminal.output.contains("\u001b_Ga=T"), itermTerminal.output)
 
   test("detached append image uses owning TUI cell dimensions and component capabilities"):
     val retained = new Component:
@@ -737,9 +819,394 @@ class ImageSuite extends munit.FunSuite:
 
     assertEquals(renderedRowBreaksBefore(terminal.output, "after"), expectedRows)
 
+  test("fullscreen sticky stack and scroll clips omit partial and fully clipped images"):
+    val document = MutableProtocolDocument(
+      rowCount = 5,
+      Vector(TerminalControlPlacement(1, 0, kittyControl(100, "AAAA", 2, 2)))
+    )
+    val scroll   = ScrollView(document)
+    val root     = VStack(Seq(
+      StackEntry(scroll, StackEntryOptions(grow = 1, minSize = 1)),
+      StackEntry(FixedLine("edit>"), StackEntryOptions(basis = Some(1), maxSize = Some(1)))
+    ))
+    val terminal = VirtualTerminal(4, 3)
+    val tui      = TUI.fullscreen(terminal, root)
+
+    tui.start()
+    assert(!terminal.output.contains("a=T"), terminal.output)
+
+    terminal.clearWrites()
+    scroll.scrollTo(1)
+    tui.flushRender()
+    assertEquals(count("a=T", terminal.output), 1)
+
+    terminal.clearWrites()
+    scroll.scrollTo(3)
+    tui.flushRender()
+    assert(!terminal.output.contains("a=T"), terminal.output)
+    assert(terminal.output.contains("a=d,d=i,i=100"), terminal.output)
+
+    terminal.clearWrites()
+    scroll.scrollTo(1)
+    tui.flushRender()
+    assert(terminal.output.contains("a=p,i=100"), terminal.output)
+    assert(!terminal.output.contains(";AAAA"), terminal.output)
+    tui.stop()
+
+  test("nested scrolling applies every clip before image encoding"):
+    val document = MutableProtocolDocument(
+      rowCount = 3,
+      Vector(TerminalControlPlacement(1, 0, kittyControl(101, "AAAA", 1, 2)))
+    )
+    val inner    = ScrollView(document)
+    val body     = VStack(Seq(
+      StackEntry(FixedLine("head"), StackEntryOptions(basis = Some(1))),
+      StackEntry(inner, StackEntryOptions(basis = Some(2), maxSize = Some(2))),
+      StackEntry(FixedLine("tail"), StackEntryOptions(basis = Some(1)))
+    ))
+    val outer    = ScrollView(body)
+
+    val clipped = scalatui.core.ViewportLayoutEngine.layout(outer, 4, 2)
+    assertEquals(clipped.render.controls, Vector.empty)
+
+    inner.scrollTo(1)
+    outer.scrollTo(1)
+    val visible = scalatui.core.ViewportLayoutEngine.layout(outer, 4, 2)
+    assertEquals(
+      visible.render.controls.map(_.control.details).collect {
+        case kitty: TerminalRenderControl.Details.KittyImage => kitty.imageId
+      },
+      Vector(101)
+    )
+
+  test("overlay occlusion removes a Kitty footprint and retained return uses placement"):
+    val document = MutableProtocolDocument(
+      rowCount = 3,
+      Vector(TerminalControlPlacement(0, 0, kittyControl(102, "AAAA", 2, 2)))
+    )
+    val terminal = VirtualTerminal(4, 3)
+    val tui      = TUI.fullscreen(terminal, document)
+    tui.start()
+
+    terminal.clearWrites()
+    val overlay = tui.showOverlay(
+      FixedLine("x"),
+      scalatui.core.OverlayOptions(
+        width = Some(OverlaySize.Absolute(1)),
+        row = Some(OverlaySize.Absolute(1)),
+        col = Some(OverlaySize.Absolute(0)),
+        focusCapturing = false
+      )
+    )
+    tui.flushRender()
+    assert(terminal.output.contains("a=d,d=i,i=102"), terminal.output)
+    assert(!terminal.output.contains("a=T"), terminal.output)
+
+    terminal.clearWrites()
+    overlay.hide()
+    tui.flushRender()
+    assert(terminal.output.contains("a=p,i=102"), terminal.output)
+    assert(!terminal.output.contains(";AAAA"), terminal.output)
+    tui.stop()
+
+  test("partial iTerm2 images are omitted and returning images retransmit safely"):
+    val document = MutableProtocolDocument(
+      rowCount = 4,
+      Vector(TerminalControlPlacement(1, 0, itermControl("AAAA", 1, 2)))
+    )
+    val scroll   = ScrollView(document)
+    val terminal = VirtualTerminal(4, 2)
+    val tui      = TUI.fullscreen(terminal, scroll)
+
+    tui.start()
+    assert(!terminal.output.contains("1337;File="), terminal.output)
+
+    terminal.clearWrites()
+    scroll.scrollTo(1)
+    tui.flushRender()
+    assertEquals(count("1337;File=", terminal.output), 1)
+
+    terminal.clearWrites()
+    scroll.scrollTo(2)
+    tui.flushRender()
+    assert(!terminal.output.contains("1337;File="), terminal.output)
+
+    terminal.clearWrites()
+    scroll.scrollTo(1)
+    tui.flushRender()
+    assertEquals(count("1337;File=", terminal.output), 1)
+    tui.stop()
+
+  test("Kitty retention applies deterministic count and generation age eviction"):
+    val countDocument = MutableProtocolDocument(
+      1,
+      Vector(TerminalControlPlacement(0, 0, kittyControl(110, "AAAA", 1, 1)))
+    )
+    val countTerminal = VirtualTerminal(2, 1)
+    val countTui      = TUI.fullscreen(
+      countTerminal,
+      countDocument,
+      TUIOptions(kittyImageRetention = KittyImageRetentionOptions(1, 8))
+    )
+    countTui.start()
+    countDocument.controls = Vector(TerminalControlPlacement(0, 0, kittyControl(111, "AQID", 1, 1)))
+    countTui.requestRender()
+    countTui.flushRender()
+    assert(countTerminal.output.contains("a=d,d=I,i=110"), countTerminal.output)
+    countTerminal.clearWrites()
+    countDocument.controls = Vector(TerminalControlPlacement(0, 0, kittyControl(110, "AAAA", 1, 1)))
+    countTui.requestRender()
+    countTui.flushRender()
+    assert(countTerminal.output.contains(";AAAA"), countTerminal.output)
+    assert(!countTerminal.output.contains("a=p,i=110"), countTerminal.output)
+    countTui.stop()
+
+    val ageDocument = MutableProtocolDocument(
+      2,
+      Vector(TerminalControlPlacement(0, 0, kittyControl(112, "AAAA", 1, 1)))
+    )
+    val ageScroll   = ScrollView(ageDocument)
+    val ageTerminal = VirtualTerminal(2, 1)
+    val ageTui      = TUI.fullscreen(
+      ageTerminal,
+      ageScroll,
+      TUIOptions(kittyImageRetention = KittyImageRetentionOptions(2, 1))
+    )
+    ageTui.start()
+    ageScroll.scrollTo(1)
+    ageTui.flushRender()
+    ageTui.requestRender()
+    ageTui.flushRender()
+    assert(ageTerminal.output.contains("a=d,d=I,i=112"), ageTerminal.output)
+    ageTerminal.clearWrites()
+    ageScroll.scrollTo(0)
+    ageTui.flushRender()
+    assert(ageTerminal.output.contains(";AAAA"), ageTerminal.output)
+    assert(!ageTerminal.output.contains("a=p,i=112"), ageTerminal.output)
+    ageTui.stop()
+
+  test("Kitty ownership retires acknowledged historical IDs across many generations"):
+    val document = MutableProtocolDocument(
+      1,
+      Vector(TerminalControlPlacement(0, 0, kittyControl(200, "AAAA", 1, 1)))
+    )
+    val terminal = VirtualTerminal(2, 1)
+    val tui      = TUI.fullscreen(
+      terminal,
+      document,
+      TUIOptions(kittyImageRetention = KittyImageRetentionOptions(1, 8))
+    )
+    tui.start()
+    (201 to 300).foreach { imageId =>
+      document.controls = Vector(TerminalControlPlacement(
+        0,
+        0,
+        kittyControl(imageId, "AAAA", 1, 1)
+      ))
+      tui.requestRender()
+      tui.flushRender()
+    }
+    terminal.clearWrites()
+
+    tui.stop()
+
+    assertEquals(count("a=d,d=I", terminal.output), 1)
+    assert(terminal.output.contains("a=d,d=I,i=300"), terminal.output)
+    assert(!terminal.output.contains("i=200"), terminal.output)
+
+  test("failed Kitty eviction cleanup remains pending for stop cleanup retry"):
+    val document = MutableProtocolDocument(
+      1,
+      Vector(TerminalControlPlacement(0, 0, kittyControl(310, "AAAA", 1, 1)))
+    )
+    val delegate = VirtualTerminal(2, 1)
+    val terminal = FailOnceCleanupTerminal(delegate, imageId = 310)
+    val tui      = TUI.fullscreen(
+      terminal,
+      document,
+      TUIOptions(kittyImageRetention = KittyImageRetentionOptions(1, 8))
+    )
+    tui.start()
+    document.controls = Vector(TerminalControlPlacement(
+      0,
+      0,
+      kittyControl(311, "AAAA", 1, 1)
+    ))
+
+    tui.requestRender()
+    tui.flushRender()
+
+    assertEquals(terminal.failures, 1)
+    assertEquals(count("a=d,d=I,i=310", delegate.output), 1)
+    assertEquals(delegate.isRunning, false)
+
+  test("Kitty content and resize changes clean old data before retransmission"):
+    val document = MutableSizedKitty(120, "AAAA")
+    val terminal = VirtualTerminal(3, 1)
+    val tui      = TUI.fullscreen(terminal, document)
+    tui.start()
+
+    terminal.clearWrites()
+    document.value = "AQID"
+    tui.requestRender()
+    tui.flushRender()
+    assert(terminal.output.contains("a=d,d=I,i=120"), terminal.output)
+    assert(terminal.output.contains(";AQID"), terminal.output)
+
+    terminal.clearWrites()
+    terminal.resize(2, 1)
+    assert(terminal.output.contains("a=d,d=I,i=120"), terminal.output)
+    assert(terminal.output.contains("c=2"), terminal.output)
+    tui.stop()
+
+  test("fullscreen image protocols remain isolated between concurrent TUI sessions"):
+    val kittyTerminal = VirtualTerminal(2, 1)
+    val itermTerminal = VirtualTerminal(2, 1)
+    val kittyTui      = TUI.fullscreen(
+      kittyTerminal,
+      Image.withSessionCapabilities(payload("AAAA"), ImageDimensions(1, 1)),
+      TUIOptions(capabilityOverrides =
+        TerminalCapabilityOverrides(
+          images = TerminalCapabilityOverride.Forced(ImageProtocol.Kitty)
+        )
+      )
+    )
+    val itermTui      = TUI.fullscreen(
+      itermTerminal,
+      Image.withSessionCapabilities(payload("AAAA"), ImageDimensions(1, 1)),
+      TUIOptions(capabilityOverrides =
+        TerminalCapabilityOverrides(
+          images = TerminalCapabilityOverride.Forced(ImageProtocol.ITerm2)
+        )
+      )
+    )
+    val release       = CountDownLatch(1)
+    val failure       = AtomicReference[Throwable | Null](null)
+    val kittyThread   = Thread(() => runImageSession(kittyTui, release, failure))
+    val itermThread   = Thread(() => runImageSession(itermTui, release, failure))
+
+    kittyThread.start()
+    itermThread.start()
+    release.countDown()
+    kittyThread.join()
+    itermThread.join()
+    Option(failure.get()).foreach(throw _)
+
+    assert(kittyTerminal.output.contains("a=T"), kittyTerminal.output)
+    assert(!kittyTerminal.output.contains("1337;File="), kittyTerminal.output)
+    assert(itermTerminal.output.contains("1337;File="), itermTerminal.output)
+    assert(!itermTerminal.output.contains("a=T"), itermTerminal.output)
+
+  test("fullscreen stop cleanup is idempotent and cleanup failure redacts image data"):
+    val delegate = VirtualTerminal(2, 1)
+    val terminal = CleanupFailingTerminal(delegate)
+    val document = MutableProtocolDocument(
+      1,
+      Vector(TerminalControlPlacement(0, 0, kittyControl(130, "c2Vuc2l0aXZl", 1, 1)))
+    )
+    val tui      = TUI.fullscreen(terminal, document)
+    tui.start()
+
+    val failure = intercept[RuntimeException](tui.stop())
+    tui.stop()
+
+    assertEquals(failure.getMessage, "Kitty cleanup failed")
+    assert(!failure.toString.contains("c2Vuc2l0aXZl"), failure.toString)
+    assertEquals(count("a=d,d=I,i=130", delegate.output), 0)
+    assertEquals(count(TUI.AlternateScreenExit, delegate.output), 1)
+
   private final class FixedLine(var value: String) extends Component:
     override def render(width: Int): scalatui.core.ComponentRender =
       scalatui.core.ComponentRender.text(value)
+
+  private final class MutableProtocolDocument(
+      var rowCount: Int,
+      var controls: Vector[TerminalControlPlacement]
+  ) extends Component:
+    override def render(width: Int): ComponentRender =
+      ComponentRender(Vector.fill(rowCount)(""), controls, Vector.empty)
+
+  private final class MutableSizedKitty(imageId: Int, var value: String) extends Component:
+    override def render(width: Int): ComponentRender = ComponentRender(
+      Vector(""),
+      Vector(TerminalControlPlacement(0, 0, kittyControl(imageId, value, width, 1))),
+      Vector.empty
+    )
+
+  private final class FailOnceCleanupTerminal(delegate: VirtualTerminal, imageId: Int)
+      extends Terminal:
+    private var failed = false
+    def failures: Int  = if failed then 1 else 0
+
+    override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
+      delegate.start(onInput, onResize)
+    override def stop(): Unit                                                      = delegate.stop()
+    override def write(data: String): Unit                                         =
+      if !failed && data.contains(s"a=d,d=I,i=$imageId") then
+        failed = true
+        throw RuntimeException("transient Kitty cleanup failure")
+      else delegate.write(data)
+    override def columns: Int                                                      = delegate.columns
+    override def rows: Int                                                         = delegate.rows
+    override def moveBy(lines: Int): Unit                                          = delegate.moveBy(lines)
+    override def hideCursor(): Unit                                                = delegate.hideCursor()
+    override def showCursor(): Unit                                                = delegate.showCursor()
+    override def clearLine(): Unit                                                 = delegate.clearLine()
+    override def clearFromCursor(): Unit                                           = delegate.clearFromCursor()
+    override def clearScreen(): Unit                                               = delegate.clearScreen()
+
+  private final class CleanupFailingTerminal(delegate: VirtualTerminal) extends Terminal:
+    override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
+      delegate.start(onInput, onResize)
+    override def stop(): Unit                                                      = delegate.stop()
+    override def write(data: String): Unit                                         =
+      if data.contains("a=d,d=I,i=130") then throw RuntimeException("Kitty cleanup failed")
+      else delegate.write(data)
+    override def columns: Int                                                      = delegate.columns
+    override def rows: Int                                                         = delegate.rows
+    override def moveBy(lines: Int): Unit                                          = delegate.moveBy(lines)
+    override def hideCursor(): Unit                                                = delegate.hideCursor()
+    override def showCursor(): Unit                                                = delegate.showCursor()
+    override def clearLine(): Unit                                                 = delegate.clearLine()
+    override def clearFromCursor(): Unit                                           = delegate.clearFromCursor()
+    override def clearScreen(): Unit                                               = delegate.clearScreen()
+
+  private def kittyControl(
+      imageId: Int,
+      value: String,
+      width: Int,
+      rows: Int
+  ): TerminalRenderControl =
+    TerminalImageProtocol.encodeKitty(payload(value), imageId, width, rows)
+
+  private def itermControl(value: String, width: Int, rows: Int): TerminalRenderControl =
+    TerminalImageProtocol.encodeITerm2(payload(value), None, width, rows)
+
+  private def count(value: String, text: String): Int =
+    text.sliding(value.length).count(_ === value)
+
+  private def imageSession(terminal: VirtualTerminal, protocol: ImageProtocol): TUI =
+    val tui = TUI(
+      terminal,
+      TUIOptions(capabilityOverrides =
+        TerminalCapabilityOverrides(
+          images = TerminalCapabilityOverride.Forced(protocol)
+        )
+      )
+    )
+    tui.addChild(Image.withSessionCapabilities(payload("AAAA"), ImageDimensions(1, 1)))
+    tui
+
+  private def runImageSession(
+      tui: TUI,
+      release: CountDownLatch,
+      failure: AtomicReference[Throwable | Null]
+  ): Unit =
+    try
+      release.await()
+      tui.start()
+      tui.stop()
+    catch case error: Throwable => failure.compareAndSet(null, error)
 
   private def runtimeImage(): Image = Image(
     payload("AAAA"),

@@ -1,6 +1,7 @@
 package scalatui.extras
 
 import scalatui.ansi.Ansi
+import scalatui.components.ComponentStateBoundary
 import scalatui.core.{Component, ComponentRender}
 import scalatui.syntax.Equality.*
 
@@ -34,56 +35,73 @@ final class ExpandableSection(
     theme: ExpandableSectionTheme = ExpandableSectionTheme()
 ) extends Component
     with Expandable:
+  private val stateBoundary = ComponentStateBoundary()
   private var expandedState = initiallyExpanded
   private var cachedWidth   = -1
   private var cachedState   = !initiallyExpanded
   private var cachedContent = SectionContent("", "", None)
   private var cachedLines   = Vector.empty[String]
+  private var revision      = 0L
 
   /** Current expansion state. */
-  def expanded: Boolean = expandedState
+  def expanded: Boolean = stateBoundary(expandedState)
 
-  override def setExpanded(expanded: Boolean): Unit =
+  override def setExpanded(expanded: Boolean): Unit = stateBoundary {
     if expandedState !== expanded then
       expandedState = expanded
-      invalidate()
+      invalidateLocked()
+  }
 
-  override def invalidate(): Unit =
+  override def invalidate(): Unit = stateBoundary(invalidateLocked())
+
+  override def render(width: Int): ComponentRender =
+    val (expandedSnapshot, token) = stateBoundary((expandedState, revision))
+    val content                   = SectionContent(
+      title(),
+      if expandedSnapshot then expandedBody() else collapsedBody(),
+      visibleHint(expandedSnapshot).map(provider => provider())
+    )
+    val cached                    = stateBoundary {
+      Option.when(
+        cachedWidth === width && cachedState === expandedSnapshot && cachedContent === content
+      )(cachedLines)
+    }
+    ComponentRender.text(cached.getOrElse {
+      val rendered = renderSection(content, expandedSnapshot, width)
+      stateBoundary {
+        if revision === token then
+          cachedWidth = width
+          cachedState = expandedSnapshot
+          cachedContent = content
+          cachedLines = rendered
+      }
+      rendered
+    })
+
+  private def invalidateLocked(): Unit =
+    revision += 1
     cachedWidth = -1
     cachedLines = Vector.empty
 
-  override def render(width: Int): ComponentRender = ComponentRender.text(renderLines(width))
-
-  private def renderLines(width: Int): Vector[String] =
-    val content = SectionContent(
-      title(),
-      if expandedState then expandedBody() else collapsedBody(),
-      visibleHint.map(provider => provider())
-    )
-    if cachedWidth === width && cachedState === expandedState && cachedContent === content then
-      cachedLines
-    else
-      cachedWidth = width
-      cachedState = expandedState
-      cachedContent = content
-      cachedLines = renderSection(content, width)
-      cachedLines
-
-  private def visibleHint: Option[() => String] =
+  private def visibleHint(expandedSnapshot: Boolean): Option[() => String] =
     hintText.filter(_ =>
       hintVisibility match
         case ExpansionHintVisibility.Always        => true
-        case ExpansionHintVisibility.CollapsedOnly => !expandedState
-        case ExpansionHintVisibility.ExpandedOnly  => expandedState
+        case ExpansionHintVisibility.CollapsedOnly => !expandedSnapshot
+        case ExpansionHintVisibility.ExpandedOnly  => expandedSnapshot
     )
 
-  private def renderSection(content: SectionContent, width: Int): Vector[String] =
+  private def renderSection(
+      content: SectionContent,
+      expandedSnapshot: Boolean,
+      width: Int
+  ): Vector[String] =
     val safeWidth   = math.max(0, width)
     val safePadding = math.max(0, paddingX)
     val innerWidth  = math.max(0, safeWidth - safePadding * 2)
     val vertical    = Vector.fill(math.max(0, paddingY))(" ".repeat(safeWidth))
     val titleLines  = renderBlock(content.title, innerWidth, safePadding, safeWidth, theme.title)
-    val bodyStyle   = if expandedState then theme.expandedBody else theme.collapsedBody
+    val bodyStyle   = if expandedSnapshot then theme.expandedBody else theme.collapsedBody
     val bodyLines   = renderBlock(content.body, innerWidth, safePadding, safeWidth, bodyStyle)
     val hintLines   =
       content.hint.toVector.flatMap(renderBlock(_, innerWidth, safePadding, safeWidth, theme.hint))
