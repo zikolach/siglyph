@@ -68,46 +68,6 @@ jobs:
       - name: Package jars
         run: mill __.jar
 
-      - name: Collect packaged jars
-        run: |
-          set -euo pipefail
-          rm -rf artifacts/jars
-          mkdir -p artifacts/jars
-          for module in \
-            core \
-            coreNative \
-            terminalJvm \
-            terminalNative \
-            markdown \
-            markdownNative \
-            image \
-            imageNative \
-            extras \
-            extrasNative \
-            demo \
-            keyTester \
-            interactiveDemo \
-            interactiveDemoNative \
-            interactiveJvmDemo \
-            interactiveNativeDemo
-          do
-            src="out/${module}/jar.dest/out.jar"
-            if [ -f "${src}" ]; then
-              cp "${src}" "artifacts/jars/${module}.jar"
-            else
-              echo "Missing expected jar: ${src}" >&2
-              exit 1
-            fi
-          done
-          ls -lh artifacts/jars
-
-      - name: Upload jar artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: siglyph-jars
-          path: artifacts/jars/*.jar
-          if-no-files-found: error
-
   macos-terminal-conformance:
     name: macOS terminal conformance
     runs-on: macos-latest
