@@ -93,6 +93,13 @@ enum TUIScreenMode derives CanEqual:
  * @param kittyImageRetention
  *   Per-TUI count and accepted-generation bounds for fullscreen Kitty offscreen reuse. This option
  *   does not affect normal-screen or append-only image ownership.
+ * @param normalResizeRecovery
+ *   Optional synchronous provider for reconstructing a bounded durable text tail after a
+ *   geometry-changing normal-screen preserve-scrollback resize. Its context includes previous and
+ *   current geometry with a strict budget bounded by both viewport capacities. The provider is
+ *   retryable Render work and receives no component, cursor, typed-control, or raw-terminal
+ *   authority. Configuring it with alternate screen or scrollback-clearing resize policy fails
+ *   before terminal startup.
  */
 final case class TUIOptions(
     hardwareCursorPositioning: Boolean = false,
@@ -105,7 +112,8 @@ final case class TUIOptions(
     mouseGestures: MouseGestureOptions = MouseGestureOptions(),
     keybindings: KeybindingManager = KeybindingManager(),
     hostClipboard: Option[HostClipboard] = None,
-    kittyImageRetention: KittyImageRetentionOptions = KittyImageRetentionOptions()
+    kittyImageRetention: KittyImageRetentionOptions = KittyImageRetentionOptions(),
+    normalResizeRecovery: Option[NormalResizeRecoveryProvider] = None
 ) derives CanEqual
 
 object TUIOptions:
@@ -202,6 +210,8 @@ final class TUI(
   private var cleanupOwned                                                                   = false
   private var contextDetachScheduled                                                         = false
   private var resizeGeneration                                                               = 0L
+  private var committedRenderWidth                                                           = 0
+  private var committedRenderHeight                                                          = 0
   @volatile private var latestOverlayVisibility                                              = false
   private var queryWriteReservations                                                         = 0
   private var nextQueryFlightId                                                              = 0L
@@ -215,8 +225,10 @@ final class TUI(
   private var baseFocusedComponent: Option[Component]                                        = None
   private var exitRequested                                                                  = false
   private var renderRequested                                                                = false
-  private var forceRenderRequested                                                           = false
-  private var clearRequested                                                                 = false
+  private var genericForceRenderRequested                                                    = false
+  private var genericClearRequested                                                          = false
+  private var pendingResizeRecoveryGeneration                                                = Option.empty[Long]
+  private var pendingResizeInvalidation                                                      = false
   private var runtimeFailure                                                                 = Option.empty[Throwable]
   override private[scalatui] lazy val componentEffectCoordinator: ComponentEffectCoordinator =
     ComponentEffectCoordinator.runtime(
@@ -499,6 +511,7 @@ final class TUI(
     lifecycleLock.synchronized(inputListeners -= listener)
 
   def start(): Unit =
+    validateNormalResizeRecoveryOptions()
     var reattachRetainedContexts = false
     val shouldStart              = lifecycleLock.synchronized {
       if (lifecycleState !== TUI.LifecycleState.Stopped) || drainOwned then false
@@ -508,6 +521,9 @@ final class TUI(
         contextDetachScheduled = false
         exitRequested = false
         runtimeFailure = None
+        committedRenderWidth = 0
+        committedRenderHeight = 0
+        pendingResizeInvalidation = false
         currentTerminalCapabilities = TerminalCapabilities.resolve(
           TerminalCapabilities.detect(),
           terminalCapabilityOverrides
@@ -583,6 +599,18 @@ final class TUI(
           catch case cleanupFailure: Throwable => e.addSuppressed(cleanupFailure)
           throw runtimeFailure.getOrElse(e)
 
+  private def validateNormalResizeRecoveryOptions(): Unit =
+    options.normalResizeRecovery.foreach { _ =>
+      if rendererPolicy.isAlternateScreen then
+        throw IllegalArgumentException(
+          "Normal resize recovery requires normal-screen mode"
+        )
+      if options.normalResizeClearPolicy !== NormalResizeClearPolicy.PreserveScrollback then
+        throw IllegalArgumentException(
+          "Normal resize recovery requires preserve-scrollback resize policy"
+        )
+    }
+
   /** Start, wait for exit, and return only after deferred cleanup reaches `Stopped`. */
   def run(): Unit =
     try
@@ -632,8 +660,8 @@ final class TUI(
         lifecycleState === TUI.LifecycleState.Running
       then
         if force then
-          forceRenderRequested = true
-        if clear then clearRequested = true
+          genericForceRenderRequested = true
+        if clear then genericClearRequested = true
         renderRequested = true
     }
 
@@ -1128,19 +1156,23 @@ final class TUI(
     }
 
   private def publishResize(): Unit =
+    val width      = positiveDimension(terminal.columns)
+    val height     = positiveDimension(terminal.rows)
     val diagnostic = lifecycleLock.synchronized {
       resizeGeneration += 1
       if lifecycleState === TUI.LifecycleState.Running then
         renderRequested = true
-        forceRenderRequested = true
-        clearRequested = true
+        if (committedRenderWidth > 0) &&
+          ((width !== committedRenderWidth) || (height !== committedRenderHeight))
+        then pendingResizeInvalidation = true
+        pendingResizeRecoveryGeneration = Some(resizeGeneration)
         Some(resizeGeneration)
       else None
     }
     diagnostic.foreach { generation =>
       emitDiagnostic(TUIDiagnosticEvent.Resize(
-        positiveDimension(terminal.columns),
-        positiveDimension(terminal.rows),
+        width,
+        height,
         generation,
         options.screenMode
       ))
@@ -1193,25 +1225,26 @@ final class TUI(
             TUI.Work.Done
         }
         work match
-          case TUI.Work.Ingress(ingress)             => processIngress(ingress)
-          case TUI.Work.QueryCompletion(completion)  => processQueryCompletion(completion)
-          case TUI.Work.AppendCompletion(completion) => processAppendCompletion(completion)
-          case TUI.Work.ComponentEffect              =>
+          case TUI.Work.Ingress(ingress)                                            => processIngress(ingress)
+          case TUI.Work.QueryCompletion(completion)                                 => processQueryCompletion(completion)
+          case TUI.Work.AppendCompletion(completion)                                => processAppendCompletion(completion)
+          case TUI.Work.ComponentEffect                                             =>
             componentEffectCoordinator.runNextRuntimeBatch()
-          case TUI.Work.Structural(claimed)          => applyStructural(claimed)
-          case TUI.Work.Action(action)               =>
+          case TUI.Work.Structural(claimed)                                         => applyStructural(claimed)
+          case TUI.Work.Action(action)                                              =>
             try action()
             catch case error: Throwable => recordFailure(error)
-          case TUI.Work.Control(action)              => action()
-          case TUI.Work.Append(operation)            => processAppend(operation)
-          case TUI.Work.Render(force, clear)         => renderNow(force, clear)
-          case TUI.Work.Cleanup                      =>
+          case TUI.Work.Control(action)                                             => action()
+          case TUI.Work.Append(operation)                                           => processAppend(operation)
+          case TUI.Work.Render(force, clear, recoveryGeneration, resizeInvalidated) =>
+            renderNow(force, clear, recoveryGeneration, resizeInvalidated)
+          case TUI.Work.Cleanup                                                     =>
             emitDiagnostic(TUIDiagnosticEvent.Lifecycle(
               TUIDiagnosticLifecycleState.Cleaning,
               options.screenMode
             ))
             deferredCleanupFailure = cleanup()
-          case TUI.Work.Done                         => continue = false
+          case TUI.Work.Done                                                        => continue = false
       completed = true
     catch
       case e: Throwable =>
@@ -1615,11 +1648,15 @@ final class TUI(
         TUI.Work.Append(operation)
       case TUI.OrdinaryCategory.Render     =>
         renderRequested = false
-        val force = forceRenderRequested
-        val clear = clearRequested
-        forceRenderRequested = false
-        clearRequested = false
-        TUI.Work.Render(force, clear)
+        val genericForce       = genericForceRenderRequested
+        val genericClear       = genericClearRequested
+        val recoveryGeneration = pendingResizeRecoveryGeneration
+        val resizeInvalidated  = pendingResizeInvalidation
+        genericForceRenderRequested = false
+        genericClearRequested = false
+        pendingResizeRecoveryGeneration = None
+        pendingResizeInvalidation = false
+        TUI.Work.Render(genericForce, genericClear, recoveryGeneration, resizeInvalidated)
 
   private def ordinaryCategoryReadyLocked(category: TUI.OrdinaryCategory): Boolean = category match
     case TUI.OrdinaryCategory.Structural => pendingStructural.nonEmpty
@@ -1751,8 +1788,10 @@ final class TUI(
     pendingStructural.clear()
     desiredChildren = committedChildren
     renderRequested = false
-    forceRenderRequested = false
-    clearRequested = false
+    genericForceRenderRequested = false
+    genericClearRequested = false
+    pendingResizeRecoveryGeneration = None
+    pendingResizeInvalidation = false
     backgroundColorFlight match
       case Some(flight) if flight.phase === TUI.QueryFlightPhase.Emitted =>
         retainQueryCompletionsLocked(flight.subscribers, TerminalQueryResult.Stopped)
@@ -2491,7 +2530,12 @@ final class TUI(
       (eventType !== KeyEventType.Release) && (value === char) && modifiers.ctrl
     case _                                                                          => false
 
-  private def renderNow(force: Boolean, clear: Boolean): Unit =
+  private def renderNow(
+      genericForce: Boolean,
+      genericClear: Boolean,
+      recoveryGeneration: Option[Long],
+      resizeInvalidated: Boolean
+  ): Unit =
     val generation                     = lifecycleLock.synchronized(resizeGeneration)
     val width                          = positiveDimension(terminal.columns)
     val height                         = positiveDimension(terminal.rows)
@@ -2515,26 +2559,179 @@ final class TUI(
     }
     val frame                          = rendererPolicy.prepareFrame(composed.validated(width), width)
     validateRetainedKittyOwnership(frame)
+    val widthChanged                   = (rendererPolicy.retainedWidth !== 0) &&
+      (rendererPolicy.retainedWidth !== width)
+    val heightChanged                  = (rendererPolicy.retainedHeight !== 0) &&
+      (rendererPolicy.retainedHeight !== height)
+    val resizeGeometryChanged          = widthChanged || heightChanged
+    val resizeRequiresRedraw           = resizeInvalidated || resizeGeometryChanged
+    val forceForRender                 = genericForce || resizeRequiresRedraw
+    val clearForRender                 = genericClear || resizeRequiresRedraw
+    val recovery                       = Option.when(
+      resizeRequiresRedraw && rendererPolicy.retainedFrame.nonEmpty &&
+        recoveryGeneration.exists(_ === generation) && options.normalResizeRecovery.nonEmpty &&
+        !rendererPolicy.isAlternateScreen &&
+        options.normalResizeClearPolicy === NormalResizeClearPolicy.PreserveScrollback
+    ) {
+      prepareResizeRecovery(frame, width, height, generation)
+    }
 
-    val currentWidth      = positiveDimension(terminal.columns)
-    val currentHeight     = positiveDimension(terminal.rows)
-    val currentGeneration = lifecycleLock.synchronized(resizeGeneration)
-    if (generation !== currentGeneration) || (width !== currentWidth) ||
+    val currentWidth                      = positiveDimension(terminal.columns)
+    val currentHeight                     = positiveDimension(terminal.rows)
+    val (currentGeneration, stillRunning) = lifecycleLock.synchronized(
+      resizeGeneration -> (lifecycleState === TUI.LifecycleState.Running)
+    )
+    if !stillRunning then
+      recovery.foreach(value =>
+        emitResizeRecoveryDiagnostic(
+          TUIDiagnosticResizeRecoveryOutcome.Discarded,
+          failure = None,
+          value.maxRows,
+          value.lines.length,
+          value.generation
+        )
+      )
+    else if (generation !== currentGeneration) || (width !== currentWidth) ||
       (height !== currentHeight)
     then
       lifecycleLock.synchronized {
-        renderRequested = true
-        forceRenderRequested = true
-        clearRequested = true
+        if lifecycleState === TUI.LifecycleState.Running then
+          renderRequested = true
+          if genericForce then genericForceRenderRequested = true
+          if genericClear then genericClearRequested = true
+          if resizeGeometryChanged then
+            genericForceRenderRequested = true
+            genericClearRequested = true
+          if resizeInvalidated then pendingResizeInvalidation = true
+          if recoveryGeneration.nonEmpty || (currentGeneration !== generation) then
+            pendingResizeRecoveryGeneration = Some(resizeGeneration)
+          else
+            genericForceRenderRequested = true
+            genericClearRequested = true
       }
+      recovery.foreach(value =>
+        emitResizeRecoveryDiagnostic(
+          TUIDiagnosticResizeRecoveryOutcome.Discarded,
+          Some(TUIDiagnosticResizeRecoveryFailure.StaleGeometry),
+          value.maxRows,
+          value.lines.length,
+          value.generation
+        )
+      )
     else
-      rendererPolicy.render(frame, width, height, force, clear)
+      try rendererPolicy.render(frame, width, height, forceForRender, clearForRender, recovery)
+      catch
+        case error: Throwable =>
+          recovery.foreach(value =>
+            emitResizeRecoveryDiagnostic(
+              TUIDiagnosticResizeRecoveryOutcome.Failed,
+              Some(TUIDiagnosticResizeRecoveryFailure.Write),
+              value.maxRows,
+              value.lines.length,
+              value.generation
+            )
+          )
+          throw error
+      lifecycleLock.synchronized {
+        committedRenderWidth = width
+        committedRenderHeight = height
+      }
       latestBaseLayout = Some(baseFrame.layout)
       latestOverlayLayouts = layouts
       mouseCapture = mouseCapture.flatMap(refreshMouseTarget)
       mousePress = mousePress.flatMap(press =>
         refreshMouseTarget(press.target).map(target => press.copy(target = target))
       )
+      recovery.foreach(value =>
+        emitResizeRecoveryDiagnostic(
+          TUIDiagnosticResizeRecoveryOutcome.Completed,
+          failure = None,
+          value.maxRows,
+          value.lines.length,
+          value.generation
+        )
+      )
+
+  private def prepareResizeRecovery(
+      frame: PreparedFrame,
+      width: Int,
+      height: Int,
+      generation: Long
+  ): TUI.PreparedResizeRecovery =
+    val liveFrameFootprint         = math.max(1, frame.lines.length)
+    val currentMaxRows             = math.max(0, height - liveFrameFootprint)
+    val previousLiveFrameFootprint = rendererPolicy.retainedFrame.fold(1)(value =>
+      math.max(1, value.lines.length)
+    )
+    val previousMaxRows            = math.max(
+      0,
+      rendererPolicy.retainedHeight - previousLiveFrameFootprint
+    )
+    val maxRows                    = math.min(currentMaxRows, previousMaxRows)
+    if maxRows === 0 then TUI.PreparedResizeRecovery(Vector.empty, maxRows, generation)
+    else
+      val context  = NormalResizeRecoveryContext(
+        width,
+        height,
+        maxRows,
+        rendererPolicy.retainedWidth,
+        rendererPolicy.retainedHeight,
+        previousMaxRows
+      )
+      val rawLines =
+        try
+          Option(options.normalResizeRecovery.get.render(context)).getOrElse(
+            throw NullPointerException("Normal resize recovery provider returned null")
+          )
+        catch
+          case error: Throwable =>
+            emitResizeRecoveryDiagnostic(
+              TUIDiagnosticResizeRecoveryOutcome.Failed,
+              Some(TUIDiagnosticResizeRecoveryFailure.Provider),
+              maxRows,
+              rowCount = 0,
+              generation
+            )
+            throw error
+      if rawLines.length > maxRows then
+        emitResizeRecoveryDiagnostic(
+          TUIDiagnosticResizeRecoveryOutcome.Failed,
+          Some(TUIDiagnosticResizeRecoveryFailure.RowBudget),
+          maxRows,
+          rawLines.length,
+          generation
+        )
+        throw IllegalArgumentException(
+          s"Normal resize recovery returned ${rawLines.length} rows for budget $maxRows"
+        )
+      val lines    =
+        try rendererPolicy.prepareResizeRecovery(rawLines, width)
+        catch
+          case error: Throwable =>
+            emitResizeRecoveryDiagnostic(
+              TUIDiagnosticResizeRecoveryOutcome.Failed,
+              Some(TUIDiagnosticResizeRecoveryFailure.Provider),
+              maxRows,
+              rawLines.length,
+              generation
+            )
+            throw error
+      TUI.PreparedResizeRecovery(lines, maxRows, generation)
+
+  private def emitResizeRecoveryDiagnostic(
+      outcome: TUIDiagnosticResizeRecoveryOutcome,
+      failure: Option[TUIDiagnosticResizeRecoveryFailure],
+      maxRows: Int,
+      rowCount: Int,
+      generation: Long
+  ): Unit =
+    emitDiagnostic(TUIDiagnosticEvent.ResizeRecovery(
+      outcome,
+      failure,
+      maxRows,
+      rowCount,
+      generation
+    ))
 
   private def renderSearchLayer(
       frame: ComponentRender,
@@ -2600,6 +2797,12 @@ object TUI:
       options: TUIOptions = TUIOptions()
   ): TUI = new TUI(terminal, options, Some(layoutRoot))
 
+  private[core] final case class PreparedResizeRecovery(
+      lines: Vector[String],
+      maxRows: Int,
+      generation: Long
+  )
+
   private enum LifecycleState derives CanEqual:
     case Starting, Running, Stopping, Cleaning, Stopped
 
@@ -2616,7 +2819,12 @@ object TUI:
     case Action(action: () => Unit)
     case Control(action: () => Unit)
     case Append(operation: TUI.AppendOperation)
-    case Render(force: Boolean, clear: Boolean)
+    case Render(
+        genericForce: Boolean,
+        genericClear: Boolean,
+        recoveryGeneration: Option[Long],
+        resizeInvalidated: Boolean
+    )
     case Cleanup
     case Done
 

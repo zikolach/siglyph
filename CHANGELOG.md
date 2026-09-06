@@ -7,6 +7,12 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Added
+
+- Added opt-in, bounded text-only normal-screen resize recovery for application-owned semantic
+  history, preserving append chronology, retained-frame cursor/mouse state, redacted diagnostics,
+  and shared JVM/Scala Native behavior. #57, fixes #56
+
 ## [0.8.0] - 2026-08-02
 
 ### Added

@@ -41,18 +41,22 @@ private[core] trait RendererPolicy:
   def isAlternateScreen: Boolean
   def isFullscreenViewport: Boolean = false
   def retainedFrame: Option[PreparedFrame]
+  def retainedWidth: Int
+  def retainedHeight: Int
   def frameStartRow: Option[Int]
   def frameStartRow_=(value: Option[Int]): Unit
   def sanitizationCount: Int
   def lastSanitization: Option[TUI.RenderSanitization]
   def start(): Unit
   def prepareFrame(frame: ComponentRender, width: Int): PreparedFrame
+  def prepareResizeRecovery(lines: Vector[String], width: Int): Vector[String]
   def render(
       frame: PreparedFrame,
       width: Int,
       height: Int,
       force: Boolean,
-      clear: Boolean
+      clear: Boolean,
+      recovery: Option[TUI.PreparedResizeRecovery]
   ): Unit
   def publishAppend(appended: PreparedFrame, retained: PreparedFrame, terminalHeight: Int): Unit
   def parkCursorForCleanup(): Unit
@@ -93,6 +97,10 @@ private[core] final class NormalScreenPolicy(
 
   override def retainedFrame: Option[PreparedFrame] = previousFrame
 
+  override def retainedWidth: Int = previousWidth
+
+  override def retainedHeight: Int = previousHeight
+
   override def frameStartRow: Option[Int] = latestFrameStartRow
 
   override def frameStartRow_=(value: Option[Int]): Unit = latestFrameStartRow = value
@@ -117,12 +125,16 @@ private[core] final class NormalScreenPolicy(
       frame.documentMetadata
     )
 
+  override def prepareResizeRecovery(lines: Vector[String], width: Int): Vector[String] =
+    applyLineResets(sanitizeLines(lines, width, retainDiagnosticContent = false))
+
   override def render(
       frame: PreparedFrame,
       width: Int,
       height: Int,
       force: Boolean,
-      clear: Boolean
+      clear: Boolean,
+      recovery: Option[TUI.PreparedResizeRecovery]
   ): Unit =
     val widthChanged  = (previousWidth !== 0) && (previousWidth !== width)
     val heightChanged = (previousHeight !== 0) && (previousHeight !== height)
@@ -139,7 +151,7 @@ private[core] final class NormalScreenPolicy(
         0,
         clearReason
       )
-      fullRender(frame, width, height, clearReason)
+      fullRender(frame, width, height, clearReason, recovery)
     else if widthChanged || heightChanged then
       val clearReason = Some(TUIDiagnosticClearReason.Resize)
       emitRedraw(
@@ -150,7 +162,7 @@ private[core] final class NormalScreenPolicy(
         0,
         clearReason
       )
-      fullRender(frame, width, height, clearReason)
+      fullRender(frame, width, height, clearReason, recovery)
     else
       val firstChanged = firstChangedRow(previousFrame.get, frame)
       if firstChanged >= 0 then
@@ -188,7 +200,7 @@ private[core] final class NormalScreenPolicy(
       appendHardwareCursorMove(builder, retained, retainedPaintedRow)
       appendRenderEnd(builder)
       writeRenderBuffer(builder.result())
-      val totalRows          = appended.lines.length + retained.lines.length
+      val totalRows          = appended.lines.length + math.max(1, retained.lines.length)
       latestFrameStartRow = latestFrameStartRow.map { start =>
         val appendStart = scrolledFrameStart(start, 0, totalRows, terminalHeight)
         appendStart + appended.lines.length
@@ -208,7 +220,8 @@ private[core] final class NormalScreenPolicy(
       frame: PreparedFrame,
       width: Int,
       height: Int,
-      clearReason: Option[TUIDiagnosticClearReason]
+      clearReason: Option[TUIDiagnosticClearReason],
+      recovery: Option[TUI.PreparedResizeRecovery]
   ): Unit =
     val clear                = clearReason.nonEmpty
     val startRowBeforeRender = if clear then Some(0) else latestFrameStartRow
@@ -220,17 +233,35 @@ private[core] final class NormalScreenPolicy(
         appendVerticalMove(builder, fromRow = cursorRow, toRow = 0)
         builder.append("\r")
       }
-    val paintedRow           = appendFrameContent(
-      builder,
-      frame,
-      fromRow = 0,
-      kittyLifecycleCleanup(previousFrame, frame, fromRow = 0)
-    )
+    val cleanupControls      = kittyLifecycleCleanup(previousFrame, frame, fromRow = 0)
+    val paintedRow           = recovery match
+      case Some(value) =>
+        val recoveryFrame = PreparedFrame(
+          value.lines,
+          None,
+          Vector.empty,
+          DocumentMetadata.empty
+        )
+        appendFrameContent(builder, recoveryFrame, fromRow = 0, cleanupControls)
+        if value.lines.nonEmpty then builder.append("\r\n")
+        appendFrameContent(builder, frame, fromRow = 0, Vector.empty)
+      case None        =>
+        appendFrameContent(builder, frame, fromRow = 0, cleanupControls)
     appendHardwareCursorMove(builder, frame, paintedRow)
     appendRenderEnd(builder)
     writeRenderBuffer(builder.result())
-    latestFrameStartRow =
-      startRowBeforeRender.map(scrolledFrameStart(_, 0, frame.lines.length, height))
+    latestFrameStartRow = recovery match
+      case Some(value) =>
+        val liveFootprint = math.max(1, frame.lines.length)
+        val combinedStart = scrolledFrameStart(
+          frameStartRow = 0,
+          writeStartFrameRow = 0,
+          writtenLineCount = value.lines.length + liveFootprint,
+          terminalHeight = height
+        )
+        Some(combinedStart + value.lines.length)
+      case None        =>
+        startRowBeforeRender.map(scrolledFrameStart(_, 0, frame.lines.length, height))
     previousFrame = Some(frame)
     previousWidth = width
     previousHeight = height
@@ -395,20 +426,25 @@ private[core] final class NormalScreenPolicy(
   private def appendMoveRight(builder: StringBuilder, columns: Int): Unit =
     if columns > 0 then builder.append(s"\u001b[${columns}C")
 
-  private def sanitizeLines(lines: Vector[String], width: Int): Vector[String] =
+  private def sanitizeLines(
+      lines: Vector[String],
+      width: Int,
+      retainDiagnosticContent: Boolean = true
+  ): Vector[String] =
     lines.zipWithIndex.map { (line, index) =>
       val lineWidth = Ansi.visibleWidth(line)
       if lineWidth <= width then Ansi.sanitize(line)
       else
         val sanitized = Ansi.truncateToWidth(line, width, "")
         sanitizedLineCount += 1
-        mostRecentSanitizedLine = Some(TUI.RenderSanitization(
-          lineIndex = index,
-          originalWidth = lineWidth,
-          targetWidth = width,
-          original = line,
-          sanitized = sanitized
-        ))
+        if retainDiagnosticContent then
+          mostRecentSanitizedLine = Some(TUI.RenderSanitization(
+            lineIndex = index,
+            originalWidth = lineWidth,
+            targetWidth = width,
+            original = line,
+            sanitized = sanitized
+          ))
         sanitized
     }
 
@@ -489,6 +525,8 @@ private[core] final class FullscreenViewportPolicy(
   override def isAlternateScreen: Boolean                       = true
   override def isFullscreenViewport: Boolean                    = true
   override def retainedFrame: Option[PreparedFrame]             = previousFrame
+  override def retainedWidth: Int                               = previousWidth
+  override def retainedHeight: Int                              = previousHeight
   override def frameStartRow: Option[Int]                       = Some(0)
   override def frameStartRow_=(value: Option[Int]): Unit        = ()
   override def sanitizationCount: Int                           = sanitizedLineCount
@@ -522,13 +560,18 @@ private[core] final class FullscreenViewportPolicy(
       .map(_._1)
     PreparedFrame(lines, cursor, frame.controls, frame.documentMetadata)
 
+  override def prepareResizeRecovery(lines: Vector[String], width: Int): Vector[String] =
+    throw IllegalStateException("Fullscreen viewport does not support normal resize recovery")
+
   override def render(
       frame: PreparedFrame,
       width: Int,
       height: Int,
       force: Boolean,
-      clear: Boolean
+      clear: Boolean,
+      recovery: Option[TUI.PreparedResizeRecovery]
   ): Unit =
+    require(recovery.isEmpty, "Fullscreen viewport does not support normal resize recovery")
     require(frame.lines.length === height, "Fullscreen frame must match terminal height")
     val resized      = (previousWidth !== width) || (previousHeight !== height)
     val retained     = kittyRetention.update(

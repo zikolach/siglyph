@@ -5,7 +5,11 @@ import scalatui.core.{
   Component,
   ComponentRender,
   NormalResizeClearPolicy,
+  NormalResizeRecoveryProvider,
   TUI,
+  TUIDiagnosticEvent,
+  TUIDiagnosticObserver,
+  TUIDiagnosticResizeRecoveryOutcome,
   TUIOptions,
   TerminalControlPlacement
 }
@@ -152,6 +156,71 @@ class SttyTerminalPtySuite extends munit.FunSuite:
         assert(!written.contains("a=d"), written)
         assert(append >= 0, written)
         assert(live > append, written)
+        assert(written.contains("\u001b[?25h"), written)
+        assertEquals(stableSttyState(), originalStableState)
+      finally
+        if !stopped then scala.util.Try(tui.stop())
+        restoreStty(originalState, originalRows, originalColumns)
+    }
+
+  test("PTY resize recovery precedes later append and restores terminal"):
+    withPtyTest {
+      val originalState                   = runStty("-g")
+      val originalStableState             = stableSttyState()
+      val (originalRows, originalColumns) = querySize()
+      val targetRows                      = if originalRows > 2 then originalRows - 1 else 7
+      val targetColumns                   = if originalColumns > 2 then originalColumns - 1 else 29
+      val output                          = ByteArrayOutputStream()
+      val recovered                       = CountDownLatch(1)
+      val terminal                        = SttyTerminal(
+        input = InputStream.nullInputStream(),
+        output = output
+      )
+      val tui                             = TUI(
+        terminal,
+        TUIOptions(
+          normalResizeClearPolicy = NormalResizeClearPolicy.PreserveScrollback,
+          diagnosticObserver = Some(TUIDiagnosticObserver {
+            case TUIDiagnosticEvent.ResizeRecovery(
+                  TUIDiagnosticResizeRecoveryOutcome.Completed,
+                  _,
+                  _,
+                  _,
+                  _
+                ) => recovered.countDown()
+            case _ => ()
+          }),
+          normalResizeRecovery = Some(NormalResizeRecoveryProvider(_ => Vector("recovered-row")))
+        )
+      )
+      var stopped                         = false
+
+      try
+        tui.addChild(new Component:
+          override def render(width: Int): ComponentRender = ComponentRender.text("live-frame"))
+        tui.start()
+        output.reset()
+        runStty(s"rows $targetRows cols $targetColumns")
+        assert(recovered.await(5, TimeUnit.SECONDS), "resize recovery did not run within 5s")
+        tui.appendToScrollback(new Component:
+          override def render(width: Int): ComponentRender = ComponentRender.text("append-row"))
+        tui.stop()
+        stopped = true
+
+        val written       = output.toString(java.nio.charset.StandardCharsets.UTF_8)
+        val clear         = written.indexOf(TUI.NormalScreenViewportClear)
+        val recovery      = written.indexOf("recovered-row")
+        val firstLive     = written.indexOf("live-frame", recovery)
+        val append        = written.indexOf("append-row", firstLive)
+        val relocatedLive = written.indexOf("live-frame", append)
+        assert(clear >= 0, written)
+        assert(recovery > clear, written)
+        assert(firstLive > recovery, written)
+        assert(append > firstLive, written)
+        assert(relocatedLive > append, written)
+        assert(!written.contains("\u001b[3J"), written)
+        assert(written.contains(TUI.SyncStart), written)
+        assert(written.contains(TUI.SyncEnd + TUI.AutoWrapOn), written)
         assert(written.contains("\u001b[?25h"), written)
         assertEquals(stableSttyState(), originalStableState)
       finally

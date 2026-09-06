@@ -37,12 +37,20 @@ enum TUIDiagnosticAppendFailure derives CanEqual:
   case Lifecycle, ScreenMode, ResizePolicy, FrameUnavailable, AttachedComponent, Capacity,
     RetainedITerm2, Stopped, Context, Render, Validation, Identity, Planning, Write, Callback
 
+/** Bounded outcome for one optional normal-screen resize recovery attempt. */
+enum TUIDiagnosticResizeRecoveryOutcome derives CanEqual:
+  case Completed, Discarded, Failed
+
+/** Bounded failure category for normal-screen resize recovery diagnostics. */
+enum TUIDiagnosticResizeRecoveryFailure derives CanEqual:
+  case StaleGeometry, Provider, RowBudget, Write
+
 /**
  * Redacted, backend-independent terminal runtime diagnostics.
  *
- * Events contain only bounded enums, dimensions, row indexes, generations, and byte counts. They
- * never contain rendered application text, image payloads, raw query replies, or terminal output
- * bytes. Events from one observer belong only to its owning TUI instance.
+ * Events contain only bounded enums, dimensions, row indexes, generations, row budgets/counts, and
+ * byte counts. They never contain rendered application text, image payloads, raw query replies, or
+ * terminal output bytes. Events from one observer belong only to its owning TUI instance.
  */
 enum TUIDiagnosticEvent derives CanEqual:
   case Lifecycle(state: TUIDiagnosticLifecycleState, screenMode: TUIScreenMode)
@@ -63,6 +71,13 @@ enum TUIDiagnosticEvent derives CanEqual:
       rowCount: Int,
       controlCount: Int,
       screenMode: TUIScreenMode,
+      resizeGeneration: Long
+  )
+  case ResizeRecovery(
+      outcome: TUIDiagnosticResizeRecoveryOutcome,
+      failure: Option[TUIDiagnosticResizeRecoveryFailure],
+      maxRows: Int,
+      rowCount: Int,
       resizeGeneration: Long
   )
 
