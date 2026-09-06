@@ -2,7 +2,7 @@
 
 Small single-file demos intended for `scala-cli`.
 
-The released examples use Maven Central `0.8.0` artifacts.
+The released examples use Maven Central `0.9.0` artifacts.
 
 Run from this repository:
 

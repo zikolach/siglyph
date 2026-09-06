@@ -7,11 +7,32 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-06
+
 ### Added
 
+- Added opt-in `TUI.fullscreen` sessions with height-aware layout, vertical and horizontal stacks,
+  nested scrolling, follow-end behavior, viewport navigation, transcript search, mouse gestures,
+  text selection, and explicit host clipboard results on JVM and Scala Native. #58
+- Added session-scoped terminal capability overrides, typed image clipping, bounded Kitty image
+  retention, runtime counters, deterministic benchmark workloads, and JVM and Scala Native
+  fullscreen demos. #58
 - Added opt-in, bounded text-only normal-screen resize recovery for application-owned semantic
   history, preserving append chronology, retained-frame cursor/mouse state, redacted diagnostics,
   and shared JVM/Scala Native behavior. #57, fixes #56
+
+### Changed
+
+- Serialized component mutations and callbacks through bounded per-session coordination, propagated
+  unexpected terminal worker failures through one cleanup path, and preserved fail-fast parsing,
+  I/O, network, worker, and callback behavior. #58
+- Made transcript search and selection Unicode-aware and viewport-bounded, with deterministic
+  Unicode 17 canonical normalization and lowercase matching across JVM and Scala Native. #58
+
+### Fixed
+
+- Fixed input precedence, nested mouse routing, origin-aware rendering, retained context restart,
+  zero-width search geometry, image cleanup, and idempotent terminal stop and restart behavior. #58
 
 ## [0.8.0] - 2026-08-02
 
@@ -285,7 +306,8 @@ and this project uses semantic versioning while it remains pre-1.0.
 - GitHub Actions CI, jar packaging, GitHub Packages publishing, and GitHub
   release artifacts.
 
-[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/zikolach/siglyph/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/zikolach/siglyph/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/zikolach/siglyph/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/zikolach/siglyph/compare/v0.6.0...v0.7.0

@@ -1,8 +1,8 @@
 # Publishing
 
 siglyph publishes release jars to GitHub Releases and artifacts to GitHub Packages and Maven
-Central. The latest published release referenced by README and Scala CLI examples is `0.8.0`.
-Documentation work on an unreleased branch does not change that version.
+Central. README and Scala CLI examples use the version prepared for the next release, currently
+`0.9.0`. The artifacts become available after release tag publishing completes.
 
 ## Version source
 
