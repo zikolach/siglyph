@@ -1,0 +1,121 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "timezone": "Etc/UTC",
+  "schedule": ["before 6am on monday"],
+  "dependencyDashboard": true,
+  "labels": ["dependencies"],
+  "enabledManagers": ["github-actions", "custom.regex"],
+  "ignorePaths": [
+    "CHANGELOG.md",
+    "openspec/**",
+    "core/src/scalatui/unicode/**",
+    "core/test/src/scalatui/unicode/**"
+  ],
+  "packageRules": [
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions"
+    },
+    {
+      "matchPackageNames": ["org.scala-lang:scala3-compiler_3"],
+      "groupName": "Scala compiler",
+      "separateMinorPatch": true
+    },
+    {
+      "matchPackageNames": ["org.scala-native:scala-native-tools_3"],
+      "groupName": "Scala Native",
+      "separateMinorPatch": true
+    },
+    {
+      "matchPackageNames": ["com.lihaoyi:mill-dist"],
+      "groupName": "Mill",
+      "separateMinorPatch": true
+    },
+    {
+      "matchDepTypes": ["test"],
+      "groupName": "test dependencies"
+    },
+    {
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "enabled": false,
+      "matchPackageNames": ["io.github.zikolach:siglyph-{/,}**"]
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Mill Scala cross-published Maven dependencies in build.mill",
+      "managerFilePatterns": ["/^build\\.mill$/"],
+      "matchStrings": [
+        "mvn\\\"(?<groupId>[^:\\\"]+)::(?<artifactId>[^:\\\"]+)::(?<currentValue>[^\\\"\\s]+)\\\""
+      ],
+      "datasourceTemplate": "maven",
+      "depNameTemplate": "{{{groupId}}}:{{{artifactId}}}_3",
+      "packageNameTemplate": "{{{groupId}}}:{{{artifactId}}}_3"
+    },
+    {
+      "customType": "regex",
+      "description": "Mill Maven dependencies in build.mill",
+      "managerFilePatterns": ["/^build\\.mill$/"],
+      "matchStrings": [
+        "mvn\\\"(?<groupId>[^:\\\"]+):(?<artifactId>[^:\\\"]+):(?<currentValue>[^\\\"\\s]+)\\\""
+      ],
+      "datasourceTemplate": "maven",
+      "depNameTemplate": "{{{groupId}}}:{{{artifactId}}}",
+      "packageNameTemplate": "{{{groupId}}}:{{{artifactId}}}"
+    },
+    {
+      "customType": "regex",
+      "description": "Scala version literals used by Mill and Scala CLI scripts",
+      "managerFilePatterns": [
+        "/^build\\.mill$/",
+        "/^scripts/.*\\.scala$/",
+        "/^examples/scala-cli/.*\\.scala$/"
+      ],
+      "matchStrings": [
+        "(?:def scalaVersion\\s*=\\s*\\\"|--scala-version\\s+|//> using scala \\\"?)(?<currentValue>\\d+\\.\\d+\\.\\d+)(?:\\\"?)"
+      ],
+      "datasourceTemplate": "maven",
+      "depNameTemplate": "Scala 3",
+      "packageNameTemplate": "org.scala-lang:scala3-compiler_3"
+    },
+    {
+      "customType": "regex",
+      "description": "Scala Native version literals in build.mill",
+      "managerFilePatterns": ["/^build\\.mill$/"],
+      "matchStrings": [
+        "def scalaNativeVersion\\s*=\\s*\\\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\\\""
+      ],
+      "datasourceTemplate": "maven",
+      "depNameTemplate": "Scala Native",
+      "packageNameTemplate": "org.scala-native:scala-native-tools_3"
+    },
+    {
+      "customType": "regex",
+      "description": "Mill bootstrap download URLs in GitHub Actions workflows",
+      "managerFilePatterns": ["/^\\.github/workflows/.*\\.ya?ml$/"],
+      "matchStrings": [
+        "curl -fLo mill https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/(?<currentValue>\\d+\\.\\d+\\.\\d+)/mill-dist-\\d+\\.\\d+\\.\\d+-mill\\.sh"
+      ],
+      "datasourceTemplate": "maven",
+      "depNameTemplate": "Mill",
+      "packageNameTemplate": "com.lihaoyi:mill-dist",
+      "autoReplaceStringTemplate": "curl -fLo mill https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/{{{newValue}}}/mill-dist-{{{newValue}}}-mill.sh"
+    },
+    {
+      "customType": "regex",
+      "description": "Scala CLI cross-published dependencies in examples",
+      "managerFilePatterns": ["/^examples/scala-cli/.*\\.scala$/"],
+      "matchStrings": [
+        "//> using dep (?<groupId>[^:\\s]+)::(?<artifactId>[^:\\s]+):(?<currentValue>[^\\s]+)"
+      ],
+      "datasourceTemplate": "maven",
+      "depNameTemplate": "{{{groupId}}}:{{{artifactId}}}_3",
+      "packageNameTemplate": "{{{groupId}}}:{{{artifactId}}}_3"
+    }
+  ]
+}
