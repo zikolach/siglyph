@@ -23,7 +23,7 @@
       "separateMinorPatch": true
     },
     {
-      "matchPackageNames": ["org.scala-native:scala-native-tools_3"],
+      "matchPackageNames": ["org.scala-native:tools_3"],
       "groupName": "Scala Native",
       "separateMinorPatch": true
     },
@@ -92,7 +92,7 @@
       ],
       "datasourceTemplate": "maven",
       "depNameTemplate": "Scala Native",
-      "packageNameTemplate": "org.scala-native:scala-native-tools_3"
+      "packageNameTemplate": "org.scala-native:tools_3"
     },
     {
       "customType": "regex",
