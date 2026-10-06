@@ -31,6 +31,7 @@ object JvmBenchmarkMain:
 
   def main(arguments: Array[String]): Unit =
     val config     = parse(arguments.toList)
+    val scenarios  = BenchmarkWorkloads.selectedScenarios(config.scale, config.only)
     val allocation = ThreadAllocation.current
     val baseline   = config.comparison.map(loadProperties)
     println("benchmark.runtime=jvm")
@@ -42,9 +43,7 @@ object JvmBenchmarkMain:
       }")
     config.comparison.foreach(path => println(s"benchmark.comparison=${path.toAbsolutePath}"))
 
-    BenchmarkWorkloads.scenarios(config.scale).filter(scenario =>
-      config.only.forall(_ === scenario.name)
-    ).foreach { scenario =>
+    scenarios.foreach { scenario =>
       (0 until config.warmup).foreach(_ => scenario.execute())
       val samples          = Vector.fill(config.samples)(measure(scenario, allocation))
       require(

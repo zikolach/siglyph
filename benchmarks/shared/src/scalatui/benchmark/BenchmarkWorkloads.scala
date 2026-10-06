@@ -80,6 +80,18 @@ private[scalatui] object BenchmarkWorkloads:
     imageHeavyFrames(scale)
   )
 
+  def selectedScenarios(scale: Scale, only: Option[String]): Vector[Scenario] =
+    val available = scenarios(scale)
+    only match
+      case None       => available
+      case Some(name) =>
+        available.find(_.name === name) match
+          case Some(scenario) => Vector(scenario)
+          case None           =>
+            throw IllegalArgumentException(
+              s"Unknown benchmark scenario for --only; expected one of: ${available.map(_.name).mkString(", ")}"
+            )
+
   private def fullWidthRowPaint(): Scenario = Scenario(
     "full-width-row-paint",
     Vector("terminal" -> "80x24", "frames" -> "100", "rowKind" -> "plain-full-width"),

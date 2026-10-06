@@ -825,8 +825,8 @@ object ViewportLayoutEngine:
             val leadingGap  = math.max(0, sourceStart - prefixWidth)
             val slice       = Ansi.sliceByColumns(line, sourceStart, math.max(0, span - leadingGap))
             if slice.text.nonEmpty then
-              if sourceStart === 0 && visibleLeft === 0 && visibleRight === width &&
-                lines(targetRow).isEmpty
+              if slice.width > 0 && sourceStart === 0 && visibleLeft === 0 &&
+                visibleRight === width && lines(targetRow).isEmpty
               then
                 // Match empty-base composition, including its second bounded ANSI slice and
                 // reset boundaries, without rescanning the empty base or rebuilding its gaps.

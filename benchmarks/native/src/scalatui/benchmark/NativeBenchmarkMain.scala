@@ -12,15 +12,15 @@ object NativeBenchmarkMain:
   private final case class Config(warmup: Int, samples: Int, only: Option[String])
 
   def main(arguments: Array[String]): Unit =
-    val config = parse(arguments.toList)
+    val config    = parse(arguments.toList)
+    val scenarios =
+      BenchmarkWorkloads.selectedScenarios(BenchmarkWorkloads.Scale.Quick, config.only)
     println("benchmark.runtime=scala-native")
     println("benchmark.scale=quick")
     println(s"benchmark.warmup=${config.warmup}")
     println(s"benchmark.samples=${config.samples}")
     println("benchmark.allocation=unsupported")
-    BenchmarkWorkloads.scenarios(BenchmarkWorkloads.Scale.Quick).filter(scenario =>
-      config.only.forall(_ === scenario.name)
-    ).foreach { scenario =>
+    scenarios.foreach { scenario =>
       (0 until config.warmup).foreach(_ => scenario.execute())
       val samples     = Vector.fill(config.samples) {
         val started     = System.nanoTime()

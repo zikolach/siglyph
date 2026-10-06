@@ -18,7 +18,7 @@ mill benchmarkJvm.run
 
 Each scenario reports its exact workload metadata, median wall time after warmup, deterministic runtime counters, and a numeric checksum. The JVM runner reports median current-thread allocated bytes when `com.sun.management.ThreadMXBean` supports and permits allocation tracking. It prints `unsupported` on a JDK without that API. The project does not add JMH, a profiler agent, or another allocation dependency, so allocation counts exclude work on other threads and cannot identify allocation sites.
 
-The fixed scenarios include `full-width-row-paint` (100 immutable 80×24 frames of full-width plain rows). Select only it with `--only full-width-row-paint` on either runner. Its direct-layout checksum is deterministic; TUI runtime counters remain zero because the workload does not create a TUI. The fixed scenarios also cover large transcript layout, append-only output, a differential tail change, Unicode wrapping and width reflow, overlays, nested scrolling, search indexing, selection mapping, and image-heavy typed frames.
+The fixed scenarios include `full-width-row-paint` (100 immutable 80×24 frames of full-width plain rows). Select only it with `--only full-width-row-paint` on either runner. An unknown `--only` name fails before reporting a benchmark and lists the supported scenario names. Its direct-layout checksum is deterministic; TUI runtime counters remain zero because the workload does not create a TUI. The fixed scenarios also cover large transcript layout, append-only output, a differential tail change, Unicode wrapping and width reflow, overlays, nested scrolling, search indexing, selection mapping, and image-heavy typed frames.
 
 ## Controlled comparison
 

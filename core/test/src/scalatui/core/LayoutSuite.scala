@@ -400,6 +400,26 @@ class LayoutSuite extends munit.FunSuite:
     assertEquals(frame.lines(2).endsWith("\u001b[0m\u001b[0m"), true)
     assertEquals(frame.lines(4).contains("\u001b]8;;\u0007"), true)
 
+  test("zero-width-only full-width row retains empty-base bytes without taking shortcut"):
+    val source   = "\u0301"
+    val width    = 8
+    val slice    = Ansi.sliceByColumns(source, 0, width)
+    val counters = RuntimeCounters()
+    val frame    = RuntimeCounterScope.withCounters(counters) {
+      ViewportLayoutEngine.layout(Lines(Vector(source)), width, height = 1)
+    }
+    val expected = Ansi.truncateToWidth(
+      OverlayRenderer.compositeLine("", slice.text, 0, slice.width, width),
+      width,
+      ""
+    )
+
+    assertEquals(slice.text.nonEmpty, true)
+    assertEquals(slice.width, 0)
+    assertEquals(expected, "")
+    assertEquals(frame.lines, Vector(expected))
+    assertEquals(counters.snapshot.fullWidthFastPathRows, 0L)
+
   test("later decoration and typed metadata keep paint and clipping order"):
     val control   = TerminalImageProtocol.encodeKitty(
       Base64ImagePayload.from("AAAA").toOption.get,
