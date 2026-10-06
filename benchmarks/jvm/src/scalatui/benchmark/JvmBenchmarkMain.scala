@@ -19,7 +19,8 @@ object JvmBenchmarkMain:
       scaleName: String,
       warmup: Int,
       samples: Int,
-      comparison: Option[Path]
+      comparison: Option[Path],
+      only: Option[String]
   )
 
   private final case class Sample(
@@ -41,7 +42,9 @@ object JvmBenchmarkMain:
       }")
     config.comparison.foreach(path => println(s"benchmark.comparison=${path.toAbsolutePath}"))
 
-    BenchmarkWorkloads.scenarios(config.scale).foreach { scenario =>
+    BenchmarkWorkloads.scenarios(config.scale).filter(scenario =>
+      config.only.forall(_ === scenario.name)
+    ).foreach { scenario =>
       (0 until config.warmup).foreach(_ => scenario.execute())
       val samples          = Vector.fill(config.samples)(measure(scenario, allocation))
       require(
@@ -126,13 +129,15 @@ object JvmBenchmarkMain:
         loop(tail, config.copy(warmup = positive(value, "warmup")))
       case "--samples" :: value :: tail =>
         loop(tail, config.copy(samples = positive(value, "samples")))
+      case "--only" :: value :: tail    =>
+        loop(tail, config.copy(only = Some(value)))
       case "--compare" :: value :: tail =>
         loop(tail, config.copy(comparison = Some(Path.of(value))))
       case option :: _                  => throw IllegalArgumentException(s"Unknown benchmark option: $option")
 
     loop(
       arguments,
-      Config(BenchmarkWorkloads.Scale.Standard, "standard", warmup = 3, samples = 7, None)
+      Config(BenchmarkWorkloads.Scale.Standard, "standard", warmup = 3, samples = 7, None, None)
     )
 
   private def positive(value: String, name: String): Int =

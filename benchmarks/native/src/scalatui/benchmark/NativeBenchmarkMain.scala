@@ -9,7 +9,7 @@ import scalatui.syntax.Equality.*
  * unsupported, and this runner is not part of ordinary compile, test, format, or lint targets.
  */
 object NativeBenchmarkMain:
-  private final case class Config(warmup: Int, samples: Int)
+  private final case class Config(warmup: Int, samples: Int, only: Option[String])
 
   def main(arguments: Array[String]): Unit =
     val config = parse(arguments.toList)
@@ -18,7 +18,9 @@ object NativeBenchmarkMain:
     println(s"benchmark.warmup=${config.warmup}")
     println(s"benchmark.samples=${config.samples}")
     println("benchmark.allocation=unsupported")
-    BenchmarkWorkloads.scenarios(BenchmarkWorkloads.Scale.Quick).foreach { scenario =>
+    BenchmarkWorkloads.scenarios(BenchmarkWorkloads.Scale.Quick).filter(scenario =>
+      config.only.forall(_ === scenario.name)
+    ).foreach { scenario =>
       (0 until config.warmup).foreach(_ => scenario.execute())
       val samples     = Vector.fill(config.samples) {
         val started     = System.nanoTime()
@@ -46,10 +48,14 @@ object NativeBenchmarkMain:
   private def median(values: Vector[Long]): Long = values.sorted.apply(values.length / 2)
 
   private def parse(arguments: List[String]): Config = arguments.dropWhile(_ === "--") match
-    case Nil                                                   => Config(warmup = 1, samples = 3)
-    case "--warmup" :: warmup :: "--samples" :: samples :: Nil =>
-      Config(positive(warmup, "warmup"), positive(samples, "samples"))
-    case _                                                     =>
+    case Nil                                                    => Config(warmup = 1, samples = 3, None)
+    case "--warmup" :: warmup :: "--samples" :: samples :: rest =>
+      rest match
+        case Nil                     => Config(positive(warmup, "warmup"), positive(samples, "samples"), None)
+        case "--only" :: name :: Nil =>
+          Config(positive(warmup, "warmup"), positive(samples, "samples"), Some(name))
+        case _                       => throw IllegalArgumentException("Expected optional --only NAME")
+    case _                                                      =>
       throw IllegalArgumentException("Expected no arguments or --warmup N --samples N")
 
   private def positive(value: String, name: String): Int =

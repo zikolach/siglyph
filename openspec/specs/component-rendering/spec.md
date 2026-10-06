@@ -2,7 +2,9 @@
 
 ## Purpose
 Defines the component rendering contract, ANSI-aware text utilities, differential rendering behavior, focus flow, overlays, and editor visual layout expectations for terminal UI output.
+
 ## Requirements
+
 ### Requirement: Component contract
 The library SHALL expose a component abstraction whose render operation receives the available terminal width and returns `ComponentRender` containing ordered ordinary terminal lines and positioned semantic terminal controls. Each ordinary line and each control footprint MUST fit within the requested display width, and controls MUST fit within the returned frame rows.
 
@@ -955,3 +957,15 @@ The live-frame render, recovery provider invocation, stale-geometry check, and c
 #### Scenario: Resize coalesces during provider rendering
 - **WHEN** one or more resize notifications arrive while provider code runs
 - **THEN** resize work SHALL remain capacity-free and coalesced, the stale candidate SHALL not mutate differential state, and a latest-geometry Render SHALL remain pending
+
+### Requirement: Full-width untouched viewport row paint retains terminal semantics
+The viewport painter SHALL avoid redundant empty-base recomposition and final truncation for a prepared full-width row that remains untouched. The shortcut SHALL preserve byte-equivalent sanitized, width-bounded terminal text and SGR/OSC 8 replay and closure. Later paint and typed metadata SHALL retain their existing order and clipping.
+
+#### Scenario: Full-width untouched row preserves trusted text boundaries
+- **WHEN** a full-width box first paints a viewport row containing short or wide graphemes, unclosed SGR or OSC 8 state, or unsupported terminal controls
+- **THEN** its output remains byte-equivalent to ordinary empty-base composition after final width clipping
+- **AND** unsupported controls gain no authority and supported state is closed before the next row
+
+#### Scenario: Later paint and metadata retain their order
+- **WHEN** a child or decoration later paints over a full-width row carrying typed controls, cursor candidates, or document markers
+- **THEN** later text composition and independent typed metadata translation and clipping retain their existing behavior

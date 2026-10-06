@@ -367,3 +367,84 @@ class LayoutSuite extends munit.FunSuite:
     ViewportLayoutEngine.layout(root, width = 4, height = 3)
 
     assertEquals(renders.last, Some(ComponentRenderOrigin(row = 2, col = 2)))
+
+  test("full-width untouched rows preserve exact ANSI and grapheme composition bytes"):
+    val rows     = Vector(
+      "short",
+      "界e\u0301🙂",
+      "\u001b[31mred",
+      "\u001b[31mred\u001b[0mplain",
+      "\u001b]8;;https://example.test\u0007link",
+      "\u001b]8;;https://example.test\u0007link\u001b]8;;\u0007tail",
+      "\u001b[2Jinert",
+      "abcdefghijklmnopqrs界",
+      "\u001b[31m"
+    )
+    val width    = 20
+    val counters = RuntimeCounters()
+    val frame    = RuntimeCounterScope.withCounters(counters) {
+      ViewportLayoutEngine.layout(Lines(rows), width, rows.length)
+    }
+    val expected = rows.map { source =>
+      val slice = Ansi.sliceByColumns(source, 0, width)
+      Ansi.truncateToWidth(
+        OverlayRenderer.compositeLine("", slice.text, 0, slice.width, width),
+        width,
+        ""
+      )
+    }
+
+    assertEquals(frame.lines, expected)
+    assertEquals(counters.snapshot.fullWidthFastPathRows, (rows.length - 1).toLong)
+    assertEquals(Ansi.strip(frame.lines(6)).startsWith("\\u001B[2J"), true)
+    assertEquals(frame.lines(2).endsWith("\u001b[0m\u001b[0m"), true)
+    assertEquals(frame.lines(4).contains("\u001b]8;;\u0007"), true)
+
+  test("later decoration and typed metadata keep paint and clipping order"):
+    val control   = TerminalImageProtocol.encodeKitty(
+      Base64ImagePayload.from("AAAA").toOption.get,
+      imageId = 43,
+      widthCells = 1,
+      heightCells = 1
+    )
+    val child     = new Component:
+      override def render(width: Int): ComponentRender = ComponentRender(
+        Vector("abcdefgh"),
+        Vector(TerminalControlPlacement(0, 4, control)),
+        Vector(CursorPlacement(0, 0)),
+        DocumentMetadata(Vector(PromptStart(DocumentPosition(0, 2))))
+      )
+    val decorated = new Component with ViewportLayoutProvider with ViewportScrollProvider:
+      override def render(width: Int): ComponentRender                               = child.render(width)
+      override def viewportLayout: ViewportLayout                                    = ViewportScrollLayout(child)
+      override private[scalatui] def commitViewportGeometry(
+          contentExtent: Int,
+          viewportExtent: Int,
+          viewportWidth: Int,
+          layoutViewport: LayoutViewport
+      ): Int = 0
+      override private[scalatui] def viewportDecorations: Vector[ViewportDecoration] =
+        Vector(ViewportDecoration(0, 1, "Z", 1))
+    val counters  = RuntimeCounters()
+    val frame     = RuntimeCounterScope.withCounters(counters) {
+      ViewportLayoutEngine.layout(decorated, width = 8, height = 1)
+    }
+    val initial   = Ansi.truncateToWidth(
+      OverlayRenderer.compositeLine("", "abcdefgh", 0, 8, 8),
+      8,
+      ""
+    )
+    val expected  = Ansi.truncateToWidth(
+      OverlayRenderer.compositeLine(initial, "Z", 1, 1, 8),
+      8,
+      ""
+    )
+
+    assertEquals(frame.lines, Vector(expected))
+    assertEquals(counters.snapshot.fullWidthFastPathRows, 1L)
+    assertEquals(frame.render.controls, Vector(TerminalControlPlacement(0, 4, control)))
+    assertEquals(frame.render.cursorPlacements, Vector(CursorPlacement(0, 0)))
+    assertEquals(
+      frame.render.documentMetadata,
+      DocumentMetadata(Vector(PromptStart(DocumentPosition(0, 2))))
+    )
