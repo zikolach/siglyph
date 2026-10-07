@@ -335,9 +335,13 @@ final class PosixTerminal(
   private def flushLoop(generation: Long, onFailure: Throwable => Unit): Unit =
     try
       while inputDelivery.isActive(generation) do
-        Thread.sleep(PosixTerminal.IncompleteEscapeFlushMillis)
         workerFailureForTesting("flush").foreach(throw _)
-        flushPending(generation)
+        inputDelivery.awaitFlushAndDeliver(
+          generation,
+          inputBuffer.nanosUntilFlush(System.nanoTime()),
+          inputBuffer.flushIfIdle(System.nanoTime()),
+          TerminalInputBuffer.IncompleteSequenceFlushNanos
+        )(inputHandler)
     catch case error: Throwable => reportFailure(generation, "flush", error, onFailure)
     finally clearFlushThread(Thread.currentThread())
 
@@ -384,9 +388,6 @@ final class PosixTerminal(
       catch case _: Throwable => ()
       try onFailure(error)
       catch case _: Throwable => ()
-
-  private def flushPending(generation: Long): Unit =
-    parseAndDeliver(generation, inputBuffer.flush())
 
   private def parseAndDeliver(generation: Long, parse: => Vector[TerminalInput]): Unit =
     inputDelivery.parseAndDeliver(generation, parse)(inputHandler)
@@ -468,8 +469,7 @@ final class PosixTerminal(
     (value.toInt | mask).toUInt
 
 object PosixTerminal:
-  private val ResizePollMillis            = 150L
-  private val IncompleteEscapeFlushMillis = 75L
+  private val ResizePollMillis = 150L
 
   private[native] enum ReadErrorClassification:
     case Retry, Stop

@@ -42,13 +42,43 @@ private[terminal] final class OrderedInputDelivery:
   )(deliver: TerminalInput => Unit): Unit =
     val batch = stateLock.synchronized {
       Option.when(active && generation === expectedGeneration) {
-        val inputs = parse
-        val id     = nextBatch
-        nextBatch += 1
-        id -> inputs
+        val batch = reserveBatch(parse)
+        stateLock.notifyAll()
+        batch
       }
     }
 
+    deliverBatch(expectedGeneration, batch)(deliver)
+
+  /** Waits on the parser lock so a fragment cannot race the deadline check or be lost on wakeup. */
+  def awaitFlushAndDeliver(
+      expectedGeneration: Long,
+      nanosUntilFlush: => Option[Long],
+      flush: => Vector[TerminalInput],
+      maxWaitNanos: Long
+  )(deliver: TerminalInput => Unit): Unit =
+    val batch = stateLock.synchronized {
+      if !active || (generation !== expectedGeneration) then None
+      else
+        nanosUntilFlush match
+          case Some(remaining) if remaining <= 0L => Some(reserveBatch(flush))
+          case remaining                          =>
+            val waitNanos = remaining.fold(maxWaitNanos)(value => math.min(value, maxWaitNanos))
+            stateLock.wait(waitNanos / 1000000L, (waitNanos % 1000000L).toInt)
+            None
+    }
+    deliverBatch(expectedGeneration, batch)(deliver)
+
+  private def reserveBatch(parse: => Vector[TerminalInput]): (Long, Vector[TerminalInput]) =
+    val inputs = parse
+    val id     = nextBatch
+    nextBatch += 1
+    id -> inputs
+
+  private def deliverBatch(
+      expectedGeneration: Long,
+      batch: Option[(Long, Vector[TerminalInput])]
+  )(deliver: TerminalInput => Unit): Unit =
     batch.foreach { (id, inputs) =>
       var interrupted = false
       try
