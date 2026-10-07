@@ -22,6 +22,35 @@ import scalatui.terminal.{
 }
 
 class EditorSuite extends munit.FunSuite:
+  test("cached visual rows track cursor moves, edits, and width reflow with Unicode and ANSI"):
+    val source = "\u001b[31m" + "a界e\u0301\t👩💻" + Ansi.Reset + "\nsecond line"
+    val editor = Editor(source)
+    editor.focused = true
+
+    def matchesFresh(width: Int): Unit =
+      val fresh = Editor(editor.text)
+      fresh.focused = true
+      fresh.setCursor(editor.cursor)
+      assertEquals(editor.render(width), fresh.render(width))
+
+    matchesFresh(3)
+    Vector(0, 2, 5, 8).foreach { column =>
+      editor.setCursor(EditorCursor(0, column))
+      matchesFresh(3)
+    }
+    matchesFresh(1)
+    matchesFresh(12)
+    matchesFresh(0)
+    editor.setCursor(EditorCursor(1, 3))
+    matchesFresh(3)
+    editor.insertAtCursor("界")
+    matchesFresh(3)
+    assert(editor.undo())
+    matchesFresh(3)
+    editor.setText("\u001b]8;;https://example.com\u001b\\" + "🙂a" + "\u001b]8;;\u001b\\")
+    matchesFresh(2)
+    matchesFresh(1)
+
   test("renders focused fake cursor on character and hides it when unfocused"):
     val editor = Editor("abc")
     editor.setCursor(EditorCursor(0, 1))
