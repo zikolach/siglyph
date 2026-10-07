@@ -111,6 +111,10 @@ private[components] final case class EditorRenderPlan(
 ):
   def sourceColumnAt(row: Int, visualColumn: Int): Int = rows(row).sourceColumnAt(visualColumn)
 
+  def withCursor(cursor: EditorCursor): EditorRenderPlan =
+    val (position, boundary) = EditorLayout.cursorFor(cursor, rows)
+    copy(layout = layout.copy(cursor = position), cursorBoundary = boundary)
+
 object EditorLayout:
   /**
    * Compute wrapped visual lines and cursor coordinates from sanitized final display graphemes.
@@ -170,7 +174,7 @@ object EditorLayout:
       if rowStart < projection.units.length then appendRow(projection.units.length, omitted = false)
       result.result()
 
-  private def cursorFor(
+  private[components] def cursorFor(
       cursor: EditorCursor,
       rows: Vector[EditorRenderRow]
   ): (EditorVisualCursor, Int) =

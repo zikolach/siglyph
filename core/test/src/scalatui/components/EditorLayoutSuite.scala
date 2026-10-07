@@ -4,6 +4,28 @@ import scalatui.ansi.Ansi
 import scalatui.editing.{EditorBuffer, EditorCursor}
 
 class EditorLayoutSuite extends munit.FunSuite:
+  test("retargets a projected plan for cursor-only navigation without changing row ownership"):
+    val source = "a界" + "\u001b[31m" + "e\u0301" + "\u001b[0m" + "\t" + "👩💻z"
+    val buffer = EditorBuffer.fromText(source, EditorCursor(0, 0))
+    val plan   = EditorLayout.renderPlan(buffer, 3)
+
+    (0 to buffer.clustersForLine(0).length).foreach { column =>
+      buffer.setCursor(EditorCursor(0, column))
+      val reused = plan.withCursor(buffer.cursor)
+      val fresh  = EditorLayout.renderPlan(buffer, 3)
+      assert(reused.rows eq plan.rows)
+      assertEquals(reused.layout, fresh.layout)
+      assertEquals(reused.cursorBoundary, fresh.cursorBoundary)
+      reused.rows.indices.foreach(row =>
+        (0 to 3).foreach(visualColumn =>
+          assertEquals(
+            reused.sourceColumnAt(row, visualColumn),
+            fresh.sourceColumnAt(row, visualColumn)
+          )
+        )
+      )
+    }
+
   test("wraps long logical lines and maps cursor to wrapped visual row"):
     val buffer = EditorBuffer.fromText("abcdef", EditorCursor(0, 5))
     val layout = EditorLayout.fromBuffer(buffer, width = 3)

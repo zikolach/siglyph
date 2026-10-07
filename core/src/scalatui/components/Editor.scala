@@ -55,6 +55,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
       MouseInputHandler:
   private val stateBoundary                                         = ComponentStateBoundary()
   private var buffer                                                = EditorBuffer(initialText)
+  private var layoutCache                                           = Option.empty[Editor.LayoutCache]
   private var isFocused                                             = false
   private var context                                               = Option.empty[TUIContext]
   private var provider                                              = options.autocompleteProvider
@@ -219,9 +220,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     val snapshot         = stateBoundary {
       Editor.RenderSnapshot(buffer.snapshot, isFocused, currentAutocomplete.isEmpty)
     }
-    val renderBuffer     = EditorBuffer("")
-    renderBuffer.restore(snapshot.buffer)
-    val plan             = EditorLayout.renderPlan(renderBuffer, width)
+    val plan             = layoutPlan(snapshot.buffer, width)
     val cursorPlacements = Vector.newBuilder[CursorPlacement]
     val lines            = plan.rows.zipWithIndex.map { (row, index) =>
       if snapshot.focused && snapshot.autocompleteEmpty && index === plan.layout.cursor.row then
@@ -241,6 +240,22 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     }
     placementEffect.foreach(_.apply())
     ComponentRender(lines, Vector.empty, cursorPlacements.result())
+
+  private def layoutPlan(snapshot: EditorBuffer.Snapshot, width: Int): EditorRenderPlan =
+    val cached = stateBoundary(layoutCache)
+    val plan   = cached match
+      case Some(value)
+          if value.width === width && (value.lines eq snapshot.lines) &&
+            (value.pasteMarkers eq snapshot.pasteMarkers) =>
+        value.plan.withCursor(snapshot.cursor)
+      case _ =>
+        val renderBuffer = EditorBuffer("")
+        renderBuffer.restore(snapshot)
+        EditorLayout.renderPlan(renderBuffer, width)
+    stateBoundary {
+      layoutCache = Some(Editor.LayoutCache(snapshot.lines, snapshot.pasteMarkers, width, plan))
+    }
+    plan
 
   private def transition[A](operation: Editor.Effects => A): A =
     stateBoundary.transition(operation)
@@ -350,11 +365,11 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
         case TerminalInput.Key(TerminalKey.Enter, modifiers)                                    =>
           handleEnter(modifiers, effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorCursorUp)                  =>
-          val layout = EditorLayout.fromBuffer(buffer, math.max(1, lastRenderedWidth))
+          val layout = layoutPlan(buffer.snapshot, math.max(1, lastRenderedWidth)).layout
           if shouldUseHistoryUp(layout) then navigateHistory(-1, effects)
           else move(_.moveUp(), effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorCursorDown)                =>
-          val layout = EditorLayout.fromBuffer(buffer, math.max(1, lastRenderedWidth))
+          val layout = layoutPlan(buffer.snapshot, math.max(1, lastRenderedWidth)).layout
           if shouldUseHistoryDown(layout) then navigateHistory(1, effects)
           else move(_.moveDown(), effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorPageUp)                    =>
@@ -718,7 +733,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
       else false
 
   private def pageScroll(direction: Int, effects: Editor.Effects): InputResult =
-    val plan       = EditorLayout.renderPlan(buffer, math.max(1, lastRenderedWidth))
+    val plan       = layoutPlan(buffer.snapshot, math.max(1, lastRenderedWidth))
     val pageSize   = 5
     val targetRow  = plan.layout.cursor.row + direction * pageSize
     val boundedRow = math.max(0, math.min(plan.layout.lines.length - 1, targetRow))
@@ -1059,6 +1074,12 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     )
 
 object Editor:
+  private final case class LayoutCache(
+      lines: Vector[String],
+      pasteMarkers: Map[Int, String],
+      width: Int,
+      plan: EditorRenderPlan
+  )
   private type Effects = ComponentEffects
 
   private final case class RenderSnapshot(

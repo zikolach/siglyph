@@ -1,6 +1,7 @@
 package scalatui.benchmark
 
-import scalatui.components.{ScrollView, StackEntry, StackEntryOptions, Text, VStack}
+import scalatui.components.{Editor, ScrollView, StackEntry, StackEntryOptions, Text, VStack}
+import scalatui.editing.EditorCursor
 import scalatui.core.{
   Component,
   ComponentRender,
@@ -69,6 +70,7 @@ private[scalatui] object BenchmarkWorkloads:
 
   def scenarios(scale: Scale): Vector[Scenario] = Vector(
     fullWidthRowPaint(),
+    editorCursorNavigation(),
     largeTranscriptLayout(scale),
     append(scale),
     differentialTail(scale),
@@ -102,6 +104,22 @@ private[scalatui] object BenchmarkWorkloads:
       while index < 100 do
         val frame = ViewportLayoutEngine.layout(component, 80, 24)
         checksum += frame.lines.length + frame.lines.head.length
+        index += 1
+      Observation(RuntimeCounterSnapshot(0, 0, 0, 0, 0, 0), checksum)
+  )
+
+  private def editorCursorNavigation(): Scenario = Scenario(
+    "editor-cursor-navigation",
+    Vector("logicalLines" -> "200", "suffixChars" -> "92", "cursorMoves" -> "40", "width" -> "40"),
+    () =>
+      val editor   = Editor(Vector.tabulate(200)(index => s"$index " + "x".repeat(92)).mkString("\n"))
+      editor.focused = true
+      var checksum = 0L
+      var index    = 0
+      while index < 40 do
+        editor.setCursor(EditorCursor(100 + index % 20, index % 30))
+        val render = editor.render(40)
+        checksum += render.lines.length + render.cursorPlacements.headOption.map(_.row).getOrElse(0)
         index += 1
       Observation(RuntimeCounterSnapshot(0, 0, 0, 0, 0, 0), checksum)
   )
