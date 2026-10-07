@@ -18,7 +18,7 @@ mill benchmarkJvm.run
 
 Each scenario reports its exact workload metadata, median wall time after warmup, deterministic runtime counters, and a numeric checksum. The JVM runner reports median current-thread allocated bytes when `com.sun.management.ThreadMXBean` supports and permits allocation tracking. It prints `unsupported` on a JDK without that API. The project does not add JMH, a profiler agent, or another allocation dependency, so allocation counts exclude work on other threads and cannot identify allocation sites.
 
-The fixed scenarios cover large transcript layout, append-only output, a differential tail change, Unicode wrapping and width reflow, overlays, nested scrolling, search indexing, selection mapping, and image-heavy typed frames.
+The fixed scenarios include `full-width-row-paint` (100 immutable 80×24 frames of full-width plain rows). Select only it with `--only full-width-row-paint` on either runner. An unknown `--only` name fails before reporting a benchmark and lists the supported scenario names. Its direct-layout checksum is deterministic; TUI runtime counters remain zero because the workload does not create a TUI. The fixed scenarios also cover large transcript layout, append-only output, a differential tail change, Unicode wrapping and width reflow, overlays, nested scrolling, search indexing, selection mapping, and image-heavy typed frames.
 
 ## Controlled comparison
 
@@ -44,3 +44,14 @@ The Native target runs the fixed quick workload, reports exact metadata and medi
 ## Checked-in counter baseline
 
 `PerformanceCounterBaselineSuite` records the reviewed quick-workload algorithmic baseline. It checks visible-row painting, same-frame render reuse, bounded search scanning, image encoding, and terminal writes on JVM and Scala Native. Runtime counters contain numbers only. They retain no rendered rows, image payloads, or application text.
+
+## Full-width row paint local comparison (2026-10-06)
+
+On one Linux x86_64 host with JDK 21 for Mill, JDK 17 runtime Java, and Clang 23.1.1, `--warmup 3 --samples 5 --only full-width-row-paint` produced these medians with the same 11200 checksum:
+
+| Runtime | Before | After | Allocation before → after |
+| --- | ---: | ---: | ---: |
+| JVM | 315,631,275 ns | 209,566,375 ns | 629,819,064 → 460,567,840 thread bytes |
+| Scala Native | 5,868,456,041 ns | 4,513,203,909 ns | Unsupported |
+
+These are opt-in, machine-dependent workload measurements, not a general application speedup or CI threshold. The Native runner does not report allocation.

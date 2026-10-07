@@ -6,24 +6,27 @@ private[scalatui] final case class RuntimeCounterSnapshot(
     paintedRows: Long,
     terminalWrites: Long,
     controlEncodes: Long,
-    searchScans: Long
+    searchScans: Long,
+    fullWidthFastPathRows: Long
 ) derives CanEqual
 
 /**
  * Package-local counters that retain no rendered lines, controls, payloads, or application text.
  */
 private[scalatui] final class RuntimeCounters:
-  private var componentRenderCount = 0L
-  private var paintedRowCount      = 0L
-  private var terminalWriteCount   = 0L
-  private var controlEncodeCount   = 0L
-  private var searchScanCount      = 0L
+  private var componentRenderCount   = 0L
+  private var paintedRowCount        = 0L
+  private var terminalWriteCount     = 0L
+  private var controlEncodeCount     = 0L
+  private var searchScanCount        = 0L
+  private var fullWidthFastPathCount = 0L
 
   def recordComponentRender(): Unit       = synchronized { componentRenderCount += 1 }
   def recordPaintedRows(count: Int): Unit = synchronized { paintedRowCount += math.max(0, count) }
   def recordTerminalWrite(): Unit         = synchronized { terminalWriteCount += 1 }
   def recordControlEncode(): Unit         = synchronized { controlEncodeCount += 1 }
   def recordSearchScans(count: Int): Unit = synchronized { searchScanCount += math.max(0, count) }
+  def recordFullWidthFastPathRow(): Unit  = synchronized { fullWidthFastPathCount += 1 }
 
   def snapshot: RuntimeCounterSnapshot = synchronized {
     RuntimeCounterSnapshot(
@@ -31,7 +34,8 @@ private[scalatui] final class RuntimeCounters:
       paintedRowCount,
       terminalWriteCount,
       controlEncodeCount,
-      searchScanCount
+      searchScanCount,
+      fullWidthFastPathCount
     )
   }
 
@@ -47,3 +51,6 @@ private[core] object RuntimeCounterScope:
 
   def recordComponentRender(): Unit =
     Option(current.get()).foreach(_.recordComponentRender())
+
+  def recordFullWidthFastPathRow(): Unit =
+    Option(current.get()).foreach(_.recordFullWidthFastPathRow())

@@ -10,7 +10,8 @@ import scalatui.core.{
   TUI,
   TUIOptions,
   TerminalControlPlacement,
-  ViewportRangeRenderer
+  ViewportRangeRenderer,
+  ViewportLayoutEngine
 }
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{
@@ -67,6 +68,7 @@ private[scalatui] object BenchmarkWorkloads:
       else s"row $index transcript needle"
 
   def scenarios(scale: Scale): Vector[Scenario] = Vector(
+    fullWidthRowPaint(),
     largeTranscriptLayout(scale),
     append(scale),
     differentialTail(scale),
@@ -76,6 +78,32 @@ private[scalatui] object BenchmarkWorkloads:
     search(scale),
     selectionMapping(scale),
     imageHeavyFrames(scale)
+  )
+
+  def selectedScenarios(scale: Scale, only: Option[String]): Vector[Scenario] =
+    val available = scenarios(scale)
+    only match
+      case None       => available
+      case Some(name) =>
+        available.find(_.name === name) match
+          case Some(scenario) => Vector(scenario)
+          case None           =>
+            throw IllegalArgumentException(
+              s"Unknown benchmark scenario for --only; expected one of: ${available.map(_.name).mkString(", ")}"
+            )
+
+  private def fullWidthRowPaint(): Scenario = Scenario(
+    "full-width-row-paint",
+    Vector("terminal" -> "80x24", "frames" -> "100", "rowKind" -> "plain-full-width"),
+    () =>
+      val component = MutableLines(Vector.fill(24)("x".repeat(80)))
+      var checksum  = 0L
+      var index     = 0
+      while index < 100 do
+        val frame = ViewportLayoutEngine.layout(component, 80, 24)
+        checksum += frame.lines.length + frame.lines.head.length
+        index += 1
+      Observation(RuntimeCounterSnapshot(0, 0, 0, 0, 0, 0), checksum)
   )
 
   private def largeTranscriptLayout(scale: Scale): Scenario = Scenario(

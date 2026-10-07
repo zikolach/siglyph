@@ -798,6 +798,7 @@ object ViewportLayoutEngine:
 
   private def paintFrame(root: ResolvedBox, width: Int, height: Int): LayoutFrame =
     val lines       = Array.fill(math.max(0, height))("")
+    val readyRows   = Array.fill(math.max(0, height))(false)
     val controls    = Vector.newBuilder[TerminalControlPlacement]
     val cursors     = Vector.newBuilder[CursorPlacement]
     val allMarkers  = Vector.newBuilder[DocumentMarker]
@@ -824,13 +825,26 @@ object ViewportLayoutEngine:
             val leadingGap  = math.max(0, sourceStart - prefixWidth)
             val slice       = Ansi.sliceByColumns(line, sourceStart, math.max(0, span - leadingGap))
             if slice.text.nonEmpty then
-              lines(targetRow) = OverlayRenderer.compositeLine(
-                lines(targetRow),
-                slice.text,
-                visibleLeft + leadingGap,
-                slice.width,
-                width
-              )
+              if slice.width > 0 && sourceStart === 0 && visibleLeft === 0 &&
+                visibleRight === width && lines(targetRow).isEmpty
+              then
+                // Match empty-base composition, including its second bounded ANSI slice and
+                // reset boundaries, without rescanning the empty base or rebuilding its gaps.
+                val overlay = Ansi.sliceByColumns(slice.text, 0, slice.width)
+                lines(targetRow) =
+                  Ansi.Reset + overlay.text + " ".repeat(math.max(0, slice.width - overlay.width)) +
+                    Ansi.Reset
+                readyRows(targetRow) = true
+                RuntimeCounterScope.recordFullWidthFastPathRow()
+              else
+                lines(targetRow) = OverlayRenderer.compositeLine(
+                  lines(targetRow),
+                  slice.text,
+                  visibleLeft + leadingGap,
+                  slice.width,
+                  width
+                )
+                readyRows(targetRow) = false
           }
           targetRow += 1
 
@@ -885,13 +899,16 @@ object ViewportLayoutEngine:
                 decoration.width,
                 width
               )
+              readyRows(targetRow) = false
           }
         case _                              => ()
 
     visit(root)
     val metadata = DocumentMetadata(allMarkers.result())
     val render   = ComponentRender(
-      lines.toVector.map(line => Ansi.truncateToWidth(line, width, "")),
+      lines.indices.iterator.map(index =>
+        if readyRows(index) then lines(index) else Ansi.truncateToWidth(lines(index), width, "")
+      ).toVector,
       controls.result(),
       cursors.result(),
       DocumentMetadata(shownMarker.result())
