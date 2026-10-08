@@ -53,6 +53,106 @@ class TerminalInputBufferSuite extends munit.FunSuite:
     assertEquals(buffer.flush(), Vector(TerminalInput.Key(TerminalKey.Escape)))
     assertEquals(buffer.flush(), Vector.empty)
 
+  test("lone Escape has a short deadline while fragmented Alt and CSI use idle deadlines"):
+    val millis = 1000000L
+    val escape = TerminalInputBuffer()
+    assertEquals(escape.processAt(chunk("\u001b"), 0L), Vector.empty)
+    assertEquals(escape.nanosUntilFlush(34L * millis), Some(millis))
+    assertEquals(escape.flushIfIdle(34L * millis), Vector.empty)
+    assertEquals(escape.flushIfIdle(35L * millis), Vector(TerminalInput.Key(TerminalKey.Escape)))
+    assertEquals(escape.flushIfIdle(100L * millis), Vector.empty)
+
+    val csi = TerminalInputBuffer()
+    assertEquals(csi.processAt(chunk("\u001b"), 0L), Vector.empty)
+    assertEquals(csi.processAt(chunk("["), 30L * millis), Vector.empty)
+    assertEquals(csi.nanosUntilFlush(104L * millis), Some(millis))
+    assertEquals(
+      csi.processAt(chunk("A"), 104L * millis),
+      Vector(TerminalInput.Key(TerminalKey.Up))
+    )
+    assertEquals(csi.flushIfIdle(200L * millis), Vector.empty)
+
+    val alt = TerminalInputBuffer()
+    assertEquals(alt.processAt(chunk("\u001b"), 0L), Vector.empty)
+    assertEquals(
+      alt.processAt(chunk("x"), 30L * millis),
+      Vector(TerminalInput.Key(TerminalKey.Character("x"), KeyModifiers(alt = true)))
+    )
+    assertEquals(alt.flushIfIdle(100L * millis), Vector.empty)
+
+  test("pending Alt UTF-8, repeated Escape, CSI, and paste retain exact framing at deadlines"):
+    val millis = 1000000L
+    val alt    = TerminalInputBuffer()
+    val prefix = Array[Byte](0x1b, 0xf0.toByte, 0x9f.toByte)
+    assertEquals(alt.processAt(TerminalInputChunk(prefix.take(1)), 0L), Vector.empty)
+    assertEquals(alt.processAt(TerminalInputChunk(prefix.slice(1, 2)), 30L * millis), Vector.empty)
+    assertEquals(alt.processAt(TerminalInputChunk(prefix.slice(2, 3)), 100L * millis), Vector.empty)
+    assertEquals(alt.flushIfIdle(174L * millis), Vector.empty)
+    assertEquals(
+      alt.flushIfIdle(175L * millis),
+      Vector(
+        TerminalInput.RawStart(TerminalRawKind.Escape),
+        TerminalInput.RawChunk(TerminalInputChunk(prefix)),
+        TerminalInput.RawEnd(TerminalRawTermination.Incomplete)
+      )
+    )
+    assertEquals(
+      alt.processAt(chunk("x"), 176L * millis),
+      Vector(TerminalInput.Key(TerminalKey.Character("x")))
+    )
+
+    val repeated = TerminalInputBuffer()
+    assertEquals(repeated.processAt(chunk("\u001b"), 0L), Vector.empty)
+    assertEquals(
+      repeated.processAt(chunk("\u001b"), 30L * millis),
+      Vector(TerminalInput.Key(TerminalKey.Escape, KeyModifiers(alt = true)))
+    )
+    assertEquals(repeated.flushIfIdle(100L * millis), Vector.empty)
+
+    val separated = TerminalInputBuffer()
+    assertEquals(separated.processAt(chunk("\u001b"), 0L), Vector.empty)
+    assertEquals(separated.flushIfIdle(35L * millis), Vector(TerminalInput.Key(TerminalKey.Escape)))
+    assertEquals(separated.processAt(chunk("\u001b"), 36L * millis), Vector.empty)
+    assertEquals(separated.flushIfIdle(71L * millis), Vector(TerminalInput.Key(TerminalKey.Escape)))
+
+    val utf8       = TerminalInputBuffer()
+    val utf8Prefix = Array[Byte](0xf0.toByte, 0x9f.toByte)
+    assertEquals(utf8.processAt(TerminalInputChunk(utf8Prefix.take(1)), 0L), Vector.empty)
+    assertEquals(utf8.processAt(TerminalInputChunk(utf8Prefix.drop(1)), 70L * millis), Vector.empty)
+    assertEquals(utf8.flushIfIdle(144L * millis), Vector.empty)
+    assertEquals(
+      utf8.flushIfIdle(145L * millis),
+      Vector(
+        TerminalInput.RawStart(TerminalRawKind.Utf8),
+        TerminalInput.RawChunk(TerminalInputChunk(utf8Prefix)),
+        TerminalInput.RawEnd(TerminalRawTermination.Incomplete)
+      )
+    )
+
+    val csi = TerminalInputBuffer()
+    assertEquals(csi.processAt(chunk("\u001b[1;"), 0L), Vector.empty)
+    assertEquals(csi.flushIfIdle(74L * millis), Vector.empty)
+    assertEquals(
+      csi.flushIfIdle(75L * millis),
+      Vector(
+        TerminalInput.RawStart(TerminalRawKind.Csi),
+        TerminalInput.RawChunk(chunk("\u001b[1;")),
+        TerminalInput.RawEnd(TerminalRawTermination.Incomplete)
+      )
+    )
+
+    val paste = TerminalInputBuffer()
+    assertEquals(paste.processAt(chunk("\u001b[200~hello"), 0L), Vector(TerminalInput.PasteStart))
+    assertEquals(paste.nanosUntilFlush(1000L * millis), None)
+    assertEquals(paste.flushIfIdle(1000L * millis), Vector.empty)
+    assertEquals(
+      paste.processAt(chunk("\u001b[201~"), 1001L * millis),
+      Vector(
+        TerminalInput.PasteChunk(chunk("hello")),
+        TerminalInput.PasteEnd
+      )
+    )
+
   test("escape continuation before flush remains one combined key"):
     val buffer = TerminalInputBuffer()
     assertEquals(buffer.process(chunk("\u001b")), Vector.empty)

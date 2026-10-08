@@ -123,6 +123,74 @@ class StreamTerminalSuite extends munit.FunSuite:
       terminal.stop()
     assertEquals(inputs, Vector(TerminalInput.Key(TerminalKey.Escape)))
 
+  test("stream terminal keeps split CSI intact across a 50 ms read gap"):
+    val releaseRead = CountDownLatch(1)
+    val firstRead   = CountDownLatch(1)
+    val observed    = CountDownLatch(1)
+    val in          = new InputStream:
+      private var reads                                               = 0
+      override def read(): Int                                        = -1
+      override def read(buffer: Array[Byte], off: Int, len: Int): Int =
+        reads += 1
+        reads match
+          case 1 =>
+            buffer(off) = 0x1b.toByte
+            buffer(off + 1) = '['.toByte
+            firstRead.countDown()
+            2
+          case 2 =>
+            releaseRead.await()
+            buffer(off) = 'A'.toByte
+            1
+          case _ =>
+            releaseRead.await()
+            -1
+    val terminal    = StreamTerminal(input = in)
+    val lock        = Object()
+    var inputs      = Vector.empty[TerminalInput]
+    terminal.start(
+      input => {
+        lock.synchronized(inputs :+= input)
+        observed.countDown()
+      },
+      () => ()
+    )
+    try
+      assert(firstRead.await(1, TimeUnit.SECONDS))
+      Thread.sleep(50)
+      releaseRead.countDown()
+      assert(observed.await(1, TimeUnit.SECONDS))
+      assertEquals(lock.synchronized(inputs), Vector(TerminalInput.Key(TerminalKey.Up)))
+    finally
+      releaseRead.countDown()
+      terminal.stop()
+
+  test("stopping a generation wakes a dormant flush worker without stale delivery"):
+    val delivery = OrderedInputDelivery()
+    val entered  = CountDownLatch(1)
+    val finished = CountDownLatch(1)
+    val observed = scala.collection.mutable.ArrayBuffer.empty[TerminalInput]
+    val old      = delivery.start(())
+    val worker   = Thread(() =>
+      try
+        delivery.awaitFlushAndDeliver(
+          old, {
+            entered.countDown()
+            None
+          },
+          Vector(TerminalInput.PasteEnd),
+          TimeUnit.SECONDS.toNanos(5)
+        )(observed += _)
+      finally finished.countDown()
+    )
+    worker.start()
+    assert(entered.await(1, TimeUnit.SECONDS))
+    delivery.stop(old, ())
+    assert(finished.await(1, TimeUnit.SECONDS))
+    val current  = delivery.start(())
+    delivery.parseAndDeliver(current, Vector(TerminalInput.PasteStart))(observed += _)
+    assertEquals(observed.toVector, Vector(TerminalInput.PasteStart))
+
   test("stream terminal preserves parser order across read and flush threads"):
     val allowSecondRead = CountDownLatch(1)
     val escapeStarted   = CountDownLatch(1)
@@ -603,7 +671,7 @@ class StreamTerminalSuite extends munit.FunSuite:
             Option(terminal).foreach(_.drainInput())
             drained.countDown()
             try
-              // Keep input blocked for 150 ms, spanning more than one 75 ms flush period.
+              // Keep input blocked for 150 ms, spanning more than one 75 ms worker wake.
               Thread.sleep(150)
             catch case _: InterruptedException => ()
             finally observationWindowComplete.countDown()

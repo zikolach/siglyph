@@ -8,15 +8,43 @@ import scala.collection.mutable.ArrayBuffer
 final class TerminalInputBuffer:
   import TerminalInputBuffer.*
 
-  private var mode: Mode     = Mode.Normal
-  private val candidate      = ArrayBuffer.empty[Byte]
-  private val pasteTail      = ArrayBuffer.empty[Byte]
-  private val confirmedPaste = ArrayBuffer.empty[Byte]
+  private var mode: Mode         = Mode.Normal
+  private val candidate          = ArrayBuffer.empty[Byte]
+  private val pasteTail          = ArrayBuffer.empty[Byte]
+  private val confirmedPaste     = ArrayBuffer.empty[Byte]
+  private var lastPendingAtNanos = 0L
 
   def process(chunk: TerminalInputChunk): Vector[TerminalInput] =
+    processAt(chunk, System.nanoTime())
+
+  /** Parser-lock-only clock seam for the backend deadline and portable deterministic tests. */
+  private[terminal] def processAt(
+      chunk: TerminalInputChunk,
+      nowNanos: Long
+  ): Vector[TerminalInput] =
     val out = Vector.newBuilder[TerminalInput]
     chunk.toArray.foreach(byte => accept(byte, out))
+    if hasPendingNonPaste then lastPendingAtNanos = nowNanos
     out.result()
+
+  /** None means complete input or active paste; otherwise time until the idle framing cutoff. */
+  private[terminal] def nanosUntilFlush(nowNanos: Long): Option[Long] =
+    Option.when(hasPendingNonPaste) {
+      val timeout =
+        if mode === Mode.Normal && candidate.length === 1 && candidate.head === Esc then
+          LoneEscapeFlushNanos
+        else IncompleteSequenceFlushNanos
+      timeout - (nowNanos - lastPendingAtNanos)
+    }
+
+  private[terminal] def flushIfIdle(nowNanos: Long): Vector[TerminalInput] =
+    if nanosUntilFlush(nowNanos).exists(_ <= 0L) then flush() else Vector.empty
+
+  private def hasPendingNonPaste: Boolean =
+    mode match
+      case Mode.Normal       => candidate.nonEmpty
+      case Mode.Raw(_, _, _) => true
+      case Mode.Paste        => false
 
   def flush(): Vector[TerminalInput] =
     val out = Vector.newBuilder[TerminalInput]
@@ -39,6 +67,7 @@ final class TerminalInputBuffer:
     candidate.clear()
     pasteTail.clear()
     confirmedPaste.clear()
+    lastPendingAtNanos = 0L
 
   private def accept(byte: Byte, out: Builder): Unit = mode match
     case Mode.Paste                            => acceptPaste(byte, out)
@@ -155,10 +184,12 @@ final class TerminalInputBuffer:
     )
 
 object TerminalInputBuffer:
-  val MaxTypedSequenceBytes: Int = 4096
-  private val Esc: Byte          = 0x1b
-  private val PasteStart         = Array[Byte](0x1b, 0x5b, 0x32, 0x30, 0x30, 0x7e)
-  private val PasteEnd           = Array[Byte](0x1b, 0x5b, 0x32, 0x30, 0x31, 0x7e)
+  val MaxTypedSequenceBytes: Int                     = 4096
+  private[terminal] val LoneEscapeFlushNanos         = 35L * 1000000L
+  private[terminal] val IncompleteSequenceFlushNanos = 75L * 1000000L
+  private val Esc: Byte                              = 0x1b
+  private val PasteStart                             = Array[Byte](0x1b, 0x5b, 0x32, 0x30, 0x30, 0x7e)
+  private val PasteEnd                               = Array[Byte](0x1b, 0x5b, 0x32, 0x30, 0x31, 0x7e)
   private type Builder = scala.collection.mutable.Builder[TerminalInput, Vector[TerminalInput]]
 
   private enum Mode:

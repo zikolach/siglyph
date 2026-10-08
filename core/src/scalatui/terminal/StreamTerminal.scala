@@ -122,9 +122,13 @@ class StreamTerminal(
   private def flushLoop(generation: Long, onFailure: Throwable => Unit): Unit =
     try
       while inputDelivery.isActive(generation) do
-        Thread.sleep(StreamTerminal.IncompleteEscapeFlushMillis)
         workerFailureForTesting("flush").foreach(throw _)
-        flushPending(generation)
+        inputDelivery.awaitFlushAndDeliver(
+          generation,
+          inputBuffer.nanosUntilFlush(System.nanoTime()),
+          inputBuffer.flushIfIdle(System.nanoTime()),
+          TerminalInputBuffer.IncompleteSequenceFlushNanos
+        )(inputHandler)
     catch case error: Throwable => reportFailure(generation, "flush", error, onFailure)
     finally clearFlushThread(Thread.currentThread())
 
@@ -183,7 +187,5 @@ class StreamTerminal(
   }
 
 object StreamTerminal:
-  private val IncompleteEscapeFlushMillis = 75L
-
   private[terminal] def envInt(name: String): Option[Int] =
     Option(System.getenv(name)).flatMap(value => scala.util.Try(value.toInt).toOption).filter(_ > 0)
