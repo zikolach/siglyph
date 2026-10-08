@@ -16,6 +16,45 @@ private[core] final case class PreparedFrame(
     documentMetadata: DocumentMetadata
 ) derives CanEqual
 
+/** Frame-local bounded character chunks; a surrogate pair is never split between writes. */
+private[core] final class FrameOutput:
+  private val chunkSize = 65536
+  private val current   = new java.lang.StringBuilder(256)
+  private val completed = Vector.newBuilder[String]
+
+  def append(value: String): FrameOutput =
+    var offset = 0
+    while offset < value.length do
+      var count = math.min(chunkSize - current.length(), value.length - offset)
+      if count > 0 && offset + count < value.length &&
+        Character.isHighSurrogate(value.charAt(offset + count - 1)) &&
+        Character.isLowSurrogate(value.charAt(offset + count))
+      then count -= 1
+      if count === 0 then flushChunk()
+      else
+        current.append(value, offset, offset + count)
+        offset += count
+        if current.length() === chunkSize then flushChunk()
+    this
+
+  def append(value: Char): FrameOutput =
+    current.append(value)
+    if current.length() === chunkSize then flushChunk()
+    this
+
+  def nonEmpty: Boolean = current.length() > 0
+
+  def chunks: Vector[String] =
+    flushChunk()
+    completed.result()
+
+  def result(): String = chunks.mkString
+
+  private def flushChunk(): Unit =
+    if current.length() > 0 then
+      completed += current.toString
+      current.setLength(0)
+
 /** Shared serialized terminal-write boundary used by runtime services and renderer policies. */
 private[core] final class RuntimeTerminalServices(
     terminal: Terminal,
@@ -31,10 +70,35 @@ private[core] final class RuntimeTerminalServices(
     write(terminal.write(value))
     onWrite(kind, value)
 
-  def writeRenderBuffer(buffer: String): Unit =
-    counters.recordTerminalWrite()
-    write(terminal.write(buffer))
-    onWrite(TUIDiagnosticWriteKind.Render, buffer)
+  def writeRenderChunks(chunks: Vector[String]): Unit =
+    var written       = 0
+    var repairWritten = false
+    var failure       = Option.empty[Throwable]
+    val repair        = "\u001b\\" + TUI.SyncEnd + TUI.AutoWrapOn
+    write {
+      try
+        chunks.foreach { chunk =>
+          counters.recordTerminalWrite()
+          terminal.write(chunk)
+          written += 1
+        }
+      catch
+        case error: Throwable =>
+          failure = Some(error)
+          // A chunk may end inside Kitty APC or iTerm OSC. ST also terminates either protocol.
+          // The sink may be broken, so this is only a best-effort state repair.
+          try
+            counters.recordTerminalWrite()
+            terminal.write(repair)
+            repairWritten = true
+          catch case repairError: Throwable => error.addSuppressed(repairError)
+    }
+    var index         = 0
+    while index < written do
+      onWrite(TUIDiagnosticWriteKind.Render, chunks(index))
+      index += 1
+    if repairWritten then onWrite(TUIDiagnosticWriteKind.Cleanup, repair)
+    failure.foreach(throw _)
 
 /** Internal rendering boundary shared by the current width-only screen modes. */
 private[core] trait RendererPolicy:
@@ -186,7 +250,7 @@ private[core] final class NormalScreenPolicy(
       terminalHeight: Int
   ): Unit =
     if appended.lines.nonEmpty then
-      val builder            = StringBuilder()
+      val builder            = new FrameOutput
       appendRenderStart(builder)
       appendVerticalMove(builder, fromRow = cursorRow, toRow = 0)
       builder.append("\r\u001b[J")
@@ -199,7 +263,7 @@ private[core] final class NormalScreenPolicy(
       val retainedPaintedRow = appendFrameContent(builder, retained, fromRow = 0, Vector.empty)
       appendHardwareCursorMove(builder, retained, retainedPaintedRow)
       appendRenderEnd(builder)
-      writeRenderBuffer(builder.result())
+      writeRenderBuffer(builder.chunks)
       val totalRows          = appended.lines.length + math.max(1, retained.lines.length)
       latestFrameStartRow = latestFrameStartRow.map { start =>
         val appendStart = scrolledFrameStart(start, 0, totalRows, terminalHeight)
@@ -225,7 +289,7 @@ private[core] final class NormalScreenPolicy(
   ): Unit =
     val clear                = clearReason.nonEmpty
     val startRowBeforeRender = if clear then Some(0) else latestFrameStartRow
-    val builder              = StringBuilder()
+    val builder              = new FrameOutput
     appendRenderStart(builder)
     if clear then builder.append(clearSequence(clearReason.get))
     else
@@ -249,7 +313,7 @@ private[core] final class NormalScreenPolicy(
         appendFrameContent(builder, frame, fromRow = 0, cleanupControls)
     appendHardwareCursorMove(builder, frame, paintedRow)
     appendRenderEnd(builder)
-    writeRenderBuffer(builder.result())
+    writeRenderBuffer(builder.chunks)
     latestFrameStartRow = recovery match
       case Some(value) =>
         val liveFootprint = math.max(1, frame.lines.length)
@@ -268,7 +332,7 @@ private[core] final class NormalScreenPolicy(
     cursorRow = finalCursorRow(frame, paintedRow)
 
   private def partialRender(frame: PreparedFrame, firstChanged: Int): Unit =
-    val builder    = StringBuilder()
+    val builder    = new FrameOutput
     appendRenderStart(builder)
     appendVerticalMove(builder, fromRow = cursorRow, toRow = firstChanged)
     builder.append("\r\u001b[J")
@@ -280,14 +344,14 @@ private[core] final class NormalScreenPolicy(
     )
     appendHardwareCursorMove(builder, frame, paintedRow)
     appendRenderEnd(builder)
-    writeRenderBuffer(builder.result())
+    writeRenderBuffer(builder.chunks)
     cursorRow = finalCursorRow(frame, paintedRow)
     latestFrameStartRow = latestFrameStartRow.map(start =>
       scrolledFrameStart(start, firstChanged, frame.lines.length - firstChanged, terminal.rows)
     )
 
   private def appendFrameContent(
-      builder: StringBuilder,
+      builder: FrameOutput,
       frame: PreparedFrame,
       fromRow: Int,
       cleanupControls: Vector[TerminalRenderControl]
@@ -336,14 +400,14 @@ private[core] final class NormalScreenPolicy(
     counters.recordControlEncode()
     TerminalRenderControlEncoder.encode(control)
 
-  private def writeRenderBuffer(buffer: String): Unit =
+  private def writeRenderBuffer(chunks: Vector[String]): Unit =
     autoWrapRestoreNeeded = true
-    terminalServices.writeRenderBuffer(buffer)
+    terminalServices.writeRenderChunks(chunks)
     autoWrapRestoreNeeded = false
 
   private def parkCursorBelowContentIfNeeded(): Unit =
     if previousFrame.exists(_.lines.nonEmpty) && !alternateScreenEntered then
-      val builder = StringBuilder()
+      val builder = new FrameOutput
       appendVerticalMove(
         builder,
         fromRow = cursorRow,
@@ -367,21 +431,21 @@ private[core] final class NormalScreenPolicy(
       autoWrapRestoreNeeded = false
       terminalServices.writeData(TUI.AutoWrapOn, TUIDiagnosticWriteKind.Cleanup)
 
-  private def appendRenderStart(builder: StringBuilder): Unit =
+  private def appendRenderStart(builder: FrameOutput): Unit =
     builder.append(TUI.SyncStart)
     // Full-width terminal lines can be marked as soft-wrapped by real terminal emulators. Those
     // soft-wrap markers may be reflowed on resize, invalidating the logical cursor row used by the
     // differential redraw path. Disable autowrap while painting each frame.
     builder.append(TUI.AutoWrapOff)
 
-  private def appendRenderEnd(builder: StringBuilder): Unit =
+  private def appendRenderEnd(builder: FrameOutput): Unit =
     builder.append(TUI.SyncEnd)
     builder.append(TUI.AutoWrapOn)
 
   private def positionHardwareCursorOnly(position: Option[CursorPlacement]): Unit =
     if options.hardwareCursorPositioning then
       position.foreach { target =>
-        val builder = StringBuilder()
+        val builder = new FrameOutput
         appendVerticalMove(builder, fromRow = cursorRow, toRow = target.row)
         builder.append("\r")
         appendMoveRight(builder, target.column)
@@ -391,7 +455,7 @@ private[core] final class NormalScreenPolicy(
       }
 
   private def appendHardwareCursorMove(
-      builder: StringBuilder,
+      builder: FrameOutput,
       frame: PreparedFrame,
       fromRow: Int
   ): Unit =
@@ -418,12 +482,12 @@ private[core] final class NormalScreenPolicy(
     if options.hardwareCursorPositioning then frame.position.map(_.row).getOrElse(paintedRow)
     else paintedRow
 
-  private def appendVerticalMove(builder: StringBuilder, fromRow: Int, toRow: Int): Unit =
+  private def appendVerticalMove(builder: FrameOutput, fromRow: Int, toRow: Int): Unit =
     val delta = toRow - fromRow
     if delta > 0 then builder.append(s"\u001b[${delta}B")
     else if delta < 0 then builder.append(s"\u001b[${-delta}A")
 
-  private def appendMoveRight(builder: StringBuilder, columns: Int): Unit =
+  private def appendMoveRight(builder: FrameOutput, columns: Int): Unit =
     if columns > 0 then builder.append(s"\u001b[${columns}C")
 
   private def sanitizeLines(
@@ -642,7 +706,7 @@ private[core] final class FullscreenViewportPolicy(
       clearScreen: Boolean,
       cleanup: Vector[TerminalRenderControl]
   ): Unit =
-    val builder       = StringBuilder(TUI.SyncStart).append(TUI.AutoWrapOff)
+    val builder       = new FrameOutput().append(TUI.SyncStart).append(TUI.AutoWrapOff)
     if clearScreen then builder.append(TUI.AlternateScreenClear)
     cleanup.foreach { control =>
       builder.append(TerminalRenderControlEncoder.encode(control))
@@ -665,23 +729,23 @@ private[core] final class FullscreenViewportPolicy(
     appendCursor(builder, frame.position)
     builder.append(TUI.SyncEnd).append(TUI.AutoWrapOn)
     autoWrapRestoreNeeded = true
-    terminalServices.writeRenderBuffer(builder.result())
+    terminalServices.writeRenderChunks(builder.chunks)
     kittyRetention.acknowledgeCleanup(cleanup)
     autoWrapRestoreNeeded = false
 
   private def positionCursor(position: Option[CursorPlacement]): Unit =
     if options.hardwareCursorPositioning then
       position.foreach { placement =>
-        val builder = StringBuilder()
+        val builder = new FrameOutput
         appendPosition(builder, placement.row, placement.column)
         terminalServices.writeData(builder.result(), TUIDiagnosticWriteKind.Control)
       }
 
-  private def appendCursor(builder: StringBuilder, position: Option[CursorPlacement]): Unit =
+  private def appendCursor(builder: FrameOutput, position: Option[CursorPlacement]): Unit =
     if options.hardwareCursorPositioning then
       position.foreach(placement => appendPosition(builder, placement.row, placement.column))
 
-  private def appendPosition(builder: StringBuilder, row: Int, column: Int): Unit =
+  private def appendPosition(builder: FrameOutput, row: Int, column: Int): Unit =
     builder.append(s"\u001b[${row + 1};${column + 1}H")
 
   private def firstChangedRow(oldFrame: PreparedFrame, newFrame: PreparedFrame): Int =
