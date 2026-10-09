@@ -37,11 +37,6 @@ private[core] final class FrameOutput:
         if current.length() === chunkSize then flushChunk()
     this
 
-  def append(value: Char): FrameOutput =
-    current.append(value)
-    if current.length() === chunkSize then flushChunk()
-    this
-
   def nonEmpty: Boolean = current.length() > 0
 
   def chunks: Vector[String] =
@@ -91,7 +86,9 @@ private[core] final class RuntimeTerminalServices(
             counters.recordTerminalWrite()
             terminal.write(repair)
             repairWritten = true
-          catch case repairError: Throwable => error.addSuppressed(repairError)
+          catch
+            case repairError: Throwable =>
+              if repairError ne error then error.addSuppressed(repairError)
     }
     var index         = 0
     while index < written do

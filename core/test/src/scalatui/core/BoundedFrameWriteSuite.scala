@@ -275,6 +275,22 @@ class BoundedFrameWriteSuite extends munit.FunSuite:
     assertEquals(terminal.writes.length, 1)
     assertEquals(counters.snapshot.terminalWrites, 3L)
 
+  test("same sink exception on chunk and repair preserves the original error"):
+    val terminal = new RecordingTerminal
+    val failure  = new IOException("sink remains broken")
+    var attempts = 0
+    terminal.beforeWrite = _ =>
+      attempts += 1
+      if attempts >= 2 then throw failure
+    val counters = new RuntimeCounters
+    val services = new RuntimeTerminalServices(terminal, counters, (_, _) => ())
+    val frame    = new FrameOutput
+    frame.append(TUI.SyncStart).append("x" * 140000).append(TUI.SyncEnd)
+    val thrown   = intercept[IOException](services.writeRenderChunks(frame.chunks))
+    assert(thrown eq failure)
+    assertEquals(thrown.getSuppressed.toVector, Vector.empty)
+    assertEquals(counters.snapshot.terminalWrites, 3L)
+
   test("fullscreen second-chunk failure exits alternate screen through lifecycle cleanup"):
     val terminal    = new RecordingTerminal
     val failure     = new IOException("fullscreen second chunk")
