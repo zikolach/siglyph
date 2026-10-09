@@ -28,6 +28,11 @@ final class VirtualTerminal(initialColumns: Int = 80, initialRows: Int = 24)
   private var cursorCol                           = 0
   private var autowrapEnabled                     = true
   private var wrapPending                         = false
+  private var pendingEscape                       = ""
+  private var discardingCsi                       = false
+  private var stringControlPending                = false
+  private var stringControlAllowsBel              = false
+  private var stringControlEscape                 = false
   private val screen                              = ArrayBuffer.fill(currentRows)(blankRow())
   @volatile private var mouseTrackingMode         = TerminalMouseTrackingMode.Disabled
   private var mouseCleanupMode                    = TerminalMouseTrackingMode.Disabled
@@ -134,8 +139,18 @@ final class VirtualTerminal(initialColumns: Int = 80, initialRows: Int = 24)
     val allLines = plain.split("\n", -1).toVector
     allLines.takeRight(currentRows)
 
-  private def processOutput(data: String): Unit =
+  private def processOutput(incoming: String): Unit =
+    val data  = if pendingEscape.isEmpty then incoming else pendingEscape + incoming
+    pendingEscape = ""
     var index = 0
+    if discardingCsi then
+      val end = data.indexWhere(isCsiFinal)
+      if end < 0 then index = data.length
+      else
+        discardingCsi = false
+        index = end + 1
+    if stringControlPending then
+      index = skipStringControl(data, 0)
     while index < data.length do
       data.charAt(index) match
         case '\u001b' if data.startsWith(TerminalCursorProtocol.CursorPositionQuery, index) =>
@@ -145,14 +160,29 @@ final class VirtualTerminal(initialColumns: Int = 80, initialRows: Int = 24)
           deliverInputOffCallerThread(inputs)
           index += TerminalCursorProtocol.CursorPositionQuery.length
         case '\u001b' if index + 1 < data.length && data.charAt(index + 1) === '['          =>
-          index = processCsi(data, index)
+          val finalIndex = (index + 2 until data.length).find(i => isCsiFinal(data.charAt(i)))
+          finalIndex match
+            case Some(_) => index = processCsi(data, index)
+            case None    =>
+              val fragment = data.substring(index)
+              if fragment.length <= 128 then pendingEscape = fragment
+              else discardingCsi = true
+              index = data.length
         case '\u001b' if index + 1 < data.length && data.charAt(index + 1) === ']'          =>
-          index = processStringControl(data, index, allowsBel = true)
+          stringControlPending = true
+          stringControlAllowsBel = true
+          stringControlEscape = false
+          index = skipStringControl(data, index + 2)
         case '\u001b'
             if index + 1 < data.length && isStringControlIntroducer(data.charAt(index + 1)) =>
-          index = processStringControl(data, index, allowsBel = false)
-        case '\u001b' if index + 1 < data.length                                            =>
-          index += 2
+          stringControlPending = true
+          stringControlAllowsBel = false
+          stringControlEscape = false
+          index = skipStringControl(data, index + 2)
+        case '\u001b' if index + 1 < data.length                                            => index += 2
+        case '\u001b'                                                                       =>
+          pendingEscape = "\u001b"
+          index = data.length
         case '\r'                                                                           =>
           cursorCol = 0
           wrapPending = false
@@ -170,6 +200,19 @@ final class VirtualTerminal(initialColumns: Int = 80, initialRows: Int = 24)
           Unicode.graphemeClusters(data.substring(index, end)).foreach(writeGrapheme)
           index = end
         case _                                                                              => index += 1
+
+  private def skipStringControl(data: String, from: Int): Int =
+    var index = from
+    while index < data.length && stringControlPending do
+      val ch           = data.charAt(index)
+      val isTerminator = (stringControlEscape && ch === '\\') ||
+        (stringControlAllowsBel && ch === '\u0007')
+      if isTerminator then
+        stringControlPending = false
+        stringControlEscape = false
+      else stringControlEscape = ch === '\u001b'
+      index += 1
+    index
 
   private def deliverInputOffCallerThread(inputs: Vector[TerminalInput]): Unit =
     if inputs.nonEmpty then
@@ -216,22 +259,6 @@ final class VirtualTerminal(initialColumns: Int = 80, initialRows: Int = 24)
           wrapPending = false
         case _                    => ()
       index + 1
-
-  private def processStringControl(data: String, start: Int, allowsBel: Boolean): Int =
-    var index    = start + 2
-    var endIndex = data.length
-    var complete = false
-    while index < data.length && !complete do
-      if allowsBel && data.charAt(index) === '\u0007' then
-        endIndex = index + 1
-        complete = true
-      else if data.charAt(index) === '\u001b' && index + 1 < data.length &&
-        data.charAt(index + 1) === '\\'
-      then
-        endIndex = index + 2
-        complete = true
-      else index += 1
-    endIndex
 
   private def isStringControlIntroducer(ch: Char): Boolean =
     ch === 'P' || ch === '_' || ch === '^' || ch === 'X'

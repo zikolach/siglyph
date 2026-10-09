@@ -56,3 +56,10 @@ state-level automated assertions.
 
 The PTY suite treats the transient POSIX `PENDIN` flag and externally changed window dimensions as
 non-restoration state. All stable raw/canonical mode flags must return to their initial values.
+
+Large synchronized frames are emitted as at most 65,536-character writes under one frame-wide
+terminal-write lock. Concatenated bytes retain the prior normal, alternate, append, and fullscreen
+framing. The virtual terminal models Kitty/OSC/CSI controls that span writes. On a mid-frame sink
+failure the runtime attempts to terminate a partial string control and restore synchronized output
+and autowrap before normal cleanup; a broken sink may reject these attempts, so recovery is not
+guaranteed. Write counters count physical attempts, while write diagnostics describe completed writes.

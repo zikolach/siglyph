@@ -38,6 +38,13 @@ trait Terminal:
 
   def stop(): Unit
 
+  /**
+   * Write one contiguous UTF-8 stream fragment. A large synchronized TUI frame may invoke this
+   * method several times while holding its frame-wide write lock; a fragment need not end at an
+   * ANSI, OSC, or image-protocol boundary. Backends must preserve order and encode each fragment
+   * without inserting bytes. A throwing sink may have written a partial fragment; TUI cleanup is
+   * best-effort and cannot guarantee repair of a broken sink.
+   */
   def write(data: String): Unit
 
   def columns: Int

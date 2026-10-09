@@ -43,3 +43,9 @@ Append diagnostics expose only bounded outcome/failure categories, row and contr
 mode, and resize generation. They never retain component text, exception messages, image payloads,
 filenames, encoded controls, remapped image IDs, or terminal-write contents. The application-owned
 append callback separately receives its typed result.
+
+Large frames may produce multiple bounded terminal writes. A `Write(Render, byteCount)` event
+reports each completed chunk after the frame-wide write lock is released; failed or partly written
+chunks have no known byte count and do not produce a completed-write event. The package-local
+terminal-write counter includes attempted physical writes. On a mid-frame failure, a successful
+best-effort framing-repair write is reported as `Write(Cleanup, byteCount)`.
