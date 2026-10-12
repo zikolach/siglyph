@@ -7,6 +7,25 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+Planned for `v0.9.1`; the version and release date will be recorded when the release is approved.
+
+### Changed
+
+- Avoided redundant recomposition when painting an untouched, full-width viewport row and reused
+  editor visual rows for cursor-only movement; edits and width changes still recompute layout.
+  These are workload-specific performance improvements, not a general speedup claim. #63, #64
+- Bounded large synchronized frames into non-interleaved terminal writes while preserving their
+  concatenated bytes. `Terminal.write` may receive fragments that end inside ANSI, OSC, or image
+  controls; backend implementations must preserve order and encode each fragment without added
+  bytes. #66
+
+### Fixed
+
+- Made standalone Escape flushing depend on 35 ms of input idleness, with a 75 ms idle cutoff for
+  other incomplete non-paste framing; a cutoff is not a real-time callback guarantee. #65
+- On a failed middle frame write, attempt best-effort control and terminal-mode restoration before
+  propagating the original failure; a broken output sink cannot be guaranteed repairable. #66
+
 ## [0.9.0] - 2026-09-06
 
 ### Added
