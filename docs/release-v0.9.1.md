@@ -1,10 +1,10 @@
-# v0.9.1 release preparation (draft; not published)
+# v0.9.1 release execution (publication pending)
 
-This is a proposed patch release after `v0.9.0` (2026-09-06). The draft release notes are the
-[Unreleased changelog section](../CHANGELOG.md#unreleased), covering merged PRs #63–#66. No
-`v0.9.1` tag, GitHub Release, or `0.9.1` package artifacts exist as part of this preparation.
-The release date is not set. README and Scala CLI dependency examples remain at the latest
-published version, `0.9.0`, until `0.9.1` artifacts are available.
+The patch release after `v0.9.0` (2026-09-06) was authorized for 2026-10-13. Its finalized
+[0.9.1 changelog section](../CHANGELOG.md#091---2026-10-13) covers merged PRs #63–#66.
+Finalizing these notes does not itself create a `v0.9.1` tag, GitHub Release, or package artifacts.
+README and Scala CLI dependency examples remain at the latest published version, `0.9.0`, until
+`0.9.1` artifacts are available.
 
 ## Release scope and evidence
 
@@ -25,18 +25,16 @@ published version, `0.9.0`, until `0.9.1` artifacts are available.
   `Test and package jars` and `macOS terminal conformance`. Release from the later approved
   commit and recheck its CI status before tagging.
 
-## Approval and publication checklist
+## Publication checklist
 
-1. Review and merge the release-documentation PR. Confirm no additional changes entered `main`
-   unnoticed and its exact commit has successful Linux and macOS CI. Resolve any release-blocking
-   regressions before proceeding.
-2. Approve the actual release separately. Before tagging, move the draft changelog entries from
-   `[Unreleased]` into a `## [0.9.1] - YYYY-MM-DD` section using the actual release date; leave a
-   fresh `[Unreleased]` section and update comparison links. The GitHub Release workflow extracts
-   notes from a heading beginning `## [0.9.1]`; without it, it emits a fallback message.
-3. Confirm Maven Central namespace/signing prerequisites and required workflow secrets with the
-   maintainer, without putting credentials in documentation. Check the final tag target and make
-   an explicit decision to trigger publishing. A pushed `v0.9.1` tag automatically starts **both**
+1. Merge the release-finalization documentation after its exact head passes Linux and macOS CI.
+   Confirm no additional changes entered `main` unnoticed and its exact commit has successful
+   required CI before tagging. Resolve any release-blocking regressions before proceeding.
+2. The release was authorized on 2026-10-13. The changelog now has a dated `## [0.9.1]` section
+   and a fresh `[Unreleased]` section, which the GitHub Release workflow will use for notes.
+3. Confirm Maven Central namespace/signing prerequisites and required workflow secret names
+   without exposing credentials. Check the final tag target before pushing the tag. A pushed
+   `v0.9.1` tag automatically starts **both**
    `Publish` and `Publish Maven Central`; the former publishes GitHub Packages and creates a GitHub
    Release, while the latter automatically releases non-SNAPSHOT artifacts to Central by default.
    Do not use manual workflow dispatch as an extra publication path unless deliberately chosen.
