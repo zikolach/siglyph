@@ -2,7 +2,7 @@
 
 Small single-file demos intended for `scala-cli`.
 
-The released examples use Maven Central `0.9.0` artifacts.
+The released examples use Maven Central `0.9.1` artifacts.
 
 Run from this repository:
 
@@ -15,7 +15,7 @@ Run from this repository:
 ./examples/scala-cli/mouse.scala
 ```
 
-After replacing the dependency versions with a released Maven Central version, a script can also run from a raw Gist URL:
+The pinned dependencies resolve from Maven Central, so a script can also run from a raw Gist URL:
 
 ```bash
 curl -L -o hello.scala https://gist.githubusercontent.com/zikolach/<gist-id>/raw/hello.scala
