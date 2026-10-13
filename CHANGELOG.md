@@ -7,7 +7,7 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
-Planned for `v0.9.1`; the version and release date will be recorded when the release is approved.
+## [0.9.1] - 2026-10-13
 
 ### Changed
 
@@ -325,7 +325,8 @@ Planned for `v0.9.1`; the version and release date will be recorded when the rel
 - GitHub Actions CI, jar packaging, GitHub Packages publishing, and GitHub
   release artifacts.
 
-[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/zikolach/siglyph/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/zikolach/siglyph/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/zikolach/siglyph/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/zikolach/siglyph/compare/v0.7.0...v0.7.1
