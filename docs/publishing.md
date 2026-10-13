@@ -1,8 +1,9 @@
 # Publishing
 
 siglyph publishes release jars to GitHub Releases and artifacts to GitHub Packages and Maven
-Central. README and Scala CLI examples use the version prepared for the next release, currently
-`0.9.0`. The artifacts become available after release tag publishing completes.
+Central. README and Scala CLI examples use the latest published version, currently
+`0.9.0`. Keep them on that version while a subsequent release is only planned; update them after
+the new artifacts become available.
 
 ## Version source
 
