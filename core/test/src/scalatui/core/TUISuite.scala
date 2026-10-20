@@ -1846,7 +1846,7 @@ class TUISuite extends munit.FunSuite:
     thread.join(5000)
     assert(!thread.isAlive, "TUI run did not terminate after stop cleanup failure")
 
-    assertEquals(failure.get(), null)
+    assertEquals(Option(failure.get()).map(_.getMessage), Some("write failed"))
     assertEquals(terminal.showCursorCalled, true)
     assertEquals(terminal.stopCalled, true)
 

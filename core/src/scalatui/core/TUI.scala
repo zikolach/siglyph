@@ -6,6 +6,8 @@ import scalatui.syntax.Equality.*
 import scalatui.syntax.Containment.*
 import scalatui.terminal.{
   KeyEventType,
+  KittyKeyboardProtocol,
+  KittyKeyboardProtocolTerminal,
   KeybindingCommand,
   KeybindingManager,
   ImageCellDimensions,
@@ -172,6 +174,9 @@ final class TUI(
       OverlayHost:
   private val root                                                      = Container()
   private val lifecycleLock                                             = Object()
+  private val keyboardTerminal                                          = terminal match
+    case capable: KittyKeyboardProtocolTerminal => Some(capable)
+    case _                                      => None
   override val terminalCapabilityOverrides: TerminalCapabilityOverrides =
     options.capabilityOverrides
   private var currentTerminalCapabilities                               = TerminalCapabilities.Conservative
@@ -208,6 +213,8 @@ final class TUI(
     override def initialValue(): Boolean = false
   private var lastOrdinaryCategory                                                           = TUI.OrdinaryCategory.Render
   private var cleanupOwned                                                                   = false
+  private var restorationStage                                                               = TUI.RestorationStage.BackendStop
+  private var restorationRetryRequested                                                      = false
   private var contextDetachScheduled                                                         = false
   private var resizeGeneration                                                               = 0L
   private var committedRenderWidth                                                           = 0
@@ -514,6 +521,8 @@ final class TUI(
     validateNormalResizeRecoveryOptions()
     var reattachRetainedContexts = false
     val shouldStart              = lifecycleLock.synchronized {
+      if lifecycleState === TUI.LifecycleState.Cleaning then
+        throw IllegalStateException("Terminal restoration is incomplete; retry TUI.stop() first")
       if (lifecycleState !== TUI.LifecycleState.Stopped) || drainOwned then false
       else
         componentEffectCoordinator.openGeneration()
@@ -553,6 +562,10 @@ final class TUI(
           error => handleRuntimeFailure(error)
         ))
         if startupMayContinue then rendererPolicy.start()
+        if startupMayContinue then
+          keyboardTerminal.foreach(capable =>
+            terminalServices.write(capable.requestKittyKeyboardProtocol())
+          )
         if startupMayContinue && terminalColorSchemeNotificationsEnabled then
           terminalServices.writeData(
             TerminalColorProtocol.EnableColorSchemeNotifications,
@@ -611,7 +624,11 @@ final class TUI(
         )
     }
 
-  /** Start, wait for exit, and return only after deferred cleanup reaches `Stopped`. */
+  /**
+   * Start and wait for exit and the first restoration attempt's finite callback set. If restoration
+   * fails, throw the original failure with cleanup failures attached. Call [[stop]] explicitly to
+   * retry incomplete restoration; this method never retries a failed attempt automatically.
+   */
   def run(): Unit =
     try
       start()
@@ -619,9 +636,14 @@ final class TUI(
         while lifecycleState === TUI.LifecycleState.Running && !exitRequested do
           lifecycleLock.wait()
       }
-    finally stop()
+    catch case error: Throwable => recordFailure(error)
+    finally
+      try requestStop(retryRestoration = false)
+      catch case error: Throwable => recordFailure(error)
     lifecycleLock.synchronized {
-      while lifecycleState !== TUI.LifecycleState.Stopped do lifecycleLock.wait()
+      while lifecycleState === TUI.LifecycleState.Stopping ||
+        (lifecycleState === TUI.LifecycleState.Cleaning && (cleanupOwned || !postRestorationCutoff))
+      do lifecycleLock.wait()
     }
     runtimeFailure.foreach(throw _)
 
@@ -633,14 +655,22 @@ final class TUI(
   /**
    * Request terminal restoration. An uncontended caller performs cleanup synchronously. A reentrant
    * or concurrent caller marks `Stopping` and returns without waiting; the active startup or drain
-   * owner completes single-owner cleanup. Repeated calls do not duplicate restoration.
+   * owner completes single-owner cleanup. Calls during an active restoration attempt coalesce. If
+   * backend stop fails, the runtime retains the current screen and rejects [[start]]. A later
+   * explicit call retries backend stop before screen exit. If only screen exit failed, retry only
+   * screen exit. Retries do not repeat completed teardown or callback batches and do not rethrow
+   * older attempt failures after success. Input and automatic failure handling never retry.
    */
-  def stop(): Unit =
+  def stop(): Unit = requestStop(retryRestoration = true)
+
+  private def requestStop(retryRestoration: Boolean): Unit =
     val (own, transitioned) = lifecycleLock.synchronized {
       lifecycleState match
-        case TUI.LifecycleState.Stopped | TUI.LifecycleState.Stopping |
-            TUI.LifecycleState.Cleaning => false -> false
-        case _ =>
+        case TUI.LifecycleState.Cleaning                              =>
+          if retryRestoration && !cleanupOwned then restorationRetryRequested = true
+          (retryRestoration && !cleanupOwned && !drainOwned) -> false
+        case TUI.LifecycleState.Stopped | TUI.LifecycleState.Stopping => false -> false
+        case _                                                        =>
           transitionToStoppingLocked()
           (!startupOwner && !drainOwned && queryWriteReservations === 0) -> true
     }
@@ -649,7 +679,7 @@ final class TUI(
         TUIDiagnosticLifecycleState.Stopping,
         options.screenMode
       ))
-    if own then finishDeferredCleanupIfNeeded(propagateCleanupFailure = true)
+    if own then drainOrReturn(propagateCleanupFailure = true)
 
   override def requestRender(force: Boolean = false): Unit =
     requestRenderInternal(force = force, clear = false)
@@ -1023,7 +1053,15 @@ final class TUI(
       termination: TerminalRawTermination,
       correlation: TUI.RawCorrelation
   ): TUI.IngressClassification =
-    if termination === TerminalRawTermination.Complete && TerminalImageProtocol.isCellSizeResponse(
+    if termination === TerminalRawTermination.Complete && keyboardTerminal.nonEmpty &&
+      KittyKeyboardProtocol.parseResponse(data).nonEmpty
+    then
+      TUI.IngressClassification.Publish(
+        TUI.Ingress.KeyboardResponse(data, System.currentTimeMillis()),
+        Vector.empty,
+        () => rawCorrelation = None
+      )
+    else if termination === TerminalRawTermination.Complete && TerminalImageProtocol.isCellSizeResponse(
         data
       )
     then
@@ -1199,7 +1237,11 @@ final class TUI(
     try
       while continue do
         val work = lifecycleLock.synchronized {
-          if retainedQueryCompletions.nonEmpty then
+          if restorationRetryRequested then
+            restorationRetryRequested = false
+            cleanupOwned = true
+            TUI.Work.Cleanup
+          else if retainedQueryCompletions.nonEmpty then
             TUI.Work.QueryCompletion(retainedQueryCompletions.remove(0))
           else if retainedAppendCompletions.nonEmpty then
             TUI.Work.AppendCompletion(retainedAppendCompletions.remove(0))
@@ -1256,15 +1298,23 @@ final class TUI(
         if propagateCleanupFailure then
           drainOwnerMarker.set(false)
           throw error
-        else recordFailure(error)
+        else ()
       }
     drainOwnerMarker.set(false)
 
   private def processIngress(ingress: TUI.Ingress): Unit = ingress match
-    case TUI.Ingress.Input(input)                         => handleInput(input)
-    case TUI.Ingress.AppendCompletion(completion)         =>
+    case TUI.Ingress.KeyboardResponse(response, arrivalMillis) =>
+      terminalServices.write {
+        val running = lifecycleLock.synchronized {
+          lifecycleState === TUI.LifecycleState.Running
+        }
+        if running then
+          keyboardTerminal.foreach(_.acceptKittyKeyboardProtocolResponse(response, arrivalMillis))
+      }
+    case TUI.Ingress.Input(input)                              => handleInput(input)
+    case TUI.Ingress.AppendCompletion(completion)              =>
       processAppendCompletion(completion)
-    case TUI.Ingress.Protocol(completions, notifications) =>
+    case TUI.Ingress.Protocol(completions, notifications)      =>
       completions.foreach(processQueryCompletion)
       val running = lifecycleLock.synchronized {
         lifecycleState === TUI.LifecycleState.Running
@@ -2460,6 +2510,7 @@ final class TUI(
     require(activeAppend.isEmpty)
     require(pendingControlOutput.isEmpty)
     cleanupOwned = true
+    restorationStage = TUI.RestorationStage.BackendStop
     postRestorationCutoff = false
     lifecycleState = TUI.LifecycleState.Cleaning
 
@@ -2469,60 +2520,82 @@ final class TUI(
       try action
       catch
         case e: Throwable => failure match
-            case Some(first) => first.addSuppressed(e)
-            case None        => failure = Some(e)
-    attempt(rendererPolicy.parkCursorForCleanup())
-    if terminalColorSchemeNotificationsEnabled then
-      attempt(
-        terminalServices.writeData(
-          TerminalColorProtocol.DisableColorSchemeNotifications,
-          TUIDiagnosticWriteKind.Cleanup
+            case Some(first) if first ne e => first.addSuppressed(e)
+            case None                      => failure = Some(e)
+            case _                         => ()
+    val firstAttempt                   = !postRestorationCutoff
+    if firstAttempt then
+      attempt(rendererPolicy.parkCursorForCleanup())
+      if terminalColorSchemeNotificationsEnabled then
+        attempt(
+          terminalServices.writeData(
+            TerminalColorProtocol.DisableColorSchemeNotifications,
+            TUIDiagnosticWriteKind.Cleanup
+          )
         )
+      attempt(terminalServices.write(Terminal.drainInput(terminal)))
+      attempt(rendererPolicy.restoreTypedControls())
+      attempt(terminalServices.write(terminal.showCursor()))
+      keyboardTerminal.foreach(capable =>
+        attempt(terminalServices.write(capable.disableKittyKeyboardProtocol()))
       )
-    attempt(terminalServices.write(Terminal.drainInput(terminal)))
-    attempt(rendererPolicy.restoreTypedControls())
-    attempt(terminalServices.write(terminal.showCursor()))
-    attempt(rendererPolicy.exitScreen())
-    attempt(terminalServices.write(terminal.stop()))
-    primaryScrollView.foreach { scrollView =>
-      scrollView.clearSearch()
-      scrollView.clearSelectionRetained()
-    }
-    currentClipboardResult = None
-    clearSearchPaste()
-    attempt(componentEffectCoordinator.finishGeneration())
+    if restorationStage === TUI.RestorationStage.BackendStop then
+      attempt {
+        terminalServices.write(terminal.stop())
+        restorationStage = TUI.RestorationStage.ScreenExit
+      }
+    // Each screen has its own keyboard stack. Preserve this screen after backend stop failure.
+    if restorationStage === TUI.RestorationStage.ScreenExit then
+      attempt {
+        rendererPolicy.exitScreen()
+        restorationStage = TUI.RestorationStage.Complete
+      }
+    if firstAttempt then
+      primaryScrollView.foreach { scrollView =>
+        scrollView.clearSearch()
+        scrollView.clearSelectionRetained()
+      }
+      currentClipboardResult = None
+      clearSearchPaste()
+      attempt(componentEffectCoordinator.finishGeneration())
 
-    val (detachedQueryCompletions, detachedAppendCompletions) = lifecycleLock.synchronized {
-      postRestorationCutoff = true
-      val queries = postRestorationQueryCompletions.toVector
-      val appends = postRestorationAppendCompletions.toVector
-      postRestorationQueryCompletions.clear()
-      postRestorationAppendCompletions.clear()
-      queries -> appends
-    }
-    detachedQueryCompletions.foreach(processQueryCompletion)
-    detachedAppendCompletions.foreach(processAppendCompletion)
-    lifecycleLock.synchronized {
-      backgroundColorFlight = None
-      colorSchemeFlight = None
-      cursorPositionFlight = None
-      rawCorrelation = None
-      pendingIngress.clear()
-      replayContinuation = None
-      appendOwnedKittyIds.clear()
-      pendingAppendCompletions.clear()
-      postRestorationAppendCompletions.clear()
-      pendingAppends.clear()
-      activeAppend = None
-      acceptedIncompleteAppends = 0
-      lifecycleState = TUI.LifecycleState.Stopped
+      val (detachedQueryCompletions, detachedAppendCompletions) = lifecycleLock.synchronized {
+        postRestorationCutoff = true
+        val queries = postRestorationQueryCompletions.toVector
+        val appends = postRestorationAppendCompletions.toVector
+        postRestorationQueryCompletions.clear()
+        postRestorationAppendCompletions.clear()
+        queries -> appends
+      }
+      detachedQueryCompletions.foreach(processQueryCompletion)
+      detachedAppendCompletions.foreach(processAppendCompletion)
+      lifecycleLock.synchronized {
+        backgroundColorFlight = None
+        colorSchemeFlight = None
+        cursorPositionFlight = None
+        rawCorrelation = None
+        pendingIngress.clear()
+        replayContinuation = None
+        appendOwnedKittyIds.clear()
+        pendingAppendCompletions.clear()
+        postRestorationAppendCompletions.clear()
+        pendingAppends.clear()
+        activeAppend = None
+        acceptedIncompleteAppends = 0
+      }
+    val restored                       = lifecycleLock.synchronized {
+      failure.foreach(recordFailureLocked)
+      val complete = restorationStage === TUI.RestorationStage.Complete
+      if complete then lifecycleState = TUI.LifecycleState.Stopped
       cleanupOwned = false
       lifecycleLock.notifyAll()
+      complete
     }
-    emitDiagnostic(TUIDiagnosticEvent.Lifecycle(
-      TUIDiagnosticLifecycleState.Stopped,
-      options.screenMode
-    ))
+    if restored then
+      emitDiagnostic(TUIDiagnosticEvent.Lifecycle(
+        TUIDiagnosticLifecycleState.Stopped,
+        options.screenMode
+      ))
     failure
 
   private def isCtrl(input: TerminalInput, char: String): Boolean = input match
@@ -2803,6 +2876,9 @@ object TUI:
       generation: Long
   )
 
+  private enum RestorationStage derives CanEqual:
+    case BackendStop, ScreenExit, Complete
+
   private enum LifecycleState derives CanEqual:
     case Starting, Running, Stopping, Cleaning, Stopped
 
@@ -2829,6 +2905,7 @@ object TUI:
     case Done
 
   private enum Ingress:
+    case KeyboardResponse(response: String, arrivalMillis: Long)
     case Input(input: TerminalInput)
     case AppendCompletion(completion: TUI.AppendCompletion)
     case Protocol(

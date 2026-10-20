@@ -74,12 +74,28 @@ Expected behavior:
   dimensions on both JVM and Scala Native.
 - For an app/demo configured with `TUIOptions(hardwareCursorPositioning = true)`, type in a focused `Input` or `Editor` and verify the terminal hardware cursor/IME candidate window tracks the fake cursor position. Cursor markers must not appear as visible output, and disabling the option must leave fake-cursor behavior unchanged.
 - `mill keyTester.run` prints typed key events with modifiers and press/repeat/release metadata when the terminal reports it.
-- Kitty keyboard protocol negotiation hooks are exposed by the JVM and Native interactive backends for applications that opt in. Unsupported, stale, or unavailable negotiation falls back to existing basic input parsing.
+- TUI automatically requests Kitty keyboard negotiation on the JVM and Native interactive backends. Startup does not wait for a reply. After a valid reply arrives within 100 ms, the backend enables key disambiguation. Without a reply, TUI keeps basic input parsing. Direct backend consumers can still use the explicit hooks.
 - Platform-specific modifier fallbacks, including Apple Terminal modified Enter, are implemented only when they can be queried safely. When no safe fallback is available, ordinary key input continues without blocking.
 - `Esc` and `Ctrl+C` exit and restore the terminal.
 
 Autocomplete and select command defaults can be overridden via `EditorOptions.keybindings` (via `KeybindingManager`).
 See `docs/keybinding-defaults.md` for the complete default map, ambiguity notes, and unsupported terminal encodings.
+
+### Ghostty through Herdr modified Enter check
+
+1. Open Ghostty and start Herdr. In a Herdr pane, run `mill interactiveJvmDemo.run`.
+2. Focus the editor with `Ctrl+T`. Type `first`, press physical Shift+Enter, and type `second`.
+   The editor must contain two lines and must keep both lines until submission.
+3. Press ordinary Enter. The demo must submit the two-line message once.
+4. Exit with `Esc` or `Ctrl+C`. Verify ordinary shell input after exit. Repeat the run and exit
+   to check that the backend restores the keyboard mode across sessions.
+5. Repeat with `mill interactiveNativeDemo.nativeLink` and
+   `out/interactiveNativeDemo/nativeLink.dest/out` in the same pane.
+
+If Shift+Enter submits immediately, compare the same demo directly in Ghostty. A terminal or
+multiplexer can discard Shift before Siglyph receives input. For example, if both keys arrive as
+ordinary Return, Siglyph reports Enter for both keys. Encoded-input tests do not verify physical
+Ghostty or Herdr forwarding. Record the terminal, multiplexer, and backend used for this check.
 
 ## Append-only image smoke checks
 
@@ -173,7 +189,10 @@ Expected behavior matches the JVM multiline editor demo, including opt-in mouse 
 - Both interactive backends disable bracketed paste during stop.
 - Both interactive backends expose Kitty keyboard protocol state for tests or application diagnostics.
 - Both interactive backends poll terminal dimensions while running and request in-place redraws on size changes.
-- `TUI.run()` wraps startup and waiting in `try/finally` so terminal state is restored when the run loop exits or fails after startup.
+- `TUI.run()` attempts terminal restoration when the run loop exits or fails. If restoration
+  fails, `run()` reports the original failure with cleanup failures attached after the first
+  attempt and its finite callback set. It does not wait indefinitely for restoration or retry
+  automatically.
 - One synchronous work drain serializes input, callbacks, rendering, retained control output, and
   cleanup progression. Application callbacks do not run under the lifecycle lock. Backend writes
   use a separate non-nested edge lock.
@@ -194,7 +213,14 @@ Expected behavior matches the JVM multiline editor demo, including opt-in mouse 
   backend worker failures manually.
 - An uncontended `flushRender()` or `stop()` completes synchronously. A reentrant or concurrent call
   publishes work and returns without waiting for active application code; `run()` still waits for
-  terminal restoration before returning.
+  the active restoration attempt and its finite callback set before returning or throwing.
+- If backend stop fails, TUI retains the current screen and rejects `start()`. After output
+  recovers, an explicit `tui.stop()` retries backend stop before screen exit. For example, after
+  repeated keyboard pop failures in fullscreen mode, the alternate screen remains active until
+  the caller successfully retries `tui.stop()`. If only screen exit failed, TUI retries only exit.
+  TUI does not repeat completed teardown or callbacks. Concurrent stops during an active attempt
+  coalesce. A successful retry does not rethrow older failures. `TUIKeyboardProtocolSuite`
+  injects these failures with virtual output; the interactive demos do not inject output failures.
 - `TUI` sanitizes final over-wide output before writing to protect live sessions; component tests should still verify direct render-width contracts.
 - `TUIOptions(hardwareCursorPositioning = true)` is opt-in. The runtime strips cursor markers from final output in both modes, and when enabled it positions the hardware cursor from the marker that remains after overlay composition.
 - `TUIOptions(mouseInput = true)` is opt-in. It enables terminal mouse reporting during interactive runs and may affect normal terminal text selection while active.

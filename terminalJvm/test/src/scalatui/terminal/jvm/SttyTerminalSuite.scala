@@ -112,6 +112,9 @@ class SttyTerminalSuite extends munit.FunSuite:
 
     val firstStop = intercept[RuntimeException](terminal.stop())
     assertEquals(firstStop.getMessage, "injected Kitty disable failure")
+    val restart   = intercept[IllegalStateException](terminal.start(_ => (), () => ()))
+    assert(restart.getMessage.contains("cleanup"))
+    terminal.stop()
     terminal.stop()
     assertEquals(
       writes.toVector,
@@ -120,6 +123,79 @@ class SttyTerminalSuite extends munit.FunSuite:
         KittyKeyboardProtocol.DisableSequence,
         KittyKeyboardProtocol.DisableSequence
       )
+    )
+
+  test("pending Kitty stop cancels without a pop and rejects later replies"):
+    val output   = ByteArrayOutputStream()
+    val terminal = SttyTerminal(
+      input = InputStream.nullInputStream(),
+      output = output,
+      columnsOverride = Some(80),
+      rowsOverride = Some(24),
+      sizeQuery = () => Some(24 -> 80)
+    )
+    terminal.requestKittyKeyboardProtocol(timeoutMillis = 1000L)
+    terminal.stop()
+    terminal.stop()
+    assertEquals(terminal.keyboardProtocolState, KittyKeyboardProtocolState.Inactive)
+    assert(!terminal.acceptKittyKeyboardProtocolResponse("\u001b[?0u", 0L))
+    assertEquals(
+      output.toString(java.nio.charset.StandardCharsets.UTF_8),
+      KittyKeyboardProtocol.QuerySequence
+    )
+
+  Vector(false, true).foreach { cancel =>
+    test(s"expired JVM keyboard state preserves a timely reply unless cancelled: $cancel"):
+      val output        = ByteArrayOutputStream()
+      val terminal      = SttyTerminal(
+        input = InputStream.nullInputStream(),
+        output = output,
+        columnsOverride = Some(80),
+        rowsOverride = Some(24),
+        sizeQuery = () => Some(24 -> 80)
+      )
+      val arrivalMillis = System.currentTimeMillis()
+      terminal.requestKittyKeyboardProtocol(timeoutMillis = 0L)
+      val waitDeadline  = System.currentTimeMillis() + 1000L
+      while terminal.keyboardProtocolState.isInstanceOf[KittyKeyboardProtocolState.Pending] &&
+        System.currentTimeMillis() < waitDeadline
+      do Thread.`yield`()
+      assertEquals(terminal.keyboardProtocolState, KittyKeyboardProtocolState.Inactive)
+      if cancel then terminal.disableKittyKeyboardProtocol()
+      assertEquals(
+        terminal.acceptKittyKeyboardProtocolResponse("\u001b[?0u", arrivalMillis),
+        !cancel
+      )
+      assertEquals(
+        terminal.keyboardProtocolState,
+        if cancel then KittyKeyboardProtocolState.Inactive else KittyKeyboardProtocolState.Active(0)
+      )
+      terminal.stop()
+      terminal.stop()
+      assertEquals(
+        output.toString(java.nio.charset.StandardCharsets.UTF_8),
+        KittyKeyboardProtocol.QuerySequence +
+          (if cancel then ""
+           else KittyKeyboardProtocol.EnableSequence + KittyKeyboardProtocol.DisableSequence)
+      )
+  }
+
+  test("active Kitty stop pops exactly once"):
+    val output   = ByteArrayOutputStream()
+    val terminal = SttyTerminal(
+      input = InputStream.nullInputStream(),
+      output = output,
+      columnsOverride = Some(80),
+      rowsOverride = Some(24),
+      sizeQuery = () => Some(24 -> 80)
+    )
+    terminal.requestKittyKeyboardProtocol(timeoutMillis = 1000L)
+    assert(terminal.acceptKittyKeyboardProtocolResponse("\u001b[?0u", 0L))
+    terminal.stop()
+    terminal.stop()
+    assertEquals(
+      output.toString(java.nio.charset.StandardCharsets.UTF_8),
+      KittyKeyboardProtocol.QuerySequence + KittyKeyboardProtocol.EnableSequence + KittyKeyboardProtocol.DisableSequence
     )
 
   test("Kitty keyboard state expires pending negotiation on state read"):

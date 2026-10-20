@@ -525,6 +525,25 @@ Asciinema recording scenarios are documented in [`docs/asciinema-demos.md`](docs
 
 Interactive demo controls are also summarized in [`docs/interactive-smoke.md`](docs/interactive-smoke.md). Default keybindings are listed in [`docs/keybinding-defaults.md`](docs/keybinding-defaults.md).
 
+TUI automatically requests Kitty keyboard negotiation on the JVM `stty` and Scala Native POSIX
+backends. Startup continues without waiting for a reply. After a valid reply arrives within
+100 ms, the backend enables key disambiguation. For example, `ESC[13;2u` reports Shift+Enter,
+and ordinary Return reports Enter. Stream-only and unsupported backends keep basic input parsing.
+If a terminal or multiplexer sends ordinary Return for Shift+Enter, Siglyph cannot recover Shift.
+On shutdown, TUI cancels a pending query without popping a mode. After an enable attempt, the
+backend restores the keyboard mode and retains failed cleanup for retry.
+
+If backend stop fails, TUI keeps the current screen active, including the alternate screen in
+width-only alternate and fullscreen modes. TUI rejects `start()` until restoration completes.
+After output recovers, call `tui.stop()` explicitly to retry backend stop and then screen exit.
+If only screen exit failed, TUI retries only screen exit. TUI preserves completed teardown and
+callbacks across retries. Concurrent stops during an active attempt coalesce.
+For example, after a failed keyboard pop, a successful later `tui.stop()` restores the keyboard
+mode and exits the alternate screen without repeating completed callbacks.
+`run()` reports the original startup or runtime failure with cleanup failures attached after
+the first restoration attempt and its finite callback set. TUI never retries failed restoration
+automatically. A successful explicit retry returns without rethrowing older attempt failures.
+
 ## Features
 
 - **Rendering core:** `Component`, `Focusable`, `Container`, normal-screen differential output, legacy width-only alternate screen, height-aware fullscreen, overlays, and virtual terminal tests.

@@ -93,6 +93,9 @@ class PosixTerminalSuite extends munit.FunSuite:
 
     val firstStop = intercept[RuntimeException](terminal.stop())
     assertEquals(firstStop.getMessage, "injected Kitty disable failure")
+    val restart   = intercept[IllegalStateException](terminal.start(_ => (), () => ()))
+    assert(restart.getMessage.contains("cleanup"))
+    terminal.stop()
     terminal.stop()
     assertEquals(
       writes.toVector,
@@ -100,6 +103,80 @@ class PosixTerminalSuite extends munit.FunSuite:
         KittyKeyboardProtocol.QuerySequence,
         KittyKeyboardProtocol.EnableSequence,
         KittyKeyboardProtocol.DisableSequence,
+        KittyKeyboardProtocol.DisableSequence
+      )
+    )
+
+  test("pending Kitty stop cancels without a pop and rejects later replies"):
+    val terminal = PosixTerminal(initialColumns = 80, initialRows = 24)
+    val writes   = scala.collection.mutable.ArrayBuffer.empty[String]
+    terminal.writeFailureForTesting = data =>
+      writes += data
+      None
+    terminal.requestKittyKeyboardProtocol(timeoutMillis = 1000L)
+    terminal.stop()
+    terminal.stop()
+    assertEquals(
+      terminal.keyboardProtocolState,
+      scalatui.terminal.KittyKeyboardProtocolState.Inactive
+    )
+    assert(!terminal.acceptKittyKeyboardProtocolResponse("\u001b[?0u", 0L))
+    assertEquals(writes.toVector, Vector(KittyKeyboardProtocol.QuerySequence))
+
+  Vector(false, true).foreach { cancel =>
+    test(s"expired Native keyboard state preserves a timely reply unless cancelled: $cancel"):
+      val terminal      = PosixTerminal(initialColumns = 80, initialRows = 24)
+      val writes        = scala.collection.mutable.ArrayBuffer.empty[String]
+      terminal.writeFailureForTesting = data =>
+        writes += data
+        None
+      val arrivalMillis = System.currentTimeMillis()
+      terminal.requestKittyKeyboardProtocol(timeoutMillis = 0L)
+      val waitDeadline  = System.currentTimeMillis() + 1000L
+      while terminal.keyboardProtocolState.isInstanceOf[
+          scalatui.terminal.KittyKeyboardProtocolState.Pending
+        ] &&
+        System.currentTimeMillis() < waitDeadline
+      do Thread.`yield`()
+      assertEquals(
+        terminal.keyboardProtocolState,
+        scalatui.terminal.KittyKeyboardProtocolState.Inactive
+      )
+      if cancel then terminal.disableKittyKeyboardProtocol()
+      assertEquals(
+        terminal.acceptKittyKeyboardProtocolResponse("\u001b[?0u", arrivalMillis),
+        !cancel
+      )
+      assertEquals(
+        terminal.keyboardProtocolState,
+        if cancel then scalatui.terminal.KittyKeyboardProtocolState.Inactive
+        else scalatui.terminal.KittyKeyboardProtocolState.Active(0)
+      )
+      terminal.stop()
+      terminal.stop()
+      assertEquals(
+        writes.toVector,
+        Vector(KittyKeyboardProtocol.QuerySequence) ++
+          (if cancel then Vector.empty
+           else Vector(KittyKeyboardProtocol.EnableSequence, KittyKeyboardProtocol.DisableSequence))
+      )
+  }
+
+  test("active Kitty stop pops exactly once"):
+    val terminal = PosixTerminal(initialColumns = 80, initialRows = 24)
+    val writes   = scala.collection.mutable.ArrayBuffer.empty[String]
+    terminal.writeFailureForTesting = data =>
+      writes += data
+      None
+    terminal.requestKittyKeyboardProtocol(timeoutMillis = 1000L)
+    assert(terminal.acceptKittyKeyboardProtocolResponse("\u001b[?0u", 0L))
+    terminal.stop()
+    terminal.stop()
+    assertEquals(
+      writes.toVector,
+      Vector(
+        KittyKeyboardProtocol.QuerySequence,
+        KittyKeyboardProtocol.EnableSequence,
         KittyKeyboardProtocol.DisableSequence
       )
     )

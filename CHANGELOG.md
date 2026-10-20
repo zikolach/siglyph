@@ -7,6 +7,15 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed missing automatic Kitty keyboard negotiation on JVM and Scala Native interactive TUIs so
+  supported terminals can preserve modifiers such as Shift+Enter. Negotiation replies stay out of
+  component input, and timely replies remain valid when runtime work delays handling.
+- Retained incomplete terminal restoration for explicit `TUI.stop()` retry. Alternate-screen
+  keyboard cleanup completes before screen exit, and retries preserve completed teardown and
+  callbacks without changing the shell's keyboard stack.
+
 ## [0.9.1] - 2026-10-13
 
 ### Changed
