@@ -723,3 +723,40 @@ class TUIKeyboardProtocolSuite extends munit.FunSuite:
           runner.join(5000L)
     }
   }
+
+  test("first stop reserves restoration before notifying a concurrent stop caller"):
+    val cleanupFailure = RuntimeException("owned restoration failure")
+    val terminal       = new KeyboardTerminal:
+      override def stop(): Unit =
+        super.stop()
+        throw cleanupFailure
+    val runtime        = AtomicReference[TUI]()
+    val concurrent     = AtomicReference[Thread]()
+    val firstFailure   = AtomicReference[Throwable]()
+    val secondFailure  = AtomicReference[Throwable]()
+    val secondReturned = CountDownLatch(1)
+    var coalesced      = false
+    val observer       = TUIDiagnosticObserver {
+      case TUIDiagnosticEvent.Lifecycle(TUIDiagnosticLifecycleState.Stopping, _) =>
+        val caller = Thread(() =>
+          try runtime.get().stop()
+          catch case error: Throwable => secondFailure.set(error)
+          finally secondReturned.countDown()
+        )
+        concurrent.set(caller)
+        caller.start()
+        // The first caller is paused after selecting cleanup but before entering its drain.
+        // A concurrent stop must coalesce, not steal ownership and block on this observer.
+        coalesced = secondReturned.await(5L, TimeUnit.SECONDS)
+      case _                                                                     => ()
+    }
+    val tui            = TUI(terminal, TUIOptions(diagnosticObserver = Some(observer)))
+    runtime.set(tui)
+    tui.start()
+    try tui.stop()
+    catch case error: Throwable => firstFailure.set(error)
+    join(concurrent.get())
+    assert(coalesced, "concurrent stop stole the initial caller's cleanup reservation")
+    assert(firstFailure.get() eq cleanupFailure)
+    assertEquals(secondFailure.get(), null)
+    assertEquals(terminal.stops, 1)

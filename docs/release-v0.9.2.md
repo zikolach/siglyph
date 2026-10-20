@@ -13,6 +13,8 @@ is the source for the GitHub Release notes.
 - Failed terminal restoration remains available for explicit `TUI.stop()` retry. Backend cleanup
   precedes alternate-screen exit, preserving the correct keyboard stack. Successful teardown and
   callbacks are not repeated. An interrupted idle `run()` performs its initial cleanup attempt.
+  The initial stop caller reserves restoration ownership before waking concurrent callers, so
+  synchronous stop waits for its restoration attempt and reports its cleanup failure.
 - Unsupported terminals retain basic parsing. A terminal or multiplexer that discards Shift cannot
   be repaired by Siglyph. Physical Ghostty-through-Herdr forwarding remains a manual check described
   in [interactive-smoke.md](interactive-smoke.md).

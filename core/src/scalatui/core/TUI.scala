@@ -665,7 +665,7 @@ final class TUI(
 
   private def requestStop(retryRestoration: Boolean): Unit =
     val (own, transitioned) = lifecycleLock.synchronized {
-      lifecycleState match
+      val decision = lifecycleState match
         case TUI.LifecycleState.Cleaning =>
           if retryRestoration && !cleanupOwned then restorationRetryRequested = true
           (retryRestoration && !cleanupOwned && !drainOwned) -> false
@@ -676,13 +676,16 @@ final class TUI(
         case _                           =>
           transitionToStoppingLocked()
           (!startupOwner && !drainOwned && queryWriteReservations === 0) -> true
+      // Reserve the selected owner before waking callers can claim the same Stopping state.
+      if decision._1 then drainOwned = true
+      decision
     }
     if transitioned then
       emitDiagnostic(TUIDiagnosticEvent.Lifecycle(
         TUIDiagnosticLifecycleState.Stopping,
         options.screenMode
       ))
-    if own then drainOrReturn(propagateCleanupFailure = true)
+    if own then drainWork(propagateCleanupFailure = true)
 
   override def requestRender(force: Boolean = false): Unit =
     requestRenderInternal(force = force, clear = false)

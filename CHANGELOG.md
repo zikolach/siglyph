@@ -17,6 +17,9 @@ and this project uses semantic versioning while it remains pre-1.0.
 - Retained incomplete terminal restoration for explicit `TUI.stop()` retry. Alternate-screen
   keyboard cleanup completes before screen exit, and retries preserve completed teardown and
   callbacks without changing the shell's keyboard stack.
+- Reserved the initial stop caller's cleanup ownership before waking concurrent callers, so a
+  waiting `run()` or another stop cannot make synchronous stop return before restoration or hide
+  its cleanup failure.
 
 ## [0.9.1] - 2026-10-13
 

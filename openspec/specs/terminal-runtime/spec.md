@@ -150,6 +150,10 @@ The TUI SHALL use single-owner cleanup and SHALL discard queued ordinary work af
 - **WHEN** stop occurs while another owner or query reservation is active
 - **THEN** later ordinary work is rejected, queued ordinary work is discarded, and the owner invokes retained query callbacks and accepted title/progress output before cleanup
 
+#### Scenario: Initial stop reserves synchronous restoration ownership
+- **WHEN** an idle caller requests stop and another stop caller or the waiting run thread wakes before drain execution
+- **THEN** the initial caller retains cleanup ownership, concurrent callers coalesce, and the initial caller does not return before its restoration attempt or lose that attempt's failure
+
 ### Requirement: Opt-in alternate-screen lifecycle
 The TUI runtime SHALL support an opt-in alternate-screen mode that enters the terminal alternate screen from startup until backend stop and screen exit succeed, while preserving normal-screen mode as the default.
 
