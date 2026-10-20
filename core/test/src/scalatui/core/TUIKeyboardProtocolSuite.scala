@@ -658,3 +658,68 @@ class TUIKeyboardProtocolSuite extends munit.FunSuite:
     terminal.beforeWrite = _ => ()
     tui.stop()
     assertEquals(count(terminal, TUI.AlternateScreenExit), 1)
+
+  Vector("normal", "alternate", "fullscreen").foreach { screen =>
+    Vector(false, true).foreach { failCleanup =>
+      test(
+        s"interrupted idle run owns initial cleanup and leaves retry explicit: $screen/$failCleanup"
+      ):
+        val terminal    = KeyboardTerminal()
+        val tui         = screen match
+          case "normal"    => TUI(terminal)
+          case "alternate" => alternateTui(terminal, false)
+          case _           => alternateTui(terminal, true)
+        tui.start()
+        send(terminal, "\u001b[?0u")
+        var popAttempts = 0
+        var fail        = failCleanup
+        terminal.beforeWrite = data =>
+          if data === KittyKeyboardProtocol.DisableSequence then
+            popAttempts += 1
+            if fail then throw RuntimeException("interrupted cleanup failed")
+        val reported    = AtomicReference[Throwable]()
+        val runner      = Thread(() =>
+          try tui.run()
+          catch case error: Throwable => reported.set(error)
+        )
+        runner.setDaemon(true)
+        runner.start()
+        try
+          val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5L)
+          while (runner.getState !== Thread.State.WAITING) && System.nanoTime() < deadline do
+            Thread.`yield`()
+          assertEquals(runner.getState, Thread.State.WAITING)
+          runner.interrupt()
+          join(runner)
+          assert(reported.get().isInstanceOf[InterruptedException])
+          if failCleanup then
+            assertEquals(popAttempts, 2)
+            assert(
+              reported.get().getSuppressed.exists(_.getMessage === "interrupted cleanup failed")
+            )
+            assertEquals(count(terminal, TUI.AlternateScreenExit), 0)
+            intercept[IllegalStateException](tui.start())
+          else
+            assertEquals(popAttempts, 1)
+            assertEquals(terminal.stops, 1)
+            assertEquals(
+              count(terminal, TUI.AlternateScreenExit),
+              if screen === "normal" then 0 else 1
+            )
+          fail = false
+          tui.stop()
+          tui.stop()
+          assertEquals(popAttempts, if failCleanup then 3 else 1)
+          assertEquals(terminal.stops, 1)
+          assertEquals(
+            count(terminal, TUI.AlternateScreenExit),
+            if screen === "normal" then 0 else 1
+          )
+        finally
+          fail = false
+          // Release an orphaned Stopping session even when this regression fails.
+          tui.flushRender()
+          tui.stop()
+          runner.join(5000L)
+    }
+  }

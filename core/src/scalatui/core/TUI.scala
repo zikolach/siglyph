@@ -666,11 +666,14 @@ final class TUI(
   private def requestStop(retryRestoration: Boolean): Unit =
     val (own, transitioned) = lifecycleLock.synchronized {
       lifecycleState match
-        case TUI.LifecycleState.Cleaning                              =>
+        case TUI.LifecycleState.Cleaning =>
           if retryRestoration && !cleanupOwned then restorationRetryRequested = true
           (retryRestoration && !cleanupOwned && !drainOwned) -> false
-        case TUI.LifecycleState.Stopped | TUI.LifecycleState.Stopping => false -> false
-        case _                                                        =>
+        case TUI.LifecycleState.Stopping =>
+          // Failure recording can enter Stopping without an active cleanup owner.
+          (!startupOwner && !drainOwned && queryWriteReservations === 0) -> false
+        case TUI.LifecycleState.Stopped  => false -> false
+        case _                           =>
           transitionToStoppingLocked()
           (!startupOwner && !drainOwned && queryWriteReservations === 0) -> true
     }
