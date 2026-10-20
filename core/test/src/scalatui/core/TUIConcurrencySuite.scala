@@ -1719,6 +1719,8 @@ class TUIConcurrencySuite extends munit.FunSuite:
     assertEquals(callbacks, Vector("detached", "post-cutoff"))
     assertEquals(stopFailure.map(_.getMessage), Some("restoration failed"))
     failRestoration = false
+    intercept[IllegalStateException](tui.start())
+    tui.stop()
     tui.start()
     assertEquals(terminal.starts, 2)
     tui.stop()

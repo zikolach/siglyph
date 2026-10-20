@@ -144,29 +144,33 @@ final class SttyTerminal(
   override def setProgress(active: Boolean): Unit =
     write(if active then Terminal.ProgressActiveSequence else Terminal.ProgressClearSequence)
 
-  override def keyboardProtocolState: KittyKeyboardProtocolState =
+  override def keyboardProtocolState: KittyKeyboardProtocolState = synchronized {
     keyboardProtocolNegotiator.expire(System.currentTimeMillis())
     keyboardProtocolNegotiator.state
+  }
 
-  override def requestKittyKeyboardProtocol(timeoutMillis: Long): Unit =
+  override def requestKittyKeyboardProtocol(timeoutMillis: Long): Unit = synchronized {
     keyboardProtocolNegotiator.begin(System.currentTimeMillis(), timeoutMillis)
     write(KittyKeyboardProtocol.QuerySequence)
+  }
 
   override def acceptKittyKeyboardProtocolResponse(
       response: String,
       nowMillis: Long
-  ): Boolean =
+  ): Boolean = synchronized {
     val accepted = keyboardProtocolNegotiator.receiveResponse(response, nowMillis)
     if accepted then
       kittyCleanupPending = true
       write(KittyKeyboardProtocol.EnableSequence)
     accepted
+  }
 
-  override def disableKittyKeyboardProtocol(): Unit =
-    if keyboardProtocolState !== KittyKeyboardProtocolState.Inactive then
+  override def disableKittyKeyboardProtocol(): Unit = synchronized {
+    if kittyCleanupPending then
       write(KittyKeyboardProtocol.DisableSequence)
     keyboardProtocolNegotiator.disable()
     kittyCleanupPending = false
+  }
 
   private[jvm] def refreshSizeForTesting(): Boolean = refreshSize(notify = true)
 
@@ -245,6 +249,7 @@ final class SttyTerminal(
             case None        => failure = Some(error)
 
     if kittyCleanupPending then attempt("kitty") { disableKittyKeyboardProtocol() }
+    else keyboardProtocolNegotiator.disable()
     if mouseCleanupPending then
       attempt("mouse") {
         write(Terminal.MouseProtocol.disable(mouseCleanupMode))

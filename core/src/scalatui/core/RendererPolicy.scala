@@ -274,8 +274,8 @@ private[core] final class NormalScreenPolicy(
 
   override def exitScreen(): Unit =
     if alternateScreenEntered then
-      try terminalServices.writeData(TUI.AlternateScreenExit, TUIDiagnosticWriteKind.Cleanup)
-      finally alternateScreenEntered = false
+      terminalServices.writeData(TUI.AlternateScreenExit, TUIDiagnosticWriteKind.Cleanup)
+      alternateScreenEntered = false
 
   private def fullRender(
       frame: PreparedFrame,
@@ -694,8 +694,8 @@ private[core] final class FullscreenViewportPolicy(
 
   override def exitScreen(): Unit =
     if alternateScreenEntered then
-      try terminalServices.writeData(TUI.AlternateScreenExit, TUIDiagnosticWriteKind.Cleanup)
-      finally alternateScreenEntered = false
+      terminalServices.writeData(TUI.AlternateScreenExit, TUIDiagnosticWriteKind.Cleanup)
+      alternateScreenEntered = false
 
   private def paint(
       frame: PreparedFrame,
