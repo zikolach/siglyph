@@ -1,10 +1,12 @@
-# v0.9.1 release execution (publication pending)
+# v0.9.1 release execution (published)
 
-The patch release after `v0.9.0` (2026-09-06) was authorized for 2026-10-13. Its finalized
-[0.9.1 changelog section](../CHANGELOG.md#091---2026-10-13) covers merged PRs #63–#66.
-Finalizing these notes does not itself create a `v0.9.1` tag, GitHub Release, or package artifacts.
-README and Scala CLI dependency examples remain at the latest published version, `0.9.0`, until
-`0.9.1` artifacts are available.
+The patch release after `v0.9.0` (2026-09-06) was authorized and published on 2026-10-13. Its
+finalized [0.9.1 changelog section](../CHANGELOG.md#091---2026-10-13) covers merged PRs #63–#66.
+The [`v0.9.1` tag](https://github.com/zikolach/siglyph/tree/v0.9.1) points to
+`fee20427e2eb6b7ab5cc6a631466fbb56d948078`; the
+[GitHub Release](https://github.com/zikolach/siglyph/releases/tag/v0.9.1) was published at
+2026-10-13 07:00:42 UTC with ten jars. README and Scala CLI dependency examples now use the
+available Maven Central `0.9.1` artifacts.
 
 ## Release scope and evidence
 
@@ -22,31 +24,32 @@ README and Scala CLI dependency examples remain at the latest published version,
   reviewed on 2026-09-05, not current upstream parity.
 - At preparation, merged `main` was `da1cd430bb6e2eb7597e1fafacd81546154f0d0f`. Its
   [CI run](https://github.com/zikolach/siglyph/actions/runs/37917980571) passed both Linux
-  `Test and package jars` and `macOS terminal conformance`. Release from the later approved
-  commit and recheck its CI status before tagging.
+  `Test and package jars` and `macOS terminal conformance`. The final tag commit
+  `fee20427e2eb6b7ab5cc6a631466fbb56d948078` passed those same jobs in its
+  [CI run](https://github.com/zikolach/siglyph/actions/runs/38358370456) before tagging.
 
-## Publication checklist
+## Publication checklist — completed 2026-10-13
 
-1. Merge the release-finalization documentation after its exact head passes Linux and macOS CI.
-   Confirm no additional changes entered `main` unnoticed and its exact commit has successful
-   required CI before tagging. Resolve any release-blocking regressions before proceeding.
-2. The release was authorized on 2026-10-13. The changelog now has a dated `## [0.9.1]` section
-   and a fresh `[Unreleased]` section, which the GitHub Release workflow will use for notes.
-3. Confirm Maven Central namespace/signing prerequisites and required workflow secret names
-   without exposing credentials. Check the final tag target before pushing the tag. A pushed
-   `v0.9.1` tag automatically starts **both**
-   `Publish` and `Publish Maven Central`; the former publishes GitHub Packages and creates a GitHub
-   Release, while the latter automatically releases non-SNAPSHOT artifacts to Central by default.
-   Do not use manual workflow dispatch as an extra publication path unless deliberately chosen.
-4. After the authorized tag push, verify both workflows, Maven Central and GitHub Packages
-   coordinates, and all ten expected GitHub Release jars (below). Do not describe artifacts as
-   available based only on a successful build or tag push.
-5. Once artifacts are available, update the `0.9.0` dependency examples in README and
-   `examples/scala-cli/`, plus their version guidance, to `0.9.1` in a follow-up documentation
-   change. Keep the build's `0.1.0-SNAPSHOT` local fallback unchanged; it is not the release
-   version source.
+1. The release-finalization documentation was merged as #68. Final `main` and the peeled
+   `v0.9.1` tag both point to `fee20427e2eb6b7ab5cc6a631466fbb56d948078`; its
+   [CI run](https://github.com/zikolach/siglyph/actions/runs/38358370456) passed Linux
+   `Test and package jars` and `macOS terminal conformance` before tagging.
+2. The authorized release used the dated `## [0.9.1]` changelog section and retained a fresh
+   `[Unreleased]` section. The GitHub Release notes contain the 0.9.1 change list.
+3. The `v0.9.1` tag triggered both publication workflows: [Publish](https://github.com/zikolach/siglyph/actions/runs/38359183129)
+   and [Publish Maven Central](https://github.com/zikolach/siglyph/actions/runs/38359183203)
+   completed successfully. The latter automatically released non-SNAPSHOT artifacts to Central.
+   No extra manual workflow dispatch was used for this release.
+4. The [GitHub Release](https://github.com/zikolach/siglyph/releases/tag/v0.9.1) lists all ten
+   jars below. All ten corresponding `0.9.1` POMs return HTTP 200 from
+   [Maven Central](https://repo.maven.apache.org/maven2/io/github/zikolach/siglyph-core_3/0.9.1/siglyph-core_3-0.9.1.pom).
+   The GitHub Packages workflow succeeded; this check did not independently verify package
+   listing or unauthenticated coordinate resolution there.
+5. README, `examples/scala-cli/`, and [publishing guidance](publishing.md) now point consumers
+   to `0.9.1`. The build's `0.1.0-SNAPSHOT` local fallback remains unchanged; it is not the
+   release version source.
 
-Expected GitHub Release jar names, derived from the tag workflow (not yet published):
+GitHub Release jar names, verified against the published release:
 
 | JVM | Scala Native 0.5 |
 | --- | --- |
@@ -56,6 +59,6 @@ Expected GitHub Release jar names, derived from the tag workflow (not yet publis
 | `siglyph-image_3-0.9.1.jar` | `siglyph-image_native0.5_3-0.9.1.jar` |
 | `siglyph-extras_3-0.9.1.jar` | `siglyph-extras_native0.5_3-0.9.1.jar` |
 
-The workflow publishes the corresponding ten `io.github.zikolach` Maven coordinates; see
-[publishing.md](publishing.md) for the complete coordinates and version-source rules. Packaging
-and publishing are distinct: no jar list above asserts that a release artifact exists today.
+The corresponding ten `io.github.zikolach` Maven Central coordinates were checked at version
+`0.9.1`; see [publishing.md](publishing.md) for the complete coordinate list and version-source
+rules. The jar list records release assets, not an independent GitHub Packages listing check.
