@@ -103,10 +103,11 @@ private[core] final class FullscreenKittyRetention(options: KittyImageRetentionO
                   value.control.width === placement.control.width &&
                   value.control.rows === placement.control.rows
               )
-              val reuse             = matching.nonEmpty && (repaintAll || !samePlacement ||
-                previousPlacement.exists(
-                  _.control.details.isInstanceOf[TerminalRenderControlDetails.KittyPlacement]
-                ))
+              val reuse             = matching.nonEmpty &&
+                (repaintAll || !samePlacement ||
+                  previousPlacement.exists(
+                    _.control.details.isInstanceOf[TerminalRenderControlDetails.KittyPlacement]
+                  ))
               if reuse && previousPlacement.nonEmpty && (!samePlacement || repaintAll) then
                 lowerCleanup += imageId
               else if repaintAll && previousPlacement.nonEmpty && matching.isEmpty then
@@ -167,8 +168,7 @@ private[core] final class FullscreenKittyRetention(options: KittyImageRetentionO
     pendingCleanupIds.clear()
     activeIds = Set.empty
 
-  private[core] def ownershipCount: Int =
-    (activeIds ++ entries.keySet ++ pendingCleanupIds).size
+  private[core] def ownershipCount: Int = (activeIds ++ entries.keySet ++ pendingCleanupIds).size
 
   private def admit(
       imageId: Int,

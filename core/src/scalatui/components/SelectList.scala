@@ -115,7 +115,8 @@ final class SelectList private (
         updateFilter(dropLastGrapheme(filterQuery), effects)
         InputResult.Render
       case TerminalInput.Key(TerminalKey.Character(text), modifiers)
-          if options.effectiveFiltering.enabled && !modifiers.ctrl && !modifiers.alt && !modifiers.superKey && text.nonEmpty =>
+          if options.effectiveFiltering.enabled && !modifiers.ctrl && !modifiers.alt &&
+            !modifiers.superKey && text.nonEmpty =>
         updateFilter(filterQuery + text, effects)
         InputResult.Render
       case _                                        => InputResult.Ignored

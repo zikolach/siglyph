@@ -198,7 +198,8 @@ object Ansi:
       case _: ScannedMetadata                 => ()
       case ScannedPrintable(start, end, text) =>
         val codePoint = value.codePointAt(start)
-        val control   = codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f) || end - start >
+        val control   = codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f) ||
+          end - start >
           Character.charCount(codePoint)
         if !control then builder.append(text)
     }
@@ -508,7 +509,8 @@ object Ansi:
         if csi && index > offset + (if escForm then 1 else 0) &&
           codePoint >= 0x40 && codePoint <= 0x7e
         then complete = true
-        else if !csi && ((osc && codePoint === 0x07) || codePoint === 0x9c ||
+        else if !csi &&
+          ((osc && codePoint === 0x07) || codePoint === 0x9c ||
             (codePoint === 0x1b && next < value.length && value.charAt(next) === '\\'))
         then
           if codePoint === 0x1b then

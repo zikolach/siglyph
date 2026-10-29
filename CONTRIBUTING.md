@@ -9,8 +9,12 @@ set of optional modules.
 Requirements:
 
 - JDK 21
-- Mill 1.1.8 or newer compatible Mill 1.x
+- Mill 1.3.1 (pinned in the build header)
+- Scala 3.9.0 LTS (resolved by Mill)
 - `openspec` for spec/change validation when working on user-visible behavior
+
+The build header also selects Temurin JDK 21 for Mill and its compile/test/run tasks.
+See [toolchain compatibility](README.md#toolchain-compatibility) for the consumer baseline.
 
 Useful commands:
 

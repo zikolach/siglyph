@@ -641,7 +641,8 @@ class StreamTerminalSuite extends munit.FunSuite:
 
     val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1)
     var message  = ""
-    while (message !== "cannot restart StreamTerminal while the previous flush worker is still alive") &&
+    while (message !==
+        "cannot restart StreamTerminal while the previous flush worker is still alive") &&
       System.nanoTime() < deadline
     do
       message = intercept[IllegalStateException](terminal.start(_ => (), () => ())).getMessage

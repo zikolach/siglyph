@@ -715,7 +715,7 @@ final class TUI(
   def appendToScrollback(
       component: Component,
       onComplete: AppendResult => Unit = _ => ()
-  ): Unit =
+  ): Unit                                                                                   =
     val publication = lifecycleLock.synchronized {
       nextAppendId += 1
       val requestId = nextAppendId
@@ -1067,7 +1067,8 @@ final class TUI(
         Vector.empty,
         () => rawCorrelation = None
       )
-    else if termination === TerminalRawTermination.Complete && TerminalImageProtocol.isCellSizeResponse(
+    else if termination === TerminalRawTermination.Complete &&
+      TerminalImageProtocol.isCellSizeResponse(
         data
       )
     then
@@ -1082,7 +1083,8 @@ final class TUI(
             if dimensions !== previousDimensions then renderRequested = true
           }
       )
-    else if termination === TerminalRawTermination.Complete && TerminalColorProtocol.isOsc11BackgroundColorResponse(
+    else if termination === TerminalRawTermination.Complete &&
+      TerminalColorProtocol.isOsc11BackgroundColorResponse(
         data
       )
     then
@@ -1097,7 +1099,8 @@ final class TUI(
           rawCorrelation = None
           backgroundColorFlight = None
       )
-    else if termination === TerminalRawTermination.Complete && TerminalColorProtocol.isTerminalColorSchemeReport(
+    else if termination === TerminalRawTermination.Complete &&
+      TerminalColorProtocol.isTerminalColorSchemeReport(
         data
       )
     then
@@ -1118,7 +1121,8 @@ final class TUI(
           rawCorrelation = None
           colorSchemeFlight = None
       )
-    else if termination === TerminalRawTermination.Complete && TerminalCursorProtocol.isCursorPositionReport(
+    else if termination === TerminalRawTermination.Complete &&
+      TerminalCursorProtocol.isCursorPositionReport(
         data
       )
     then

@@ -268,7 +268,8 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     context.foreach(renderContext => effects.add(() => renderContext.requestRender()))
 
   private def deferRefreshAutocompleteIfActive(effects: Editor.Effects): Unit =
-    if currentAutocomplete.nonEmpty || currentAutocompleteHandle.nonEmpty || pendingAutocompleteRefresh.nonEmpty
+    if currentAutocomplete.nonEmpty || currentAutocompleteHandle.nonEmpty ||
+      pendingAutocompleteRefresh.nonEmpty
     then effects.add(() => scheduleAutocompleteRefresh())
 
   private def deferAutocompleteRequest(effects: Editor.Effects, force: Boolean): Unit =
@@ -594,7 +595,8 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     buffer.text.isEmpty || (historyIndex >= 0 && layout.cursor.row === 0)
 
   private def shouldUseHistoryDown(layout: EditorLayout): Boolean =
-    historyIndex >= 0 && (buffer.lines.length === 1 || layout.cursor.row === layout.lines.length - 1)
+    historyIndex >= 0 &&
+      (buffer.lines.length === 1 || layout.cursor.row === layout.lines.length - 1)
 
   private def navigateHistory(direction: Int, effects: Editor.Effects): InputResult =
     if history.isEmpty then InputResult.NoRender
@@ -759,7 +761,8 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
       InputResult.Render
 
   private def maybeTriggerAutocompleteAfterText(inserted: String, effects: Editor.Effects): Unit =
-    if provider.nonEmpty && currentAutocompleteTrigger.triggerSlash && (inserted === "/") && currentLineBeforeCursor === "/"
+    if provider.nonEmpty && currentAutocompleteTrigger.triggerSlash && (inserted === "/") &&
+      currentLineBeforeCursor === "/"
     then deferAutocompleteRequest(effects, force = false)
     else deferRefreshAutocompleteIfActive(effects)
 
@@ -882,8 +885,8 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
   private def isCurrentAutocompleteRequest(
       token: Long,
       snapshot: Editor.AutocompleteSnapshot
-  ): Boolean =
-    (token === autocompleteRequestToken) && (buffer.text === snapshot.text) && (buffer.cursor === snapshot.cursor)
+  ): Boolean = (token === autocompleteRequestToken) && (buffer.text === snapshot.text) &&
+    (buffer.cursor === snapshot.cursor)
 
   private def prepareShowAutocompleteLocked(
       suggestions: AutocompleteSuggestions,
@@ -1180,7 +1183,8 @@ object Editor:
   ):
     def selectedItem: Option[AutocompleteItem] = list.selected.flatMap { item =>
       suggestions.items.find(candidate =>
-        candidate.value === item.value && candidate.label === item.label && candidate.description === item.description
+        candidate.value === item.value && candidate.label === item.label &&
+          candidate.description === item.description
       )
     }
 

@@ -442,7 +442,7 @@ class LayoutSuite extends munit.FunSuite:
           viewportExtent: Int,
           viewportWidth: Int,
           layoutViewport: LayoutViewport
-      ): Int = 0
+      ): Int                                                                         = 0
       override private[scalatui] def viewportDecorations: Vector[ViewportDecoration] =
         Vector(ViewportDecoration(0, 1, "Z", 1))
     val counters  = RuntimeCounters()
