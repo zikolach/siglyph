@@ -161,9 +161,10 @@ object ImageDimensionsSniffer:
           val height = 1L + (((b4 & 0x0f) << 10) | (b3 << 2) | ((b2 & 0xc0) >> 6)).toLong
           validatedMetadata("image/webp", width, height)
         case "VP8 "
-            if bytes.length >= 30 && (unsigned(bytes(23)) === 0x9d) && (unsigned(
-              bytes(24)
-            ) === 0x01) && (unsigned(bytes(25)) === 0x2a) =>
+            if bytes.length >= 30 && (unsigned(bytes(23)) === 0x9d) &&
+              (unsigned(
+                bytes(24)
+              ) === 0x01) && (unsigned(bytes(25)) === 0x2a) =>
           val width  = (readInt16LE(bytes, 26) & 0x3fff).toLong
           val height = (readInt16LE(bytes, 28) & 0x3fff).toLong
           validatedMetadata("image/webp", width, height)
@@ -183,11 +184,13 @@ object ImageDimensionsSniffer:
       count <= bytesLength - offset
 
   private def isPng(bytes: Array[Byte]): Boolean =
-    bytes.length >= 8 && bytes(0) === 0x89.toByte && bytes(1) === 'P'.toByte && bytes(
-      2
-    ) === 'N'.toByte && bytes(3) === 'G'.toByte && bytes(4) === 0x0d.toByte && bytes(
-      5
-    ) === 0x0a.toByte && bytes(6) === 0x1a.toByte && bytes(7) === 0x0a.toByte
+    bytes.length >= 8 && bytes(0) === 0x89.toByte && bytes(1) === 'P'.toByte &&
+      bytes(
+        2
+      ) === 'N'.toByte && bytes(3) === 'G'.toByte && bytes(4) === 0x0d.toByte &&
+      bytes(
+        5
+      ) === 0x0a.toByte && bytes(6) === 0x1a.toByte && bytes(7) === 0x0a.toByte
 
   private def isGif(bytes: Array[Byte]): Boolean =
     bytes.length >= 6 && (ascii(bytes, 0, 6) === "GIF87a" || ascii(bytes, 0, 6) === "GIF89a")

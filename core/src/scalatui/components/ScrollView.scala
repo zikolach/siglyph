@@ -390,7 +390,7 @@ final class ScrollView(
       thumbStyle,
       indicator,
       selectionDecorations
-    ) = snapshot
+    )                        = snapshot
     val scrollbarDecorations = geometry.toVector.flatMap { value =>
       Vector.tabulate(value.trackHeight) { row =>
         val thumb  = row >= value.thumbTop && row < value.thumbTop + value.thumbHeight
@@ -438,7 +438,8 @@ final class ScrollView(
           }
         }
     }
-    scrollbarDecorations ++ indicatorDecoration ++ selectionDecorations.toVector.flatten ++ searchDecorations
+    scrollbarDecorations ++ indicatorDecoration ++ selectionDecorations.toVector.flatten ++
+      searchDecorations
 
   override def render(width: Int): ComponentRender =
     child match

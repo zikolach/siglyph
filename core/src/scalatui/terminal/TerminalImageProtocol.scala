@@ -140,7 +140,8 @@ object TerminalImageProtocol:
       math.max(
         1,
         math.floor(
-          (heightCap.toDouble * cell.heightPx.toDouble * sourceWidth.toDouble) / (cell.widthPx.toDouble * sourceHeight.toDouble)
+          (heightCap.toDouble * cell.heightPx.toDouble * sourceWidth.toDouble) /
+            (cell.widthPx.toDouble * sourceHeight.toDouble)
         ).toInt
       )
     }
@@ -165,7 +166,8 @@ object TerminalImageProtocol:
     math.max(
       1,
       math.ceil(
-        (widthCells.toDouble * cell.widthPx.toDouble * sourceHeight.toDouble) / (cell.heightPx.toDouble * sourceWidth.toDouble)
+        (widthCells.toDouble * cell.widthPx.toDouble * sourceHeight.toDouble) /
+          (cell.heightPx.toDouble * sourceWidth.toDouble)
       ).toInt
     )
 

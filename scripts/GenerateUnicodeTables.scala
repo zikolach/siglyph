@@ -1,4 +1,4 @@
-//> using scala "3.7.4"
+//> using scala "3.9.0"
 
 import java.net.URI
 import java.nio.charset.StandardCharsets

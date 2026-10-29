@@ -925,5 +925,6 @@ object ViewportLayoutEngine:
       height: Int
   ): Boolean =
     position.row >= 0 && position.row < height && position.column >= 0 &&
-      position.column <= width && position.row >= clip.row && position.row < clip.row + clip.height &&
+      position.column <= width && position.row >= clip.row &&
+      position.row < clip.row + clip.height &&
       position.column >= clip.col && position.column <= clip.col + clip.width
