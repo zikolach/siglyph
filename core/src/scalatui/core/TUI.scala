@@ -200,71 +200,77 @@ final class TUI(
   private var postRestorationCutoff                       = false
   private[scalatui] val testRuntimeCounters               = RuntimeCounters()
 
-  private val pendingActions                                                                 = ArrayBuffer.empty[() => Unit]
-  private val pendingControlOutput                                                           = ArrayBuffer.empty[() => Unit]
-  private val pendingStructural                                                              = ArrayBuffer.empty[TUI.StructuralOperation]
-  private var desiredChildren                                                                = Vector.empty[TUI.ChildEntry]
-  private var committedChildren                                                              = Vector.empty[TUI.ChildEntry]
-  private var nextChildEntryId                                                               = 0L
-  private var lifecycleState: TUI.LifecycleState                                             = TUI.LifecycleState.Stopped
-  private var startupOwner                                                                   = false
-  private var drainOwned                                                                     = false
-  private val drainOwnerMarker                                                               = new ThreadLocal[Boolean]:
+  private val pendingActions                                                                  = ArrayBuffer.empty[() => Unit]
+  private val pendingControlOutput                                                            = ArrayBuffer.empty[() => Unit]
+  private val pendingStructural                                                               = ArrayBuffer.empty[TUI.StructuralOperation]
+  private var desiredChildren                                                                 = Vector.empty[TUI.ChildEntry]
+  private var committedChildren                                                               = Vector.empty[TUI.ChildEntry]
+  private var nextChildEntryId                                                                = 0L
+  private var lifecycleState: TUI.LifecycleState                                              = TUI.LifecycleState.Stopped
+  private var startupOwner                                                                    = false
+  private var drainOwned                                                                      = false
+  private val drainOwnerMarker                                                                = new ThreadLocal[Boolean]:
     override def initialValue(): Boolean = false
-  private var lastOrdinaryCategory                                                           = TUI.OrdinaryCategory.Render
-  private var cleanupOwned                                                                   = false
-  private var restorationStage                                                               = TUI.RestorationStage.BackendStop
-  private var restorationRetryRequested                                                      = false
-  private var contextDetachScheduled                                                         = false
-  private var resizeGeneration                                                               = 0L
-  private var committedRenderWidth                                                           = 0
-  private var committedRenderHeight                                                          = 0
-  @volatile private var latestOverlayVisibility                                              = false
-  private var queryWriteReservations                                                         = 0
-  private var nextQueryFlightId                                                              = 0L
-  private var nextQuerySubscriberId                                                          = 0L
-  private var latestBaseLayout                                                               = Option.empty[LayoutNode]
-  private var latestOverlayLayouts                                                           = Vector.empty[TUI.OverlayLayout]
-  private var mouseCapture                                                                   = Option.empty[TUI.MouseTarget]
-  private var mousePress                                                                     = Option.empty[TUI.MousePress]
-  private var lastMouseClick                                                                 = Option.empty[TUI.MouseClick]
-  private var focusedComponent: Option[Component]                                            = None
-  private var baseFocusedComponent: Option[Component]                                        = None
-  private var exitRequested                                                                  = false
-  private var renderRequested                                                                = false
-  private var genericForceRenderRequested                                                    = false
-  private var genericClearRequested                                                          = false
-  private var pendingResizeRecoveryGeneration                                                = Option.empty[Long]
-  private var pendingResizeInvalidation                                                      = false
-  private var runtimeFailure                                                                 = Option.empty[Throwable]
-  override private[scalatui] lazy val componentEffectCoordinator: ComponentEffectCoordinator =
+  private var lastOrdinaryCategory                                                            = TUI.OrdinaryCategory.Render
+  private var cleanupOwned                                                                    = false
+  private var restorationStage                                                                = TUI.RestorationStage.BackendStop
+  private var restorationRetryRequested                                                       = false
+  private var contextDetachScheduled                                                          = false
+  private var resizeGeneration                                                                = 0L
+  private var committedRenderWidth                                                            = 0
+  private var committedRenderHeight                                                           = 0
+  @volatile private var latestOverlayVisibility                                               = false
+  private val queryCoordinator                                                                = QueryCoordinator()
+  private def queryWriteReservations: Int                                                     = queryCoordinator.writeReservations
+  private var latestBaseLayout                                                                = Option.empty[LayoutNode]
+  private var latestOverlayLayouts                                                            = Vector.empty[TUI.OverlayLayout]
+  private var mouseCapture                                                                    = Option.empty[TUI.MouseTarget]
+  private var mousePress                                                                      = Option.empty[TUI.MousePress]
+  private var lastMouseClick                                                                  = Option.empty[TUI.MouseClick]
+  private var focusedComponent: Option[Component]                                             = None
+  private var baseFocusedComponent: Option[Component]                                         = None
+  private var exitRequested                                                                   = false
+  private var renderRequested                                                                 = false
+  private var genericForceRenderRequested                                                     = false
+  private var genericClearRequested                                                           = false
+  private var pendingResizeRecoveryGeneration                                                 = Option.empty[Long]
+  private var pendingResizeInvalidation                                                       = false
+  private var runtimeFailure                                                                  = Option.empty[Throwable]
+  override private[scalatui] lazy val componentEffectCoordinator: ComponentEffectCoordinator  =
     ComponentEffectCoordinator.runtime(
       () => drainOrReturn(deferRender = true),
       error => recordFailure(error)
     )
-  private var nextOverlayId                                                                  = 0L
-  private var nextFocusOrder                                                                 = 0L
-  private var backgroundColorFlight                                                          = Option.empty[TUI.QueryFlight[RgbColor]]
-  private var colorSchemeFlight                                                              = Option.empty[TUI.QueryFlight[TerminalColorScheme]]
-  private var cursorPositionFlight                                                           =
-    Option.empty[TUI.QueryFlight[TerminalCursorProtocol.CursorPosition]]
-  private var rawCorrelation                                                                 = Option.empty[TUI.RawCorrelation]
-  private val terminalColorSchemeListeners                                                   = ArrayBuffer.empty[TerminalColorScheme => Unit]
-  private var terminalColorSchemeNotificationsEnabled                                        = false
-  private val inputListeners                                                                 = ArrayBuffer.empty[TerminalInput => InputResult]
-  private var currentImageCellDimensions                                                     = TerminalImageProtocol.DefaultCellDimensions
-  private var viewportRootContextAttached                                                    = false
-  private val searchPasteDecoder                                                             = TerminalUtf8Decoder()
-  private val searchPasteBuffer                                                              = StringBuilder()
-  private var searchPasteActive                                                              = false
-  @volatile private var currentClipboardResult                                               = Option.empty[ClipboardCopyResult]
-  @volatile private var diagnosticObserver                                                   = options.diagnosticObserver
-  private val terminalServices                                                               = RuntimeTerminalServices(
+  private var nextOverlayId                                                                   = 0L
+  private var nextFocusOrder                                                                  = 0L
+  private def backgroundColorFlight                                                           = queryCoordinator.backgroundColorFlight
+  private def backgroundColorFlight_=(flight: Option[TUI.QueryFlight[RgbColor]]): Unit        =
+    queryCoordinator.backgroundColorFlight = flight
+  private def colorSchemeFlight                                                               = queryCoordinator.colorSchemeFlight
+  private def colorSchemeFlight_=(flight: Option[TUI.QueryFlight[TerminalColorScheme]]): Unit =
+    queryCoordinator.colorSchemeFlight = flight
+  private def cursorPositionFlight                                                            = queryCoordinator.cursorPositionFlight
+  private def cursorPositionFlight_=(
+      flight: Option[TUI.QueryFlight[TerminalCursorProtocol.CursorPosition]]
+  ): Unit                                                                                     =
+    queryCoordinator.cursorPositionFlight = flight
+  private var rawCorrelation                                                                  = Option.empty[TUI.RawCorrelation]
+  private val terminalColorSchemeListeners                                                    = ArrayBuffer.empty[TerminalColorScheme => Unit]
+  private var terminalColorSchemeNotificationsEnabled                                         = false
+  private val inputListeners                                                                  = ArrayBuffer.empty[TerminalInput => InputResult]
+  private var currentImageCellDimensions                                                      = TerminalImageProtocol.DefaultCellDimensions
+  private var viewportRootContextAttached                                                     = false
+  private val searchPasteDecoder                                                              = TerminalUtf8Decoder()
+  private val searchPasteBuffer                                                               = StringBuilder()
+  private var searchPasteActive                                                               = false
+  @volatile private var currentClipboardResult                                                = Option.empty[ClipboardCopyResult]
+  @volatile private var diagnosticObserver                                                    = options.diagnosticObserver
+  private val terminalServices                                                                = RuntimeTerminalServices(
     terminal,
     testRuntimeCounters,
     emitWriteDiagnostic
   )
-  private val rendererPolicy: RendererPolicy                                                 = viewportRoot.fold[RendererPolicy](
+  private val rendererPolicy: RendererPolicy                                                  = viewportRoot.fold[RendererPolicy](
     NormalScreenPolicy(
       terminal,
       options,
@@ -876,24 +882,12 @@ final class TUI(
       onComplete: TerminalQueryResult[A] => Unit
   ): () => Unit =
     val registration = lifecycleLock.synchronized {
-      nextQuerySubscriberId += 1
-      val subscriber = TUI.QuerySubscriber(nextQuerySubscriberId, onComplete)
+      val subscriber = queryCoordinator.subscriber(onComplete)
       lifecycleState match
         case TUI.LifecycleState.Running                                =>
-          getFlight() match
-            case Some(flight) =>
-              setFlight(Some(flight.copy(subscribers = flight.subscribers :+ subscriber)))
-              TUI.QueryRegistration.Registered(subscriber, None)
-            case None         =>
-              nextQueryFlightId += 1
-              val flight = TUI.QueryFlight(
-                nextQueryFlightId,
-                TUI.QueryFlightPhase.Reserved,
-                Vector(subscriber)
-              )
-              setFlight(Some(flight))
-              queryWriteReservations += 1
-              TUI.QueryRegistration.Registered(subscriber, Some(flight.id))
+          val (flight, reservation) = queryCoordinator.subscribe(getFlight(), subscriber)
+          setFlight(Some(flight))
+          TUI.QueryRegistration.Registered(subscriber, reservation)
         case TUI.LifecycleState.Starting | TUI.LifecycleState.Stopping =>
           retainedQueryCompletions += TUI.QueryCompletion(
             subscriber,
@@ -932,48 +926,28 @@ final class TUI(
     try
       terminalServices.writeData(request, TUIDiagnosticWriteKind.Protocol)
       lifecycleLock.synchronized {
-        getFlight() match
-          case Some(flight) if flight.id === flightId =>
-            if lifecycleState === TUI.LifecycleState.Stopping then
-              retainQueryCompletionsLocked(flight.subscribers, TerminalQueryResult.Stopped)
-              setFlight(None)
-            else
-              setFlight(Some(flight.copy(phase = TUI.QueryFlightPhase.Emitted)))
-          case _                                      => ()
-        queryWriteReservations -= 1
+        val (flight, completions) = queryCoordinator.emitted(
+          getFlight(),
+          flightId,
+          lifecycleState === TUI.LifecycleState.Stopping
+        )
+        setFlight(flight)
+        retainedQueryCompletions ++= completions
         lifecycleLock.notifyAll()
       }
     catch
       case error: Throwable =>
         lifecycleLock.synchronized {
-          getFlight() match
-            case Some(flight) if flight.id === flightId =>
-              retainQueryCompletionsLocked(
-                flight.subscribers,
-                TerminalQueryResult.Failed(error)
-              )
-              setFlight(None)
-            case _                                      => ()
-          queryWriteReservations -= 1
+          val (flight, completions) = queryCoordinator.failed(getFlight(), flightId, error)
+          setFlight(flight)
+          retainedQueryCompletions ++= completions
           recordFailureLocked(error)
           lifecycleLock.notifyAll()
         }
     finishDeferredCleanupIfNeeded()
 
   private def cancelQuerySubscriber(subscriber: TUI.QuerySubscriber[?]): Unit =
-    lifecycleLock.synchronized {
-      if subscriber.state === TUI.QuerySubscriberState.Active then
-        subscriber.state = TUI.QuerySubscriberState.Cancelled
-        backgroundColorFlight = removeQuerySubscriber(backgroundColorFlight, subscriber)
-        colorSchemeFlight = removeQuerySubscriber(colorSchemeFlight, subscriber)
-        cursorPositionFlight = removeQuerySubscriber(cursorPositionFlight, subscriber)
-    }
-
-  private def removeQuerySubscriber[A](
-      flight: Option[TUI.QueryFlight[A]],
-      subscriber: TUI.QuerySubscriber[?]
-  ): Option[TUI.QueryFlight[A]] =
-    flight.map(value => value.copy(subscribers = value.subscribers.filterNot(_ eq subscriber)))
+    lifecycleLock.synchronized(queryCoordinator.cancel(subscriber))
 
   private def initializeMouseFrameOrigin(timeoutMillis: Long = 100L): Unit =
     rendererPolicy.frameStartRow = None
@@ -1155,13 +1129,7 @@ final class TUI(
       flight: Option[TUI.QueryFlight[A]],
       result: TerminalQueryResult[A]
   ): Vector[TUI.QueryCompletion[A]] =
-    flight.toVector.flatMap(_.subscribers).map(TUI.QueryCompletion(_, result))
-
-  private def retainQueryCompletionsLocked[A](
-      subscribers: Vector[TUI.QuerySubscriber[A]],
-      result: TerminalQueryResult[A]
-  ): Unit =
-    retainedQueryCompletions ++= subscribers.map(TUI.QueryCompletion(_, result))
+    queryCoordinator.complete(flight, result)
 
   private def publishInput(input: TerminalInput): Unit =
     val publication = lifecycleLock.synchronized {
@@ -1332,18 +1300,13 @@ final class TUI(
       if running then notifications.foreach(_())
 
   private def processQueryCompletion(completion: TUI.QueryCompletion[?]): Unit =
-    val claimed = lifecycleLock.synchronized {
-      if completion.subscriber.state === TUI.QuerySubscriberState.Active then
-        completion.subscriber.state = TUI.QuerySubscriberState.Claimed
-        true
-      else false
-    }
+    val claimed = lifecycleLock.synchronized(queryCoordinator.claim(completion))
     if claimed then
       try completion.invoke()
       catch case error: Throwable => recordFailure(error)
       finally
         lifecycleLock.synchronized {
-          completion.subscriber.state = TUI.QuerySubscriberState.Completed
+          queryCoordinator.completed(completion)
         }
 
   private def processAppendCompletion(completion: TUI.AppendCompletion): Unit =
@@ -1852,16 +1815,7 @@ final class TUI(
     genericClearRequested = false
     pendingResizeRecoveryGeneration = None
     pendingResizeInvalidation = false
-    backgroundColorFlight match
-      case Some(flight) if flight.phase === TUI.QueryFlightPhase.Emitted =>
-        retainQueryCompletionsLocked(flight.subscribers, TerminalQueryResult.Stopped)
-        backgroundColorFlight = None
-      case _                                                             => ()
-    colorSchemeFlight match
-      case Some(flight) if flight.phase === TUI.QueryFlightPhase.Emitted =>
-        retainQueryCompletionsLocked(flight.subscribers, TerminalQueryResult.Stopped)
-        colorSchemeFlight = None
-      case _                                                             => ()
+    retainedQueryCompletions ++= queryCoordinator.stopEmitted()
     exitRequested = true
     lifecycleLock.notifyAll()
 
@@ -3083,34 +3037,15 @@ object TUI:
     case Clear(entryIds: Set[Long])
     case NoOp
 
-  private enum QueryFlightPhase derives CanEqual:
-    case Reserved, Emitted
-
-  private final case class QueryFlight[A](
-      id: Long,
-      phase: QueryFlightPhase,
-      subscribers: Vector[QuerySubscriber[A]]
-  )
+  private type QueryFlight[A]     = QueryCoordinator.QueryFlight[A]
+  private type QuerySubscriber[A] = QueryCoordinator.QuerySubscriber[A]
+  private type QueryCompletion[A] = QueryCoordinator.QueryCompletion[A]
+  private val QueryCompletion = QueryCoordinator.QueryCompletion
   private final case class RawCorrelation(
       kind: TerminalRawKind,
       chunks: Vector[TerminalInputChunk],
       length: Int
   )
-
-  private enum QuerySubscriberState derives CanEqual:
-    case Active, Claimed, Cancelled, Completed
-
-  private final class QuerySubscriber[A](
-      val id: Long,
-      val callback: TerminalQueryResult[A] => Unit
-  ):
-    var state: QuerySubscriberState = QuerySubscriberState.Active
-
-  private final class QueryCompletion[A](
-      val subscriber: QuerySubscriber[A],
-      val result: TerminalQueryResult[A]
-  ):
-    def invoke(): Unit = subscriber.callback(result)
 
   private enum QueryRegistration[A]:
     case Registered(subscriber: QuerySubscriber[A], flightId: Option[Long])
