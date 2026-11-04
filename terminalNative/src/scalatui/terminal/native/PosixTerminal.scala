@@ -281,7 +281,7 @@ final class PosixTerminal(
 
   private def stopResizePolling(): Unit =
     resizePolling = false
-    Option(resizeThread).foreach(_.interrupt())
+    Option(resizeThread).filterNot(_ eq Thread.currentThread()).foreach(_.interrupt())
 
   private def reapResizeThread(): Unit =
     if Option(resizeThread).exists(!_.isAlive) then resizeThread = null
@@ -406,8 +406,10 @@ final class PosixTerminal(
     if inputCleanupPending then
       attempt("input") {
         inputDelivery.stop(inputGeneration, inputBuffer.clear())
-        Option(inputThread).foreach(_.interrupt())
-        Option(flushThread).foreach(_.interrupt())
+        // A synchronous callback can own cleanup; preserve its existing interrupt state.
+        val current = Thread.currentThread()
+        Option(inputThread).filterNot(_ eq current).foreach(_.interrupt())
+        Option(flushThread).filterNot(_ eq current).foreach(_.interrupt())
         reapInputThread()
         reapFlushThread()
         inputCleanupPending = false

@@ -5,6 +5,10 @@ Central. README and Scala CLI examples use the latest published version, current
 `0.9.2`. Keep them on that version while a subsequent release is only planned; update them after
 the new artifacts become available.
 
+The next proposed release is **0.10.0** because of the Scala compiler/TASTy baseline change.
+See [release preparation](release-v0.10.0.md) for migration notes, validation gates and the
+authorization boundary; preparation does not push a tag or publish artifacts.
+
 ## Version source
 
 `build.mill` derives the package version from:

@@ -28,7 +28,21 @@ The library SHALL provide a container component that renders child components in
 - **THEN** the container renders two lines in the same order as the children
 
 ### Requirement: ANSI-aware text utilities
-The library SHALL provide pure shared JVM/Native Scala utilities for measuring, slicing, truncating, wrapping, and padding terminal text while preserving supported ANSI SGR and OSC 8 hyperlink state where required. The utilities SHALL treat Unicode 17.0.0 UAX #29 default extended grapheme clusters as atomic text units and SHALL delegate text-boundary decisions to the shared segmenter. Only fully validated atomic ESC-form SGR and OSC 8 open/close metadata SHALL remain executable, and each complete sequence SHALL be limited to 4096 UTF-8 bytes including introducer and terminator. Every other CSI, OSC, APC, DCS, SOS, PM, unsupported ESC form, C0, DEL, and C1 value SHALL be visible inert text. Rejected string controls SHALL be consumed atomically through their defined terminator, or through the remaining input when unterminated, without rescanning embedded metadata-looking prefixes. Controls SHALL use uppercase `\uXXXX`; other code points SHALL remain exact. Application text SHALL remain unlimited.
+The library SHALL provide pure shared JVM/Native Scala utilities for measuring, slicing, truncating, wrapping, and padding terminal text while preserving supported ANSI SGR and OSC 8 hyperlink state where required. The utilities SHALL treat Unicode 17.0.0 UAX #29 default extended grapheme clusters as atomic text units and SHALL delegate text-boundary decisions to the shared segmenter.
+
+#### Scenario: Shared text boundaries
+- **WHEN** ANSI geometry processes text
+- **THEN** shared Unicode grapheme boundaries remain atomic
+
+### Requirement: ANSI executable metadata bounds
+Only fully validated atomic ESC-form SGR and OSC 8 open/close metadata SHALL remain executable, and each complete sequence SHALL be limited to 4096 UTF-8 bytes including introducer and terminator. Every other CSI, OSC, APC, DCS, SOS, PM, unsupported ESC form, C0, DEL, and C1 value SHALL be visible inert text.
+
+#### Scenario: Unsupported metadata is inert
+- **WHEN** a sequence is outside the executable allowlist
+- **THEN** it is visible inert text
+
+### Requirement: ANSI rejected control consumption and text preservation
+Rejected string controls SHALL be consumed atomically through their defined terminator, or through the remaining input when unterminated, without rescanning embedded metadata-looking prefixes. Controls SHALL use uppercase `\uXXXX`; other code points SHALL remain exact. Application text SHALL remain unlimited.
 
 #### Scenario: ANSI styles do not affect width
 - **WHEN** text contains ANSI color escape sequences around five printable characters
@@ -219,7 +233,14 @@ The runtime SHALL leave the terminal readable after stopping. Retained query cal
 - **THEN** the owner invokes them before terminal cleanup, cursor positioning, and lifecycle `Stopped`
 
 ### Requirement: Editor visual layout
-The editor SHALL scan each complete joined logical line once through the existing forward ANSI scanner and compute width-aware visual layout from sanitized final Unicode 17.0.0 UAX #29 graphemes. Every projected unit SHALL retain its original half-open source-grapheme owner range. Supported bounded SGR and OSC 8 SHALL remain executable atomic metadata with bounded replay/close state. Rejected controls MAY expand to several display units or rows with the same owner range, and every visible expansion character SHALL appear exactly once in order. Editor SHALL retain no projection globally and SHALL NOT use another parser, scan source graphemes separately, mutate EditorBuffer source, or infer ownership from output bytes.
+The editor SHALL scan each complete joined logical line once through the existing forward ANSI scanner and compute width-aware visual layout from sanitized final Unicode 17.0.0 UAX #29 graphemes. Every projected unit SHALL retain its original half-open source-grapheme owner range.
+
+#### Scenario: Layout retains source owners
+- **WHEN** a logical line is projected
+- **THEN** every unit retains its original half-open source-grapheme owner range
+
+### Requirement: Editor layout metadata and projection confinement
+Supported bounded SGR and OSC 8 SHALL remain executable atomic metadata with bounded replay/close state. Rejected controls MAY expand to several display units or rows with the same owner range, and every visible expansion character SHALL appear exactly once in order. Editor SHALL retain no projection globally and SHALL NOT use another parser, scan source graphemes separately, mutate EditorBuffer source, or infer ownership from output bytes.
 
 #### Scenario: Rejected control expansion wraps completely
 - **WHEN** a retained source grapheme sanitizes to several visible final graphemes
@@ -262,7 +283,14 @@ The editor SHALL scan each complete joined logical line once through the existin
 - **AND** logical ownership, visual order, and cursor mapping follow source order
 
 ### Requirement: Editor fake cursor rendering
-The editor SHALL render a visible fake cursor using inverse-video styling within the component output. When the cursor-owned complete grapheme cluster fits the requested width, existing fake-cursor behavior SHALL remain unchanged. When that cluster cannot fit atomically on an empty requested row, the editor SHALL omit its printable output while preserving logical ownership, deterministic zero-width cursor placement, and unchanged buffer text. It SHALL NOT emit a partial cluster, replacement glyph, fallback glyph, or over-wide line.
+The editor SHALL render a visible fake cursor using inverse-video styling within the component output. When the cursor-owned complete grapheme cluster fits the requested width, existing fake-cursor behavior SHALL remain unchanged.
+
+#### Scenario: Fitting fake cursor preserves behavior
+- **WHEN** the cursor-owned complete cluster fits the requested width
+- **THEN** existing inverse-video fake-cursor behavior remains unchanged
+
+### Requirement: Over-wide fake cursor preserves ownership
+When the cursor-owned complete grapheme cluster cannot fit atomically on an empty requested row, the editor SHALL omit its printable output while preserving logical ownership, deterministic zero-width cursor placement, and unchanged buffer text. It SHALL NOT emit a partial cluster, replacement glyph, fallback glyph, or over-wide line.
 
 #### Scenario: Cursor on character
 - **WHEN** the cursor is positioned before an existing grapheme cluster that fits the requested row
@@ -598,7 +626,14 @@ Overlay composition SHALL carry visible overlay controls into final frame coordi
 - **THEN** the box treats each negative value as zero consistently for child text, control placement, and frame geometry
 
 ### Requirement: Strict ordinary-line terminal metadata allowlist
-In ordinary `ComponentRender.lines`, only bounded validated atomic ESC-form SGR and OSC 8 open/close metadata SHALL remain executable. Rejected ESC-form and C1-introduced string controls SHALL remain one inert candidate through their defined terminator or the remaining unterminated input. Former cursor APC bytes SHALL remain visible inert text and SHALL NOT influence cursor metadata. Closed typed `TerminalRenderControl` values SHALL remain separate from ordinary strings and SHALL be encoded through the trusted semantic channel at the final TUI output boundary. Structured cursor metadata SHALL encode no protocol bytes and SHALL NOT use `TerminalRenderControl`.
+In ordinary `ComponentRender.lines`, only bounded validated atomic ESC-form SGR and OSC 8 open/close metadata SHALL remain executable. Rejected ESC-form and C1-introduced string controls SHALL remain one inert candidate through their defined terminator or the remaining unterminated input. Former cursor APC bytes SHALL remain visible inert text and SHALL NOT influence cursor metadata.
+
+#### Scenario: Ordinary lines carry no cursor authority
+- **WHEN** ordinary lines contain former cursor APC bytes
+- **THEN** those bytes stay visible inert text and do not influence cursor metadata
+
+### Requirement: Semantic controls and cursors use separate channels
+Closed typed `TerminalRenderControl` values SHALL remain separate from ordinary strings and SHALL be encoded through the trusted semantic channel at the final TUI output boundary. Structured cursor metadata SHALL encode no protocol bytes and SHALL NOT use `TerminalRenderControl`.
 
 #### Scenario: Rejected terminal controls are visible
 - **WHEN** an ordinary rendered string contains private CSI, non-SGR CSI, non-OSC-8 OSC, APC, DCS, SOS, PM, unsupported ESC forms, C0, DEL, or C1 values
@@ -616,7 +651,14 @@ In ordinary `ComponentRender.lines`, only bounded validated atomic ESC-form SGR 
 - **AND** a legitimate structured cursor candidate remains the only source of hardware cursor placement
 
 ### Requirement: Structured component cursor metadata
-Shared JVM/Native core SHALL remove the public `CursorMarker` object, including `Sequence`, `Position`, `ScanResult`, and `stripAndLocate`. Direct migration SHALL use public `CursorPlacement(row: Int, column: Int)` values in `ComponentRender.cursorPlacements`; no compatibility API SHALL exist. Coordinates SHALL be non-negative, zero-based, frame-relative display cells with translation. `ComponentRender` SHALL require explicit `lines`, `controls`, and `cursorPlacements` fields. Text-only factories MAY construct explicit empty metadata. No default field, old arity, overload, adapter, conversion, or deprecation path SHALL exist.
+Shared JVM/Native core SHALL remove the public `CursorMarker` object, including `Sequence`, `Position`, `ScanResult`, and `stripAndLocate`. Direct migration SHALL use public `CursorPlacement(row: Int, column: Int)` values in `ComponentRender.cursorPlacements`; no compatibility API SHALL exist.
+
+#### Scenario: Cursor API migrates directly
+- **WHEN** code migrates from CursorMarker
+- **THEN** it uses CursorPlacement in ComponentRender.cursorPlacements with no compatibility API
+
+### Requirement: Explicit structured cursor geometry and frame fields
+Coordinates SHALL be non-negative, zero-based, frame-relative display cells with translation. `ComponentRender` SHALL require explicit `lines`, `controls`, and `cursorPlacements` fields. Text-only factories MAY construct explicit empty metadata. No default field, old arity, overload, adapter, conversion, or deprecation path SHALL exist.
 
 #### Scenario: Cursor construction rejects negative coordinates
 - **WHEN** a cursor placement or translation would produce a negative row or column
@@ -686,7 +728,14 @@ frame SHALL still be validated.
 ### Requirement: Direct overlay compositor metadata confinement
 `OverlayRenderer.composite` SHALL independently validate its base frame against terminal width,
 every overlay frame against its own rows and resolved overlay width before translation or occlusion,
-and the final composed frame against terminal width. Empty-overlay calls SHALL still validate the
+and the final composed frame against terminal width.
+
+#### Scenario: Direct compositor validates all geometry
+- **WHEN** direct composition receives base and overlay frames
+- **THEN** each frame validates against its own geometry before composition and the result validates against terminal width
+
+### Requirement: Direct overlay validation cannot be bypassed
+Empty-overlay calls SHALL still validate the
 base and final frame. Invalid cursor or terminal-control metadata SHALL fail with existing bounded
 redacted diagnostics and SHALL NOT become valid through translation or parent composition. TUI raw,
 clipped, and final validation SHALL remain unchanged.
@@ -969,3 +1018,31 @@ The viewport painter SHALL avoid redundant empty-base recomposition and final tr
 #### Scenario: Later paint and metadata retain their order
 - **WHEN** a child or decoration later paints over a full-width row carrying typed controls, cursor candidates, or document markers
 - **THEN** later text composition and independent typed metadata translation and clipping retain their existing behavior
+
+### Requirement: Internal renderer capabilities match supported screen modes
+
+The runtime SHALL expose append publishing and resize recovery preparation only through dedicated internal capabilities supported by the selected renderer. This refactoring SHALL preserve public APIs and terminal output byte streams.
+
+#### Scenario: Normal screen and width-only alternate screen support transcript operations
+- **WHEN** a normal-screen policy is selected in normal or width-only alternate mode
+- **THEN** it implements append publishing and resize recovery preparation capabilities
+- **AND** existing transcript output and resize behavior remain unchanged
+
+#### Scenario: Fullscreen viewport does not advertise transcript operations
+- **WHEN** a fullscreen viewport policy is selected
+- **THEN** it implements neither append publishing nor resize recovery preparation capabilities
+- **AND** the common renderer contract contains no unsupported transcript methods or throwing fullscreen implementations
+
+#### Scenario: Resize recovery data is renderer-neutral
+- **WHEN** runtime scheduling supplies prepared resize recovery to the renderer
+- **THEN** the internal prepared data type is independent of the TUI companion
+- **AND** generation checks and scheduling remain runtime-owned
+
+### Requirement: Component rendering services remain read-only
+
+Component consumers SHALL obtain rendering observations through a read-only RenderServices interface rather than depending on mutable TUI internals, without removing public APIs.
+
+#### Scenario: Image consumer reads rendering services
+- **WHEN** an image component needs runtime rendering observations
+- **THEN** it uses the read-only rendering services interface
+- **AND** scheduling and runtime mutation remain owned by TUI

@@ -180,7 +180,7 @@ final class SttyTerminal(
 
   private def stopResizePolling(): Unit =
     resizePolling = false
-    Option(resizeThread).foreach(_.interrupt())
+    Option(resizeThread).filterNot(_ eq Thread.currentThread()).foreach(_.interrupt())
 
   private def reapResizeThread(): Unit =
     if Option(resizeThread).exists(!_.isAlive) then resizeThread = null

@@ -367,7 +367,21 @@ The public component APIs SHALL expose configuration and callback points needed 
 - **THEN** new editing APIs are additive and do not break existing callback signatures or core module compatibility
 
 ### Requirement: Public image APIs are stable and dependency-light
-The developer API SHALL expose public shared-core `scalatui.terminal.Base64ImagePayload` and typed `scalatui.terminal.Base64ImagePayloadError` values plus optional image-module renderer helpers without requiring platform-specific dependencies at call sites. `scalatui.terminal.Base64ImagePayload.from(String)` SHALL return `Either[scalatui.terminal.Base64ImagePayloadError, scalatui.terminal.Base64ImagePayload]`, `scalatui.terminal.Base64ImagePayload.encode(Array[Byte])` SHALL return a validated payload, and the error model SHALL include `InvalidStandardBase64`. `scalatui.image.Image.fromBase64` SHALL be the high-level raw-string factory and return `Either[scalatui.terminal.Base64ImagePayloadError, Image]`. **BREAKING**: protocol helpers and `Image` SHALL require `scalatui.terminal.Base64ImagePayload` rather than raw base64 `String`, and `ImageSource` SHALL store the validated payload; no compatibility overload, adapter, fallback path, or deprecation path SHALL be provided.
+The developer API SHALL expose public shared-core `scalatui.terminal.Base64ImagePayload` and typed `scalatui.terminal.Base64ImagePayloadError` values plus optional image-module renderer helpers without requiring platform-specific dependencies at call sites.
+
+#### Scenario: Shared image APIs avoid backend coupling
+- **WHEN** applications use the public image contracts
+- **THEN** they require no platform-specific dependencies at call sites
+
+### Requirement: Public validated image payload factories
+`scalatui.terminal.Base64ImagePayload.from(String)` SHALL return `Either[scalatui.terminal.Base64ImagePayloadError, scalatui.terminal.Base64ImagePayload]`, `scalatui.terminal.Base64ImagePayload.encode(Array[Byte])` SHALL return a validated payload, and the error model SHALL include `InvalidStandardBase64`.
+
+#### Scenario: Payload factories expose typed outcomes
+- **WHEN** an application validates or encodes image data
+- **THEN** it receives the specified validated payload or typed error
+
+### Requirement: Public image raw-string factory and breaking migration
+`scalatui.image.Image.fromBase64` SHALL be the high-level raw-string factory and return `Either[scalatui.terminal.Base64ImagePayloadError, Image]`. **BREAKING**: protocol helpers and `Image` SHALL require `scalatui.terminal.Base64ImagePayload` rather than raw base64 `String`, and `ImageSource` SHALL store the validated payload; no compatibility overload, adapter, fallback path, or deprecation path SHALL be provided.
 
 #### Scenario: Applications can construct image options and helpers
 - **WHEN** an application depends on the optional image module and configures image rendering options

@@ -141,7 +141,14 @@ The autocomplete capability SHALL provide a dependency-free fuzzy matching utili
 - **THEN** only candidates matching every token are returned and they are ordered by total fuzzy score
 
 ### Requirement: Filesystem path completion helper
-The autocomplete capability SHALL provide an optional path completion helper that enumerates filesystem paths behind the existing `PathCompletionProvider` boundary without making shell tools or third-party dependencies mandatory. The helper SHALL distinguish the completion current directory from its canonical containment root, SHALL apply explicit policy to parent, home, and absolute paths, and SHALL document that ordering is deterministic within the bounded candidate set while filesystem enumeration membership is implementation-defined when a scan bound is reached.
+The autocomplete capability SHALL provide an optional path completion helper that enumerates filesystem paths behind the existing `PathCompletionProvider` boundary without making shell tools or third-party dependencies mandatory.
+
+#### Scenario: Path helper remains optional and dependency-light
+- **WHEN** an application uses filesystem completion
+- **THEN** enumeration uses the existing provider boundary without mandatory shell tools or third-party dependencies
+
+### Requirement: Filesystem path policy and bounded ordering
+The helper SHALL distinguish the completion current directory from its canonical containment root, SHALL apply explicit policy to parent, home, and absolute paths, and SHALL document that ordering is deterministic within the bounded candidate set while filesystem enumeration membership is implementation-defined when a scan bound is reached.
 
 #### Scenario: Relative path resolves from current directory
 - **WHEN** a request completes a relative path token
