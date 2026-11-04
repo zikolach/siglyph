@@ -6,6 +6,51 @@ import java.io.{ByteArrayInputStream, ByteArrayOutputStream, InputStream}
 import java.util.concurrent.{CountDownLatch, TimeUnit}
 
 class StreamTerminalSuite extends munit.FunSuite:
+  for
+    worker             <- Vector("input", "flush")
+    alreadyInterrupted <- Vector(false, true)
+  do
+    test(s"stop from $worker callback preserves interrupt flag $alreadyInterrupted"):
+      val releaseRead = CountDownLatch(1)
+      val observed    = CountDownLatch(1)
+      val result      = new java.util.concurrent.atomic.AtomicReference[(String, Boolean, Boolean)]()
+      val in          = new InputStream:
+        private var first                                               = true
+        override def read(): Int                                        = -1
+        override def read(buffer: Array[Byte], off: Int, len: Int): Int =
+          if first then
+            first = false
+            buffer(off) = (if worker === "input" then 'x'.toByte else 0x1b.toByte)
+            1
+          else
+            releaseRead.await()
+            -1
+      val terminal    = StreamTerminal(input = in)
+      terminal.start(
+        _ => {
+          val thread = Thread.currentThread()
+          if alreadyInterrupted then thread.interrupt()
+          val before = thread.isInterrupted
+          terminal.stop()
+          result.set((thread.getName, before, thread.isInterrupted))
+          observed.countDown()
+        },
+        () => ()
+      )
+      try
+        assert(observed.await(5, TimeUnit.SECONDS))
+        val (name, before, after) = result.get()
+        assertEquals(name, s"siglyph-stream-terminal-$worker")
+        assertEquals(before, alreadyInterrupted)
+        assertEquals(
+          after,
+          before,
+          "stop must not introduce or clear the cleanup owner's interrupt"
+        )
+      finally
+        releaseRead.countDown()
+        terminal.stop()
+
   test("stream terminal writes to provided output stream"):
     val out      = ByteArrayOutputStream()
     val terminal = StreamTerminal(output = out, initialColumns = 10, initialRows = 2)

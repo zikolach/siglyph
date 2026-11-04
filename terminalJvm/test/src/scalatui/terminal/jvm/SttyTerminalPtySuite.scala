@@ -28,6 +28,105 @@ import scala.sys.process.*
 class SttyTerminalPtySuite extends munit.FunSuite:
   private val PtyTestEnabled = "SIGLYPH_PTY_TEST"
 
+  test("PTY fullscreen typed Ctrl+C returns normally and restores terminal protocols"):
+    withPtyTest {
+      val originalState                   = runStty("-g")
+      val originalStableState             = stableSttyState()
+      val (originalRows, originalColumns) = querySize()
+      val releaseInput                    = CountDownLatch(1)
+      val failure                         = new java.util.concurrent.atomic.AtomicReference[Throwable]()
+      val output                          = ByteArrayOutputStream()
+      val in                              = new InputStream:
+        private var first                                               = true
+        override def read(): Int                                        = -1
+        override def read(buffer: Array[Byte], off: Int, len: Int): Int =
+          releaseInput.await()
+          if first then
+            first = false
+            buffer(off) = 0x03.toByte
+            1
+          else -1
+      val terminal                        = SttyTerminal(input = in, output = output)
+      val root                            = new Component:
+        override def render(width: Int): ComponentRender =
+          ComponentRender(Vector("fullscreen"), Vector.empty, Vector.empty)
+      val tui                             = TUI.fullscreen(terminal, root)
+      val runner                          = Thread(() => {
+        try tui.run()
+        catch case error: Throwable => failure.set(error)
+      })
+      try
+        // Finish startup before releasing input so the callback can own synchronous cleanup.
+        tui.start()
+        runner.start()
+        releaseInput.countDown()
+        runner.join(5000)
+        assert(!runner.isAlive, "fullscreen run did not return after typed Ctrl+C")
+        assertEquals(Option(failure.get()), None)
+        assertEquals(stableSttyState(), originalStableState)
+        val written = output.toString(java.nio.charset.StandardCharsets.UTF_8)
+        Vector("\u001b[?1049h", "\u001b[?25l", "\u001b[?2004h").foreach { sequence =>
+          assert(written.contains(sequence), written)
+        }
+        Vector("\u001b[?1049l", "\u001b[?25h", "\u001b[?2004l").foreach { sequence =>
+          assert(written.contains(sequence), written)
+        }
+      finally
+        releaseInput.countDown()
+        scala.util.Try(tui.stop())
+        runner.join(5000)
+        restoreStty(originalState, originalRows, originalColumns)
+    }
+
+  for worker <- Vector("input", "flush", "resize") do
+    test(s"PTY stop from $worker callback restores stty without self-interruption"):
+      withPtyTest {
+        val originalState                   = runStty("-g")
+        val originalStableState             = stableSttyState()
+        val (originalRows, originalColumns) = querySize()
+        val releaseRead                     = CountDownLatch(1)
+        val observed                        = CountDownLatch(1)
+        val resized                         = new java.util.concurrent.atomic.AtomicBoolean(false)
+        val failure                         = new java.util.concurrent.atomic.AtomicReference[Throwable]()
+        val interrupted                     = new java.util.concurrent.atomic.AtomicBoolean(false)
+        val in                              = new InputStream:
+          private var first                                               = true
+          override def read(): Int                                        = -1
+          override def read(buffer: Array[Byte], off: Int, len: Int): Int =
+            if first && (worker !== "resize") then
+              first = false
+              buffer(off) = (if worker === "input" then 0x03.toByte else 0x1b.toByte)
+              1
+            else
+              releaseRead.await()
+              -1
+        val terminal                        = SttyTerminal(
+          input = in,
+          output = ByteArrayOutputStream(),
+          sizeQuery = () => Some(24 -> (if resized.get() then 81 else 80))
+        )
+        def stopFromCallback(): Unit        =
+          try
+            terminal.stop()
+            interrupted.set(Thread.currentThread().isInterrupted)
+          catch case error: Throwable => failure.set(error)
+          finally observed.countDown()
+        try
+          terminal.start(
+            _ => stopFromCallback(),
+            () => if worker === "resize" then stopFromCallback()
+          )
+          resized.set(true)
+          assert(observed.await(5, TimeUnit.SECONDS), s"$worker callback was not delivered")
+          assertEquals(Option(failure.get()), None)
+          assertEquals(interrupted.get(), false)
+          assertEquals(stableSttyState(), originalStableState)
+        finally
+          releaseRead.countDown()
+          scala.util.Try(terminal.stop())
+          restoreStty(originalState, originalRows, originalColumns)
+      }
+
   test("PTY lifecycle enters raw mode, orders writes, reports resize, and restores stty"):
     withPtyTest {
       val originalState                   = runStty("-g")

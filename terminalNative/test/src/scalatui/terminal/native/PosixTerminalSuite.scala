@@ -380,6 +380,39 @@ class PosixTerminalSuite extends munit.FunSuite:
         assert(error.getMessage.contains(s"errno ${errno.EIO}"), error.getMessage)
       case other                                                => fail(s"unexpected classification: $other")
 
+  for
+    worker             <- Vector("input", "flush", "resize")
+    alreadyInterrupted <- Vector(false, true)
+  do
+    test(s"Native stop from $worker failure callback preserves interrupt flag $alreadyInterrupted"):
+      val terminal       = PosixTerminal(initialColumns = 80, initialRows = 24)
+      val releaseInput   = CountDownLatch(1)
+      val observed       = CountDownLatch(1)
+      val interrupted    = AtomicBoolean(!alreadyInterrupted)
+      val cleanupFailure = AtomicReference[Throwable]()
+      terminal.workerFailureForTesting = candidate =>
+        if (candidate === "input") && (worker !== "input") then releaseInput.await()
+        Option.when(candidate === worker)(RuntimeException(s"$worker failed"))
+      terminal.start(
+        _ => (),
+        () => (),
+        _ => {
+          try
+            if alreadyInterrupted then Thread.currentThread().interrupt()
+            terminal.stop()
+            interrupted.set(Thread.currentThread().isInterrupted)
+          catch case error: Throwable => cleanupFailure.set(error)
+          finally observed.countDown()
+        }
+      )
+      try
+        assert(observed.await(5, TimeUnit.SECONDS))
+        assertEquals(Option(cleanupFailure.get()), None)
+        assertEquals(interrupted.get(), alreadyInterrupted)
+      finally
+        releaseInput.countDown()
+        terminal.stop()
+
   test("Native input, flush, and resize workers each report and restore state"):
     Vector("input", "flush", "resize").foreach { failingWorker =>
       val observed       = CountDownLatch(1)

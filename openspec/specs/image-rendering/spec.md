@@ -4,7 +4,14 @@
 Defines terminal image capability detection, Kitty/iTerm2 image protocol output, optional image helper module behavior, fallback rendering, cache-aware cleanup, and width-safe mixed output.
 ## Requirements
 ### Requirement: Image component for Kitty/iTerm2 protocols
-The library SHALL expose core image capability/protocol contracts and an optional image component/helper module that can emit terminal image escapes for Kitty and iTerm2 when supported. The component and protocol contracts SHALL require `scalatui.terminal.Base64ImagePayload` instead of raw base64 `String` values. `scalatui.image.Image.fromBase64` SHALL be the high-level raw-string component factory and SHALL return `Either[scalatui.terminal.Base64ImagePayloadError, Image]` before constructing output.
+The library SHALL expose core image capability/protocol contracts and an optional image component/helper module that can emit terminal image escapes for Kitty and iTerm2 when supported. The component and protocol contracts SHALL require `scalatui.terminal.Base64ImagePayload` instead of raw base64 `String` values.
+
+#### Scenario: Image contracts require validated data
+- **WHEN** a component or protocol helper receives image data
+- **THEN** it requires Base64ImagePayload instead of raw base64 strings
+
+### Requirement: High-level raw image validation factory
+`scalatui.image.Image.fromBase64` SHALL be the high-level raw-string component factory and SHALL return `Either[scalatui.terminal.Base64ImagePayloadError, Image]` before constructing output.
 
 #### Scenario: Render image with supported protocol
 - **WHEN** an application opts into the image module, supplies a validated payload, and terminal image capability is detected as Kitty or iTerm2
@@ -56,7 +63,14 @@ The image module SHALL provide an optional helper that loads supported image fil
 - **THEN** the helper reports a typed failure and does not emit terminal escape output
 
 ### Requirement: Image dimension sniffing
-The image module SHALL provide dependency-light dimension sniffing for common supported formats where practical, including PNG, JPEG, GIF, and WebP, with optional richer decoders isolated from the baseline module. Sniffers SHALL validate decoded dimensions as positive and representable before constructing `ImageDimensions` and SHALL report invalid dimensions through the existing typed `InvalidImage` failure. JPEG marker-loop and segment-bound arithmetic SHALL avoid overflow-prone additive comparisons while preserving existing typed messages and precedence.
+The image module SHALL provide dependency-light dimension sniffing for common supported formats where practical, including PNG, JPEG, GIF, and WebP, with optional richer decoders isolated from the baseline module. Sniffers SHALL validate decoded dimensions as positive and representable before constructing `ImageDimensions` and SHALL report invalid dimensions through the existing typed `InvalidImage` failure.
+
+#### Scenario: Sniffers validate dimensions before construction
+- **WHEN** a sniffer decodes dimensions
+- **THEN** it constructs ImageDimensions only for positive representable values and otherwise returns typed InvalidImage
+
+### Requirement: JPEG sniffing arithmetic preserves failures
+JPEG marker-loop and segment-bound arithmetic SHALL avoid overflow-prone additive comparisons while preserving existing typed messages and precedence.
 
 #### Scenario: Dimensions are detected without rendering
 - **WHEN** dimension sniffing is run on a supported image byte stream with positive representable dimensions
@@ -116,7 +130,14 @@ Terminal capability detection SHALL treat Warp as Kitty-image capable when not r
 - **THEN** terminal capabilities do not report image support
 
 ### Requirement: Cell-size-aware image sizing
-Image sizing that opts into runtime terminal cell dimensions SHALL use valid dimensions from the TUI session currently attached to the image and SHALL fall back to deterministic default cell dimensions when unavailable. Runtime-derived dimensions SHALL NOT be read from or written to process-global mutable image geometry. Image sizing with fixed `ImageRenderOptions.cellDimensions` SHALL use those fixed dimensions exactly. The high-level `Image` component SHALL opt into attached-session sizing by default.
+Image sizing that opts into runtime terminal cell dimensions SHALL use valid dimensions from the TUI session currently attached to the image and SHALL fall back to deterministic default cell dimensions when unavailable. Runtime-derived dimensions SHALL NOT be read from or written to process-global mutable image geometry.
+
+#### Scenario: Runtime image geometry remains session-local
+- **WHEN** runtime cell dimensions are used
+- **THEN** they come only from the attached session or deterministic defaults, never process-global mutable geometry
+
+### Requirement: Fixed image sizing and high-level defaults
+Image sizing with fixed `ImageRenderOptions.cellDimensions` SHALL use those fixed dimensions exactly. The high-level `Image` component SHALL opt into attached-session sizing by default.
 
 #### Scenario: Valid cell dimensions affect image rows
 - **WHEN** an image attached to a running TUI receives valid terminal cell pixel dimensions from that session
@@ -181,7 +202,21 @@ The baseline image component, validated payload API, and dependency-light image 
 - **THEN** the shared terminal image protocol security cases and image component cases execute against the Native implementations
 
 ### Requirement: Terminal image payload validation precedes output
-The library SHALL represent terminal image data as a validated `scalatui.terminal.Base64ImagePayload`. `scalatui.terminal.Base64ImagePayload.from(String)` SHALL return `Either[scalatui.terminal.Base64ImagePayloadError, scalatui.terminal.Base64ImagePayload]`, with `InvalidStandardBase64` for invalid standard base64, and `scalatui.terminal.Base64ImagePayload.encode(Array[Byte])` SHALL produce a validated payload without a runtime dependency. Validation SHALL accept only the standard alphabet (`A-Z`, `a-z`, `0-9`, `+`, `/`) and optional valid terminal `=` padding. Empty input SHALL be accepted. Decoder-valid unpadded input with length remainder two or three modulo four SHALL be accepted, while length remainder one SHALL return `InvalidStandardBase64`. Accepted text SHALL remain unchanged. These rules SHALL be identical on JVM and Scala Native. Protocol helpers SHALL accept only validated payloads.
+The library SHALL represent terminal image data as a validated `scalatui.terminal.Base64ImagePayload`.
+
+#### Scenario: Protocol helpers accept validated payloads only
+- **WHEN** terminal image data enters a protocol helper
+- **THEN** it is represented by Base64ImagePayload
+
+### Requirement: Validated image payload construction
+`scalatui.terminal.Base64ImagePayload.from(String)` SHALL return `Either[scalatui.terminal.Base64ImagePayloadError, scalatui.terminal.Base64ImagePayload]`, with `InvalidStandardBase64` for invalid standard base64, and `scalatui.terminal.Base64ImagePayload.encode(Array[Byte])` SHALL produce a validated payload without a runtime dependency.
+
+#### Scenario: Payload construction is dependency-free
+- **WHEN** image bytes are encoded
+- **THEN** the factory produces a validated payload without a runtime dependency
+
+### Requirement: Standard base64 acceptance and preservation
+Validation SHALL accept only the standard alphabet (`A-Z`, `a-z`, `0-9`, `+`, `/`) and optional valid terminal `=` padding. Empty input SHALL be accepted. Decoder-valid unpadded input with length remainder two or three modulo four SHALL be accepted, while length remainder one SHALL return `InvalidStandardBase64`. Accepted text SHALL remain unchanged. These rules SHALL be identical on JVM and Scala Native. Protocol helpers SHALL accept only validated payloads.
 
 #### Scenario: Padded standard base64 is accepted unchanged
 - **WHEN** `scalatui.terminal.Base64ImagePayload.from` receives valid padded standard base64
@@ -302,7 +337,14 @@ Image fallback theme callbacks SHALL run before the final ANSI-aware width const
 - **THEN** the final output has no positive visible width
 
 ### Requirement: Image render geometry has a fixed frame-row safety limit
-The image component SHALL preserve image-control rendering for supported protocol geometry through exactly 10,000 frame rows. Supported protocol geometry above 10,000 frame rows SHALL use the existing readable image fallback, apply the existing theme callback, and then apply the existing ANSI-aware width constraint. Oversized geometry SHALL produce no image control, allocate no frame-row vector, and allocate or update no image id. The 10,000-row limit SHALL be fixed and SHALL NOT affect dimension sniffing.
+The image component SHALL preserve image-control rendering for supported protocol geometry through exactly 10,000 frame rows. Supported protocol geometry above 10,000 frame rows SHALL use the existing readable image fallback, apply the existing theme callback, and then apply the existing ANSI-aware width constraint.
+
+#### Scenario: Supported geometry switches at the fixed boundary
+- **WHEN** protocol geometry exceeds 10,000 frame rows
+- **THEN** the existing fallback is themed and width-constrained instead of rendering an image control
+
+### Requirement: Oversized image geometry avoids allocations
+Oversized geometry SHALL produce no image control, allocate no frame-row vector, and allocate or update no image id. The 10,000-row limit SHALL be fixed and SHALL NOT affect dimension sniffing.
 
 #### Scenario: Exact frame-row boundary retains image control
 - **WHEN** a supported image protocol produces geometry of exactly 10,000 frame rows

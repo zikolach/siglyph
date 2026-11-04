@@ -77,8 +77,10 @@ class StreamTerminal(
     if running || (inputThread ne null) || (flushThread ne null) then
       running = false
       inputDelivery.stop(inputGeneration, inputBuffer.clear())
-      Option(inputThread).foreach(_.interrupt())
-      Option(flushThread).foreach(_.interrupt())
+      // A synchronous callback can own cleanup; do not interrupt its subsequent restoration.
+      val current = Thread.currentThread()
+      Option(inputThread).filterNot(_ eq current).foreach(_.interrupt())
+      Option(flushThread).filterNot(_ eq current).foreach(_.interrupt())
       reapInputThread()
       reapFlushThread()
   }

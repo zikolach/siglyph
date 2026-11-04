@@ -38,7 +38,14 @@ Siglyph SHALL expose a shared-core `NormalResizeRecoveryProvider`, `NormalResize
 Siglyph SHALL render, compose, validate, and prepare the retained live frame first. It SHALL
 calculate current capacity as `max(0, terminalHeight - max(1, liveFrameRowCount))`, previous
 capacity as `max(0, previousTerminalHeight - max(1, previousLiveFrameRowCount))`, and recovery
-`maxRows` as the smaller capacity. The context SHALL expose positive current and previous dimensions
+`maxRows` as the smaller capacity.
+
+#### Scenario: Recovery uses the smaller capacity
+- **WHEN** the prepared current and previous live frames leave different capacities
+- **THEN** recovery maxRows is the smaller of the two calculated capacities
+
+### Requirement: Recovery context dimensions and empty-frame anchor
+The context SHALL expose positive current and previous dimensions
 plus positive previous capacity whenever the provider is invoked. The minimum one-row footprint
 SHALL reserve a physical cursor anchor for an empty retained frame.
 

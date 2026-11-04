@@ -7,6 +7,34 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Added
+
+- Added read-only `RenderServices` for session geometry and terminal capability observations;
+  `TUIContext` retains its existing defaults and runtime controls. #77
+
+### Changed
+
+- **Breaking toolchain baseline:** New artifacts use Scala **3.9.0 LTS** and require Scala 3.9.0
+  or a compatible newer compiler to read their TASTy. Scala 3.7.x consumers must upgrade.
+  JDK **21** remains the supported build and JVM runtime baseline. #73
+- Pinned Mill **1.3.1** and its Temurin JDK 21, and updated development/test tooling and example
+  dependencies. Scala Native remains **0.5.12** and Unicode data remains **17.0.0**. #73
+- Isolated runtime query bookkeeping and shared interactive-backend protocol cleanup policy while
+  preserving serialized execution, callback ordering and retryable restoration. #75, #76
+- Separated renderer append/resize capabilities and made input deadline tests deterministic without
+  changing the production 35 ms Escape or 75 ms incomplete-sequence deadlines. #74, #77
+- Split overlong specification requirements without dropping binding clauses; strict validation is
+  now clean. Promoted and archived the five completed architecture changes.
+
+### Fixed
+
+- Rejected stale viewport publications after child replacement or content invalidation, so old
+  geometry, document metadata and selection data cannot overwrite current scroll-view state. #78
+- Avoided self-interrupting terminal workers that own synchronous cleanup, preventing spurious
+  `InterruptedException` during JVM terminal restoration, including fullscreen Ctrl+C shutdown.
+  Other workers still receive stop interrupts; worker-stop signaling does not clear existing caller
+  interrupt flags or suppress genuine restoration failures.
+
 ## [0.9.2] - 2026-10-21
 
 ### Fixed
