@@ -1,12 +1,13 @@
-# v0.10.0 release preparation (not published)
+# v0.10.0 release (publication pending)
 
-The proposed next release after published `0.9.2` is **0.10.0**, not another patch: newly built
-artifacts raise the Scala compiler/TASTy baseline to 3.9.0. This is a consumer compatibility change
-under the project's pre-1.0 versioning policy. No release date, tag push or publication is authorized
-by this preparation.
+Publication of **0.10.0** is authorized for **2026-11-04**. This is a minor release rather than a
+patch because newly built artifacts raise the Scala compiler/TASTy baseline to 3.9.0 under the
+project's pre-1.0 versioning policy.
 
-The [Unreleased changelog](../CHANGELOG.md#unreleased) is the release-note draft. Keep its compare
-link rooted at `v0.9.2` until finalization. Do not present `0.10.0` artifacts as available yet.
+The [dated 0.10.0 changelog](../CHANGELOG.md#0100---2026-11-04) is the source for GitHub Release
+notes. The version comes from the authorized `v0.10.0` tag, not the local `0.1.0-SNAPSHOT` fallback.
+Finalized notes are not proof of publication: verify both publishing workflows and all artifacts
+before treating the release as available or updating published dependency examples.
 
 ## Compatibility and migration
 
@@ -56,7 +57,30 @@ The preparation worktree passed the following on macOS arm64 with managed Temuri
   the expected coordinates/version, and all ten binary jars pass ZIP checks. Nonfatal existing
   Scaladoc link/plugin warnings remain; no publication workflow or provider was called.
 
-These local checks do not replace review or exact-head CI for the final release commit.
+These preparation checks do not replace review or verification of the final release commit.
+
+## Local macOS validation instead of hosted CI
+
+With maintainer approval, an exact-commit local macOS run may satisfy the macOS release gate when
+hosted macOS runners are unavailable or outside the Actions budget. Record the tested commit,
+macOS version/architecture, Mill/JDK versions, commands and complete results. Local success does
+not change a cancelled GitHub check into a passed check or override required branch protections.
+Linux CI and the other release checks remain required. No workflow or repository-rule change is
+needed for this fallback.
+
+Run the macOS conformance workflow commands locally on the final candidate:
+
+```bash
+mill --no-daemon quality
+mill --no-daemon core.compile + terminalJvm.compile + coreNative.compile + terminalNative.compile
+script -q -e /dev/null mill --no-daemon \
+  core.test + terminalJvm.test + coreNative.test + terminalNative.test
+./scripts/test-terminal-pty.sh
+```
+
+Retain the full JVM/Native suite, strict specification validation, package checks and fullscreen
+Ctrl+C smoke required below. Recheck the final source commit before tagging; earlier worktree
+results are not an unqualified substitute for final-candidate evidence.
 
 ## Evidence and pre-tag gates
 
@@ -67,7 +91,8 @@ predates this preparation's cleanup fix and specification changes; it is not fin
 Before publication:
 
 1. Review and merge this preparation, including the cleanup regression fix and promoted specs.
-   Require successful exact-head Linux/macOS CI and recheck the final main commit before tagging.
+   Require successful exact-head Linux CI and either successful macOS CI or the approved local
+   macOS validation above. Recheck the final main commit before tagging.
 2. Run formatting/lint, all-module compilation, full JVM/Native tests under a PTY, dedicated PTY
    lifecycle tests, and the fullscreen JVM Ctrl+C process smoke. Require a clean process exit and
    terminal restoration, not merely a visually restored terminal with an exception.
@@ -75,9 +100,9 @@ Before publication:
    architecture changes and verified cleanup fix are archived and canonical specs include their deltas.
 4. Review remaining manual emulator checks in [interactive-smoke.md](interactive-smoke.md). Do not
    infer physical Ghostty/multiplexer behavior, Windows support or current upstream parity from CI.
-5. Obtain explicit release authorization, select its date and approved commit, then move the
-   Unreleased notes into a dated `## [0.10.0]` section. Add a fresh Unreleased section and compare
-   links (`v0.10.0...HEAD` and `v0.9.2...v0.10.0`) before tagging.
+5. Publication is authorized for 2026-11-04. The dated `## [0.10.0]` section, fresh Unreleased
+   section and compare links are finalized. Select the reviewed final main commit after successful
+   Linux CI and accepted exact-source local macOS verification, then push the `v0.10.0` tag once.
 6. Confirm publishing/signing prerequisites without exposing credentials. A single authorized
    `v0.10.0` tag push invokes both **Publish** and **Publish Maven Central**. Do not additionally
    dispatch a publication workflow unless deliberately authorized; see [publishing.md](publishing.md).
