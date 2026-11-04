@@ -154,6 +154,21 @@ trait ViewportDocumentMetadataProvider:
   /** Return complete typed document metadata for the current content width. */
   def viewportDocumentMetadata(width: Int): DocumentMetadata
 
+/** Immutable rendered document publication, tied to one child identity and content revision. */
+final case class ViewportSnapshot(
+    rows: Vector[String],
+    startRow: Int,
+    complete: Boolean,
+    metadata: DocumentMetadata,
+    child: Component,
+    revision: Long,
+    contentExtent: Int,
+    viewportExtent: Int,
+    viewportWidth: Int,
+    layoutViewport: LayoutViewport,
+    offset: Int
+)
+
 /** Layout-provider state boundary used by a one-child vertical scroll viewport. */
 trait ViewportScrollProvider:
   self: Component =>
@@ -168,6 +183,29 @@ trait ViewportScrollProvider:
       viewportWidth: Int,
       layoutViewport: LayoutViewport
   ): Int
+
+  /**
+   * Conditionally clamp early geometry; legacy providers retain their existing default behavior.
+   */
+  private[scalatui] def commitViewportGeometry(
+      contentExtent: Int,
+      viewportExtent: Int,
+      viewportWidth: Int,
+      layoutViewport: LayoutViewport,
+      child: Component,
+      revision: Long
+  ): Int = commitViewportGeometry(contentExtent, viewportExtent, viewportWidth, layoutViewport)
+
+  /** Publish one rendered snapshot. Legacy providers continue receiving the original callbacks. */
+  private[scalatui] def commitViewportSnapshot(snapshot: ViewportSnapshot): Unit =
+    commitViewportDocumentMetadata(snapshot.metadata)
+    commitViewportText(
+      snapshot.rows,
+      snapshot.startRow,
+      snapshot.complete,
+      snapshot.child,
+      snapshot.revision
+    )
 
   /** Capture the content revision before rendering rows for a conditional commit. */
   private[scalatui] def viewportContentRevision: Long = 0L
@@ -440,6 +478,7 @@ object ViewportLayoutEngine:
     val scrollProvider  = provider match
       case scroll: ViewportScrollProvider => Some(scroll)
       case _                              => None
+    val contentRevision = scrollProvider.map(_.viewportContentRevision).getOrElse(0L)
     val contentWidth    = scrollProvider.fold(width)(_.viewportContentWidth(width))
     val contentHeight   = intrinsicHeight(context, layout.child, contentWidth)
     val viewportHeight  = height.getOrElse(contentHeight)
@@ -449,9 +488,15 @@ object ViewportLayoutEngine:
       if !context.commitViewport then 0
       else
         scrollProvider.fold(0)(
-          _.commitViewportGeometry(contentHeight, viewportHeight, width, context.viewport)
+          _.commitViewportGeometry(
+            contentHeight,
+            viewportHeight,
+            width,
+            context.viewport,
+            layout.child,
+            contentRevision
+          )
         )
-    val contentRevision = scrollProvider.map(_.viewportContentRevision).getOrElse(0L)
     val child           = layout.child match
       case ranged: ViewportRangeRenderer if context.commitViewport =>
         context.setOrigin(layout.child, ComponentRenderOrigin(row, col))
@@ -508,14 +553,19 @@ object ViewportLayoutEngine:
         val rowCount =
           if complete then contentHeight
           else math.min(viewportHeight, math.max(0, contentHeight - offset))
-        scroll.commitViewportDocumentMetadata(metadata)
-        scroll.commitViewportText(
+        scroll.commitViewportSnapshot(ViewportSnapshot(
           renderedDocumentRows(child, row, col, contentWidth, startRow, rowCount),
           startRow,
           complete,
+          metadata,
           layout.child,
-          contentRevision
-        )
+          contentRevision,
+          contentHeight,
+          viewportHeight,
+          width,
+          context.viewport,
+          offset
+        ))
       }
     ResolvedBox(
       LayoutBox(component, rect, clip, parent, Vector(child.box), scrollOwner),

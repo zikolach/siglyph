@@ -104,7 +104,7 @@ trait OverlayHost:
   def hasOverlay: Boolean
 
 /** Runtime services that components can use without depending on terminal backends. */
-trait TUIContext:
+trait TUIContext extends RenderServices:
   /** Ordered component-effect coordinator. Standalone contexts get one private detached queue. */
   private[scalatui] lazy val componentEffectCoordinator
       : scalatui.components.ComponentEffectCoordinator =
@@ -116,13 +116,14 @@ trait TUIContext:
    * The concrete default preserves source compatibility for standalone contexts and supplies the
    * deterministic image-layout fallback used before a terminal reports its cell geometry.
    */
-  def imageCellDimensions: ImageCellDimensions = ImageCellDimensions()
+  override def imageCellDimensions: ImageCellDimensions = ImageCellDimensions()
 
   /** Immutable effective terminal capabilities selected for this TUI session. */
-  def terminalCapabilities: TerminalCapabilities = TerminalCapabilities.Conservative
+  override def terminalCapabilities: TerminalCapabilities = TerminalCapabilities.Conservative
 
   /** Overrides used to resolve this session, including hard disabled ceilings. */
-  def terminalCapabilityOverrides: TerminalCapabilityOverrides = TerminalCapabilityOverrides()
+  override def terminalCapabilityOverrides: TerminalCapabilityOverrides =
+    TerminalCapabilityOverrides()
 
   /** Queue a coalesced render intent. Force intent is preserved when requests merge. */
   def requestRender(force: Boolean = false): Unit

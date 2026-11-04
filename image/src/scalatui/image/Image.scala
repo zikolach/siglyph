@@ -6,6 +6,7 @@ import scalatui.core.{
   Component,
   ComponentRender,
   ContextualComponent,
+  RenderServices,
   TerminalControlPlacement,
   TUIContext
 }
@@ -325,7 +326,7 @@ final class Image(
 
   private def effectiveRenderOptions(
       imageIdSnapshot: Option[Int],
-      contextSnapshot: Option[TUIContext]
+      contextSnapshot: Option[RenderServices]
   ): ImageRenderOptions =
     val currentOptions = options.copy(imageId = imageIdSnapshot)
     currentOptions.cellDimensionsSource match
@@ -338,7 +339,7 @@ final class Image(
           cellDimensionsSource = ImageCellDimensionsSource.Fixed
         )
 
-  private def effectiveCapabilities(contextSnapshot: Option[TUIContext]): TerminalCapabilities =
+  private def effectiveCapabilities(contextSnapshot: Option[RenderServices]): TerminalCapabilities =
     contextSnapshot
       .map(context =>
         TerminalCapabilities.forComponent(
