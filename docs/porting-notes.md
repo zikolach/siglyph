@@ -112,3 +112,15 @@ Fullscreen is not a drop-in TypeScript API. It does not add runtime renderer swi
   fragment-flush, and resize workers report unexpected active-generation failures at most once per
   worker. EOF, stop interruption, and stale generations remain normal outcomes. `TUI.run()` wakes,
   restores terminal state, and rethrows the first failure with independent later failures suppressed.
+
+## Internal architecture boundaries
+
+- `RenderServices` exposes read-only session geometry and terminal capabilities without scheduling,
+  focus, exit, or overlay authority. `TUIContext` extends it and retains its existing concrete
+  defaults and control methods. Render helpers that only inspect the session should accept
+  `RenderServices`; contextual attachment still uses `TUIContext`.
+- Rendering policies expose append publication and normal resize preparation through internal
+  capabilities. Fullscreen rendering does not implement those capabilities. Prepared resize data
+  belongs to the renderer boundary rather than the `TUI` companion.
+- These refinements preserve the single runtime drain and serialized terminal-output boundary;
+  they do not introduce new component execution threads or runtime dependencies.

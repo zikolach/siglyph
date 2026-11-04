@@ -1385,7 +1385,11 @@ final class TUI(
             case TUI.AppendCommitDecision.Fail(error)    => throw error
             case TUI.AppendCommitDecision.Publish        =>
               failureCategory = TUIDiagnosticAppendFailure.Write
-              rendererPolicy.publishAppend(candidate, value.frame, value.height)
+              rendererPolicy match
+                case publisher: AppendPublisher =>
+                  publisher.publishAppend(candidate, value.frame, value.height)
+                case _                          =>
+                  throw IllegalStateException("Append publication requires append capability")
               val remappedIds = candidate.controls.flatMap(kittyImageId)
               lifecycleLock.synchronized { appendOwnedKittyIds ++= remappedIds }
               finishAppend(
@@ -2694,7 +2698,7 @@ final class TUI(
       width: Int,
       height: Int,
       generation: Long
-  ): TUI.PreparedResizeRecovery =
+  ): PreparedResizeRecovery =
     val liveFrameFootprint         = math.max(1, frame.lines.length)
     val currentMaxRows             = math.max(0, height - liveFrameFootprint)
     val previousLiveFrameFootprint = rendererPolicy.retainedFrame.fold(1)(value =>
@@ -2705,7 +2709,7 @@ final class TUI(
       rendererPolicy.retainedHeight - previousLiveFrameFootprint
     )
     val maxRows                    = math.min(currentMaxRows, previousMaxRows)
-    if maxRows === 0 then TUI.PreparedResizeRecovery(Vector.empty, maxRows, generation)
+    if maxRows === 0 then PreparedResizeRecovery(Vector.empty, maxRows, generation)
     else
       val context  = NormalResizeRecoveryContext(
         width,
@@ -2742,7 +2746,12 @@ final class TUI(
           s"Normal resize recovery returned ${rawLines.length} rows for budget $maxRows"
         )
       val lines    =
-        try rendererPolicy.prepareResizeRecovery(rawLines, width)
+        try
+          rendererPolicy match
+            case recoveryRenderer: ResizeRecoveryRenderer =>
+              recoveryRenderer.prepareResizeRecovery(rawLines, width)
+            case _                                        =>
+              throw IllegalStateException("Resize recovery requires recovery capability")
         catch
           case error: Throwable =>
             emitResizeRecoveryDiagnostic(
@@ -2753,7 +2762,7 @@ final class TUI(
               generation
             )
             throw error
-      TUI.PreparedResizeRecovery(lines, maxRows, generation)
+      PreparedResizeRecovery(lines, maxRows, generation)
 
   private def emitResizeRecoveryDiagnostic(
       outcome: TUIDiagnosticResizeRecoveryOutcome,
@@ -2833,12 +2842,6 @@ object TUI:
       layoutRoot: Component,
       options: TUIOptions = TUIOptions()
   ): TUI = new TUI(terminal, options, Some(layoutRoot))
-
-  private[core] final case class PreparedResizeRecovery(
-      lines: Vector[String],
-      maxRows: Int,
-      generation: Long
-  )
 
   private enum RestorationStage derives CanEqual:
     case BackendStop, ScreenExit, Complete
