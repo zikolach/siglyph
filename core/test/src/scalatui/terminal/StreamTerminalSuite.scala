@@ -123,7 +123,8 @@ class StreamTerminalSuite extends munit.FunSuite:
       terminal.stop()
     assertEquals(inputs, Vector(TerminalInput.Key(TerminalKey.Escape)))
 
-  test("stream terminal keeps split CSI intact across a 50 ms read gap"):
+  test("stream terminal keeps split CSI intact across a controlled 50 ms read gap"):
+    val timing      = ManualInputTiming()
     val releaseRead = CountDownLatch(1)
     val firstRead   = CountDownLatch(1)
     val observed    = CountDownLatch(1)
@@ -136,16 +137,17 @@ class StreamTerminalSuite extends munit.FunSuite:
           case 1 =>
             buffer(off) = 0x1b.toByte
             buffer(off + 1) = '['.toByte
-            firstRead.countDown()
             2
           case 2 =>
+            firstRead.countDown()
             releaseRead.await()
             buffer(off) = 'A'.toByte
             1
           case _ =>
             releaseRead.await()
             -1
-    val terminal    = StreamTerminal(input = in)
+    val terminal    = new StreamTerminal(input = in):
+      override private[terminal] def inputTiming: InputTiming = timing
     val lock        = Object()
     var inputs      = Vector.empty[TerminalInput]
     terminal.start(
@@ -157,7 +159,7 @@ class StreamTerminalSuite extends munit.FunSuite:
     )
     try
       assert(firstRead.await(1, TimeUnit.SECONDS))
-      Thread.sleep(50)
+      timing.advanceTo(TimeUnit.MILLISECONDS.toNanos(50))
       releaseRead.countDown()
       assert(observed.await(1, TimeUnit.SECONDS))
       assertEquals(lock.synchronized(inputs), Vector(TerminalInput.Key(TerminalKey.Up)))
