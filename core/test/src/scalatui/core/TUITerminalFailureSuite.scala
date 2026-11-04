@@ -88,7 +88,17 @@ class TUITerminalFailureSuite extends munit.FunSuite:
 
   test("backend failure bypasses ingress, retains completions, restores, and rethrows first"):
     val terminal        = FailureTerminal()
-    val tui             = TUI(terminal)
+    val runStarted      = CountDownLatch(1)
+    val tui             = TUI(
+      terminal,
+      TUIOptions(
+        diagnosticObserver = Some(TUIDiagnosticObserver {
+          case TUIDiagnosticEvent.Lifecycle(TUIDiagnosticLifecycleState.Running, _) =>
+            runStarted.countDown()
+          case _                                                                    => ()
+        })
+      )
+    )
     val callbackEntered = CountDownLatch(1)
     val releaseCallback = CountDownLatch(1)
     val ordinaryCalls   = AtomicInteger(0)
@@ -107,8 +117,6 @@ class TUITerminalFailureSuite extends munit.FunSuite:
         ordinaryCalls.incrementAndGet()
         InputResult.NoRender
     }
-    tui.start()
-    tui.queryTerminalBackgroundColor(result => queryResult.set(Some(result)))
     val runner          = Thread(() =>
       try tui.run()
       catch case error: Throwable => runFailure.set(error)
@@ -117,6 +125,8 @@ class TUITerminalFailureSuite extends munit.FunSuite:
       terminal.send(TerminalInput.Key(TerminalKey.Character("hold")))
     )
     runner.start()
+    assert(runStarted.await(5, TimeUnit.SECONDS), "run must start before failure injection")
+    tui.queryTerminalBackgroundColor(result => queryResult.set(Some(result)))
     owner.start()
     assert(callbackEntered.await(5, TimeUnit.SECONDS))
     terminal.send(TerminalInput.Key(TerminalKey.Character("discarded")))
