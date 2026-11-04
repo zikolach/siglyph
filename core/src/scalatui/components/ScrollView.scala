@@ -23,7 +23,8 @@ import scalatui.core.{
   ViewportLayoutProvider,
   ViewportRangeRenderer,
   ViewportScrollLayout,
-  ViewportScrollProvider
+  ViewportScrollProvider,
+  ViewportSnapshot
 }
 import scalatui.syntax.Equality.*
 import scalatui.unicode.Unicode
@@ -332,6 +333,50 @@ final class ScrollView(
     currentOffset
   }
 
+  override private[scalatui] def commitViewportGeometry(
+      contentExtent: Int,
+      viewportExtent: Int,
+      viewportWidth: Int,
+      layoutViewport: LayoutViewport,
+      child: Component,
+      revision: Long
+  ): Int = stateBoundary {
+    if (currentChild eq child) && contentRevision === revision then
+      commitViewportGeometry(contentExtent, viewportExtent, viewportWidth, layoutViewport)
+    else 0
+  }
+
+  override private[scalatui] def commitViewportSnapshot(snapshot: ViewportSnapshot): Unit =
+    val document = Option.when(snapshot.complete) {
+      require(snapshot.startRow === 0, "Complete viewport text must begin at document row zero")
+      ViewportSelectionDocument(snapshot.rows, maxSelectionGraphemes, maxSelectionUtf8Bytes)
+    }
+    val refresh  = stateBoundary {
+      if (currentChild ne snapshot.child) || (contentRevision !== snapshot.revision) then false
+      else
+        currentMetadata = snapshot.metadata
+        commitViewportGeometry(
+          snapshot.contentExtent,
+          snapshot.viewportExtent,
+          snapshot.viewportWidth,
+          snapshot.layoutViewport
+        )
+        document match
+          case Some(value) =>
+            commitSelectionDocument(
+              value,
+              complete = true,
+              snapshot.child,
+              snapshot.revision,
+              scanned = None
+            )
+            false
+          case None        =>
+            if !selectionComplete then selectionDocument = None
+            selectionAnchor.nonEmpty && !selectionComplete
+    }
+    if refresh then refreshCompleteSelectionDocument()
+
   override private[scalatui] def viewportContentRevision: Long = stateBoundary(contentRevision)
 
   override private[scalatui] def commitViewportText(
@@ -352,9 +397,10 @@ final class ScrollView(
       )
     else
       val selectedNeedsRefresh = stateBoundary {
-        if (currentChild eq child) && contentRevision === revision && !selectionComplete then
-          selectionDocument = None
-        selectionAnchor.nonEmpty && !selectionComplete
+        if (currentChild ne child) || (contentRevision !== revision) then false
+        else
+          if !selectionComplete then selectionDocument = None
+          selectionAnchor.nonEmpty && !selectionComplete
       }
       if selectedNeedsRefresh then refreshCompleteSelectionDocument()
 
