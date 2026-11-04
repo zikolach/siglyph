@@ -452,8 +452,8 @@ class AutocompleteSuite extends munit.FunSuite:
 
   test("editor cancels stale combined path requests and ignores old responses"):
     final class ManualPathProvider extends PathCompletionProvider:
-      var callback  = Option.empty[PathCompletionProvider.Callback]
-      var cancelled = 0
+      var callback                 = Option.empty[PathCompletionProvider.Callback]
+      var cancelled                = 0
       override def requestPathSuggestions(
           request: PathCompletionRequest,
           callback: PathCompletionProvider.Callback

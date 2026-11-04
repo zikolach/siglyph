@@ -227,14 +227,14 @@ class FullscreenViewportSuite extends munit.FunSuite:
           viewportExtent: Int,
           viewportWidth: Int,
           layoutViewport: LayoutViewport
-      ): Int = 500000
+      ): Int                                           = 500000
       override private[scalatui] def commitViewportText(
           rows: Vector[String],
           startRow: Int,
           complete: Boolean,
           child: Component,
           revision: Long
-      ): Unit = committed = Some((startRow, rows, complete))
+      ): Unit                                          = committed = Some((startRow, rows, complete))
 
     ViewportLayoutEngine.layout(viewport, width = 8, height = 3)
 

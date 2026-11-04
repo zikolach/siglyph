@@ -46,6 +46,6 @@ class LoaderConcurrencySuite extends munit.FunSuite:
       override def showOverlay(
           component: Component,
           options: OverlayOptions
-      ): OverlayHandle = throw UnsupportedOperationException()
+      ): OverlayHandle                 = throw UnsupportedOperationException()
       override def hideOverlay(): Unit = ()
       override def hasOverlay: Boolean = false

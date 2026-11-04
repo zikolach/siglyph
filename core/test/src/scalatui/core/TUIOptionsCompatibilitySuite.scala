@@ -2,8 +2,8 @@ package scalatui.core
 
 class TUIOptionsCompatibilitySuite extends munit.FunSuite:
   test("legacy five-argument apply and extractor retain their source shape"):
-    val observer  = Option.empty[TUIDiagnosticObserver]
-    val direct    = TUIOptions(
+    val observer    = Option.empty[TUIDiagnosticObserver]
+    val direct      = TUIOptions(
       true,
       TUIScreenMode.Alternate,
       true,
@@ -17,14 +17,14 @@ class TUIOptionsCompatibilitySuite extends munit.FunSuite:
         NormalResizeClearPolicy,
         Option[TUIDiagnosticObserver]
     ) => TUIOptions = TUIOptions.apply
-    val expanded  = constructor(
+    val expanded    = constructor(
       false,
       TUIScreenMode.Normal,
       false,
       NormalResizeClearPolicy.ClearScrollback,
       observer
     )
-    val extracted = direct match
+    val extracted   = direct match
       case TUIOptions(a, b, c, d, e) => (a, b, c, d, e)
 
     assertEquals(

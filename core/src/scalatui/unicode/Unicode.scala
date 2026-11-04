@@ -21,9 +21,11 @@ private[scalatui] final class GraphemeBoundaryEngine:
       if !started then true
       else if previous === Gcb.CR && current === Gcb.LF then false
       else if previous.isControl || current.isControl then true
-      else if previous === Gcb.L && (current === Gcb.L || current === Gcb.V || current === Gcb.LV || current === Gcb.LVT)
+      else if previous === Gcb.L &&
+        (current === Gcb.L || current === Gcb.V || current === Gcb.LV || current === Gcb.LVT)
       then false
-      else if (previous === Gcb.LV || previous === Gcb.V) && (current === Gcb.V || current === Gcb.T)
+      else if (previous === Gcb.LV || previous === Gcb.V) &&
+        (current === Gcb.V || current === Gcb.T)
       then false
       else if (previous === Gcb.LVT || previous === Gcb.T) && current === Gcb.T then false
       else if current === Gcb.Extend || current === Gcb.ZWJ then false

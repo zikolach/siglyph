@@ -300,8 +300,9 @@ class TerminalInputBufferSuite extends munit.FunSuite:
 
   test("switches overlong CSI to bounded raw streaming"):
     val buffer = TerminalInputBuffer()
-    val bytes  =
-      ("\u001b[" + "1" * 4094 + "1" + "A").getBytes(java.nio.charset.StandardCharsets.UTF_8)
+    val bytes  = ("\u001b[" + "1" * 4094 + "1" + "A").getBytes(
+      java.nio.charset.StandardCharsets.UTF_8
+    )
     val events =
       bytes.grouped(4096).flatMap(part => buffer.process(TerminalInputChunk(part))).toVector
     assertEquals(events.head, TerminalInput.RawStart(TerminalRawKind.Csi))
@@ -313,8 +314,7 @@ class TerminalInputBufferSuite extends munit.FunSuite:
 
   test("overlong raw stream terminates when byte 4097 is its terminator"):
     val buffer = TerminalInputBuffer()
-    val bytes  =
-      ("\u001b[" + "1" * 4094 + "x").getBytes(java.nio.charset.StandardCharsets.UTF_8)
+    val bytes  = ("\u001b[" + "1" * 4094 + "x").getBytes(java.nio.charset.StandardCharsets.UTF_8)
     val events =
       bytes.grouped(4096).flatMap(part => buffer.process(TerminalInputChunk(part))).toVector
 

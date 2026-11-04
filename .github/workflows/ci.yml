@@ -42,7 +42,7 @@ jobs:
 
       - name: Install Mill
         run: |
-          curl -fLo mill https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/1.1.8/mill-dist-1.1.8-mill.sh
+          curl -fLo mill https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/1.3.1/mill-dist-1.3.1-mill.sh
           chmod +x mill
           echo "$PWD" >> "$GITHUB_PATH"
           ./mill --version
@@ -101,7 +101,7 @@ jobs:
 
       - name: Install Mill
         run: |
-          curl -fLo mill https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/1.1.8/mill-dist-1.1.8-mill.sh
+          curl -fLo mill https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/1.3.1/mill-dist-1.3.1-mill.sh
           chmod +x mill
           echo "$PWD" >> "$GITHUB_PATH"
           ./mill --version
@@ -113,12 +113,12 @@ jobs:
         run: mill scalafixCheck
 
       - name: Compile JVM and Native terminal paths
-        run: mill core.compile terminalJvm.compile coreNative.compile terminalNative.compile
+        run: mill core.compile + terminalJvm.compile + coreNative.compile + terminalNative.compile
 
       - name: Run JVM and Native terminal tests under a PTY
         run: |
           script -q -e /dev/null mill --no-daemon \
-            core.test terminalJvm.test coreNative.test terminalNative.test
+            core.test + terminalJvm.test + coreNative.test + terminalNative.test
 
       - name: Run terminal PTY lifecycle tests
         run: ./scripts/test-terminal-pty.sh

@@ -45,7 +45,7 @@ class UtilityComponentsSuite extends munit.FunSuite:
         component: Component,
         options: Option[OverlayOptions],
         requestRender: Boolean
-    ): Unit =
+    ): Unit                                                            =
       this.component = component
       options.foreach(value => this.options = value)
 
@@ -653,6 +653,6 @@ class UtilityComponentsSuite extends munit.FunSuite:
       override def showOverlay(
           component: scalatui.core.Component,
           options: scalatui.core.OverlayOptions
-      ): scalatui.core.OverlayHandle = throw UnsupportedOperationException()
+      ): scalatui.core.OverlayHandle   = throw UnsupportedOperationException()
       override def hideOverlay(): Unit = ()
       override def hasOverlay: Boolean = false

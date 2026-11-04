@@ -3,7 +3,7 @@ package scalatui.terminal
 import scalatui.syntax.Equality.*
 
 /** Orders parser batches across backend reader and flush threads for one terminal start. */
-private[terminal] final class OrderedInputDelivery:
+private[terminal] final class OrderedInputDelivery(timing: InputTiming = InputTiming.System):
   private val stateLock    = Object()
   private var generation   = 0L
   private var active       = false
@@ -64,7 +64,7 @@ private[terminal] final class OrderedInputDelivery:
           case Some(remaining) if remaining <= 0L => Some(reserveBatch(flush))
           case remaining                          =>
             val waitNanos = remaining.fold(maxWaitNanos)(value => math.min(value, maxWaitNanos))
-            stateLock.wait(waitNanos / 1000000L, (waitNanos % 1000000L).toInt)
+            timing.await(stateLock, waitNanos)
             None
     }
     deliverBatch(expectedGeneration, batch)(deliver)

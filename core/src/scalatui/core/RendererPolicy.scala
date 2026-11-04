@@ -110,16 +110,16 @@ private[core] trait RendererPolicy:
   def lastSanitization: Option[TUI.RenderSanitization]
   def start(): Unit
   def prepareFrame(frame: ComponentRender, width: Int): PreparedFrame
-  def prepareResizeRecovery(lines: Vector[String], width: Int): Vector[String]
+
   def render(
       frame: PreparedFrame,
       width: Int,
       height: Int,
       force: Boolean,
       clear: Boolean,
-      recovery: Option[TUI.PreparedResizeRecovery]
+      recovery: Option[PreparedResizeRecovery]
   ): Unit
-  def publishAppend(appended: PreparedFrame, retained: PreparedFrame, terminalHeight: Int): Unit
+
   def parkCursorForCleanup(): Unit
   def restoreTypedControls(): Unit
   def exitScreen(): Unit
@@ -141,7 +141,7 @@ private[core] final class NormalScreenPolicy(
         Int,
         Option[TUIDiagnosticClearReason]
     ) => Unit
-) extends RendererPolicy:
+) extends RendererPolicy with AppendPublisher with ResizeRecoveryRenderer:
   private var previousFrame           = Option.empty[PreparedFrame]
   private var previousWidth           = 0
   private var previousHeight          = 0
@@ -195,7 +195,7 @@ private[core] final class NormalScreenPolicy(
       height: Int,
       force: Boolean,
       clear: Boolean,
-      recovery: Option[TUI.PreparedResizeRecovery]
+      recovery: Option[PreparedResizeRecovery]
   ): Unit =
     val widthChanged  = (previousWidth !== 0) && (previousWidth !== width)
     val heightChanged = (previousHeight !== 0) && (previousHeight !== height)
@@ -282,7 +282,7 @@ private[core] final class NormalScreenPolicy(
       width: Int,
       height: Int,
       clearReason: Option[TUIDiagnosticClearReason],
-      recovery: Option[TUI.PreparedResizeRecovery]
+      recovery: Option[PreparedResizeRecovery]
   ): Unit =
     val clear                = clearReason.nonEmpty
     val startRowBeforeRender = if clear then Some(0) else latestFrameStartRow
@@ -621,18 +621,14 @@ private[core] final class FullscreenViewportPolicy(
       .map(_._1)
     PreparedFrame(lines, cursor, frame.controls, frame.documentMetadata)
 
-  override def prepareResizeRecovery(lines: Vector[String], width: Int): Vector[String] =
-    throw IllegalStateException("Fullscreen viewport does not support normal resize recovery")
-
   override def render(
       frame: PreparedFrame,
       width: Int,
       height: Int,
       force: Boolean,
       clear: Boolean,
-      recovery: Option[TUI.PreparedResizeRecovery]
+      recovery: Option[PreparedResizeRecovery]
   ): Unit =
-    require(recovery.isEmpty, "Fullscreen viewport does not support normal resize recovery")
     require(frame.lines.length === height, "Fullscreen frame must match terminal height")
     val resized      = (previousWidth !== width) || (previousHeight !== height)
     val retained     = kittyRetention.update(
@@ -661,12 +657,6 @@ private[core] final class FullscreenViewportPolicy(
     previousFrame = Some(currentFrame)
     previousWidth = width
     previousHeight = height
-
-  override def publishAppend(
-      appended: PreparedFrame,
-      retained: PreparedFrame,
-      terminalHeight: Int
-  ): Unit = throw IllegalStateException("Fullscreen viewport does not support append-only output")
 
   override def parkCursorForCleanup(): Unit = ()
 

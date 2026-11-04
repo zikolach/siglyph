@@ -96,6 +96,15 @@
     },
     {
       "customType": "regex",
+      "description": "Mill version pinned in the build header",
+      "managerFilePatterns": ["/^build\\.mill$/"],
+      "matchStrings": ["//\\| mill-version: (?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "datasourceTemplate": "maven",
+      "depNameTemplate": "Mill",
+      "packageNameTemplate": "com.lihaoyi:mill-dist"
+    },
+    {
+      "customType": "regex",
       "description": "Mill bootstrap download URLs in GitHub Actions workflows",
       "managerFilePatterns": ["/^\\.github/workflows/.*\\.ya?ml$/"],
       "matchStrings": [

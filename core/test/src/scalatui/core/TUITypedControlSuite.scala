@@ -26,7 +26,7 @@ class TUITypedControlSuite extends munit.FunSuite:
     override def start(
         onInput: scalatui.terminal.TerminalInput => Unit,
         onResize: () => Unit
-    ): Unit = ()
+    ): Unit                   = ()
     override def stop(): Unit = stopCalled = true
 
     override def write(data: String): Unit =

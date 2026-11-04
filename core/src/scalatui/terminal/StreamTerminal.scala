@@ -24,12 +24,15 @@ class StreamTerminal(
   private var inputThread: Thread | Null                                     = null
   private var flushThread: Thread | Null                                     = null
   private val inputBuffer                                                    = TerminalInputBuffer()
-  private val inputDelivery                                                  = OrderedInputDelivery()
+  private lazy val inputDelivery                                             = OrderedInputDelivery(inputTiming)
   private var inputGeneration                                                = 0L
   private var inputFailureGeneration                                         = -1L
   private var flushFailureGeneration                                         = -1L
   private[terminal] var workerFailureForTesting: String => Option[Throwable] = _ => None
   private[terminal] var workerFailureClaimedForTesting: String => Unit       = _ => ()
+
+  /** Internal seam; overrides must return one stable timing instance for this terminal. */
+  private[terminal] def inputTiming: InputTiming = InputTiming.System
 
   override def start(onInput: TerminalInput => Unit, onResize: () => Unit): Unit =
     start(onInput, onResize, _ => ())
@@ -113,7 +116,7 @@ class StreamTerminal(
         else if read === 0 then flushPending(generation)
         else
           val chunk = TerminalInputChunk(buffer, 0, read)
-          parseAndDeliver(generation, inputBuffer.process(chunk))
+          parseAndDeliver(generation, inputBuffer.processAt(chunk, inputTiming.nanoTime()))
     catch case error: Throwable => reportFailure(generation, "input", error, onFailure)
     finally
       terminateGeneration(generation)
@@ -125,8 +128,8 @@ class StreamTerminal(
         workerFailureForTesting("flush").foreach(throw _)
         inputDelivery.awaitFlushAndDeliver(
           generation,
-          inputBuffer.nanosUntilFlush(System.nanoTime()),
-          inputBuffer.flushIfIdle(System.nanoTime()),
+          inputBuffer.nanosUntilFlush(inputTiming.nanoTime()),
+          inputBuffer.flushIfIdle(inputTiming.nanoTime()),
           TerminalInputBuffer.IncompleteSequenceFlushNanos
         )(inputHandler)
     catch case error: Throwable => reportFailure(generation, "flush", error, onFailure)

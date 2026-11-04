@@ -1,7 +1,7 @@
 #!/usr/bin/env -S scala-cli shebang
-//> using scala 3.7.4
-//> using dep io.github.zikolach::siglyph-core:0.9.0
-//> using dep io.github.zikolach::siglyph-terminal-jvm:0.9.0
+//> using scala 3.9.0
+//> using dep io.github.zikolach::siglyph-core:0.9.2
+//> using dep io.github.zikolach::siglyph-terminal-jvm:0.9.2
 
 import scalatui.ansi.Ansi
 import scalatui.components.*
@@ -105,9 +105,11 @@ private def describeMouse(mouse: TerminalInput.Mouse): String =
   s"${describeAction(mouse.action)} row=${mouse.row} col=${mouse.col}$suffix"
 
 private def describeAction(action: MouseAction): String = action match
-  case MouseAction.Press(button)    => s"press ${describeButton(button)}"
-  case MouseAction.Release(button)  => s"release ${describeButton(button)}"
-  case MouseAction.Wheel(direction) => s"wheel ${describeWheel(direction)}"
+  case MouseAction.Press(button)                          => s"press ${describeButton(button)}"
+  case MouseAction.Release(button)                        => s"release ${describeButton(button)}"
+  case MouseAction.Wheel(direction)                       => s"wheel ${describeWheel(direction)}"
+  case MouseAction.Move(MouseButtonState.Pressed(button)) => s"move ${describeButton(button)}"
+  case MouseAction.Move(MouseButtonState.Released)        => "move without button"
 
 private def describeButton(button: MouseButton): String = button match
   case MouseButton.Left        => "left"

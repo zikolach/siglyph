@@ -195,7 +195,8 @@ class SttyTerminalSuite extends munit.FunSuite:
     terminal.stop()
     assertEquals(
       output.toString(java.nio.charset.StandardCharsets.UTF_8),
-      KittyKeyboardProtocol.QuerySequence + KittyKeyboardProtocol.EnableSequence + KittyKeyboardProtocol.DisableSequence
+      KittyKeyboardProtocol.QuerySequence + KittyKeyboardProtocol.EnableSequence +
+        KittyKeyboardProtocol.DisableSequence
     )
 
   test("Kitty keyboard state expires pending negotiation on state read"):

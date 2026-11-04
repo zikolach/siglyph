@@ -2,8 +2,7 @@ package scalatui.terminal.native
 
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{
-  KittyKeyboardProtocol,
-  KittyKeyboardProtocolNegotiator,
+  InteractiveProtocolSession,
   KittyKeyboardProtocolState,
   KittyKeyboardProtocolTerminal,
   Terminal,
@@ -50,33 +49,31 @@ final class PosixTerminal(
       TerminalTitleSupport,
       TerminalProgressSupport:
   private type Winsize = CStruct4[CUnsignedShort, CUnsignedShort, CUnsignedShort, CUnsignedShort]
-  @volatile private var running                                             = false
-  @volatile private var resizePolling                                       = false
-  @volatile private var inputHandler: TerminalInput => Unit                 = _ => ()
-  @volatile private var resizeHandler: () => Unit                           = () => ()
-  @volatile private var currentColumns                                      = initialColumns
-  @volatile private var currentRows                                         = initialRows
-  private var inputThread: Thread | Null                                    = null
-  private var resizeThread: Thread | Null                                   = null
-  private var flushThread: Thread | Null                                    = null
-  private var savedState: Ptr[termios.termios]                              = null
-  private val inputBuffer                                                   = TerminalInputBuffer()
-  private val inputDelivery                                                 = OrderedInputDelivery()
-  private var inputGeneration                                               = 0L
-  private var inputFailureGeneration                                        = -1L
-  private var flushFailureGeneration                                        = -1L
-  private var resizeFailureGeneration                                       = -1L
-  private var inputCleanupPending                                           = false
-  private var pasteCleanupPending                                           = false
-  private var kittyCleanupPending                                           = false
-  @volatile private var mouseTrackingMode                                   = TerminalMouseTrackingMode.Disabled
-  private var mouseCleanupMode                                              = TerminalMouseTrackingMode.Disabled
-  private var mouseCleanupPending                                           = false
+  @volatile private var running                             = false
+  @volatile private var resizePolling                       = false
+  @volatile private var inputHandler: TerminalInput => Unit = _ => ()
+  @volatile private var resizeHandler: () => Unit           = () => ()
+  @volatile private var currentColumns                      = initialColumns
+  @volatile private var currentRows                         = initialRows
+  private var inputThread: Thread | Null                    = null
+  private var resizeThread: Thread | Null                   = null
+  private var flushThread: Thread | Null                    = null
+  private var savedState: Ptr[termios.termios]              = null
+  private val inputBuffer                                   = TerminalInputBuffer()
+  private val inputDelivery                                 = OrderedInputDelivery()
+  private var inputGeneration                               = 0L
+  private var inputFailureGeneration                        = -1L
+  private var flushFailureGeneration                        = -1L
+  private var resizeFailureGeneration                       = -1L
+  private var inputCleanupPending                           = false
+
+  @volatile private var mouseTrackingMode = TerminalMouseTrackingMode.Disabled
+
   private[native] var cleanupFailureForTesting: String => Option[Throwable] = _ => None
   private[native] var workerFailureForTesting: String => Option[Throwable]  = _ => None
   private[native] var workerFailureClaimedForTesting: String => Unit        = _ => ()
   private[native] var writeFailureForTesting: String => Option[Throwable]   = _ => None
-  private val keyboardProtocolNegotiator                                    = KittyKeyboardProtocolNegotiator()
+  private val protocolSession                                               = InteractiveProtocolSession(write)
 
   override def mouseReportingEnabled_=(enabled: Boolean): Unit =
     mouseTrackingMode =
@@ -123,22 +120,17 @@ final class PosixTerminal(
       refreshSize(notify = false)
       try
         enableRawMode()
-        pasteCleanupPending = true
-        write("\u001b[?2004h")
-        val enabledMouseTrackingMode = mouseTrackingMode
-        if enabledMouseTrackingMode !== TerminalMouseTrackingMode.Disabled then
-          mouseCleanupMode = enabledMouseTrackingMode
-          mouseCleanupPending = true
-          write(Terminal.MouseProtocol.enable(enabledMouseTrackingMode))
+        protocolSession.enablePaste()
+        protocolSession.enableMouse(mouseTrackingMode)
         inputGeneration = inputDelivery.start(inputBuffer.clear())
         inputCleanupPending = true
         running = true
-        val generation               = inputGeneration
-        val thread                   = Thread(
+        val generation = inputGeneration
+        val thread     = Thread(
           () => readLoop(generation, onFailure),
           "siglyph-posix-terminal-input"
         )
-        val flusher                  = Thread(
+        val flusher    = Thread(
           () => flushLoop(generation, onFailure),
           "siglyph-posix-terminal-flush"
         )
@@ -159,7 +151,7 @@ final class PosixTerminal(
   }
 
   override def stop(): Unit = synchronized {
-    if !kittyCleanupPending then keyboardProtocolNegotiator.disable()
+    protocolSession.cancelPendingKittyNegotiation()
     if running || hasCleanupObligations || (inputThread ne null) || (flushThread ne null) then
       running = false
       stopResizePolling()
@@ -204,31 +196,22 @@ final class PosixTerminal(
     write(if active then Terminal.ProgressActiveSequence else Terminal.ProgressClearSequence)
 
   override def keyboardProtocolState: KittyKeyboardProtocolState = synchronized {
-    keyboardProtocolNegotiator.expire(System.currentTimeMillis())
-    keyboardProtocolNegotiator.state
+    protocolSession.keyboardProtocolState(System.currentTimeMillis())
   }
 
   override def requestKittyKeyboardProtocol(timeoutMillis: Long): Unit = synchronized {
-    keyboardProtocolNegotiator.begin(System.currentTimeMillis(), timeoutMillis)
-    write(KittyKeyboardProtocol.QuerySequence)
+    protocolSession.requestKittyKeyboardProtocol(System.currentTimeMillis(), timeoutMillis)
   }
 
   override def acceptKittyKeyboardProtocolResponse(
       response: String,
       nowMillis: Long
   ): Boolean = synchronized {
-    val accepted = keyboardProtocolNegotiator.receiveResponse(response, nowMillis)
-    if accepted then
-      kittyCleanupPending = true
-      write(KittyKeyboardProtocol.EnableSequence)
-    accepted
+    protocolSession.acceptKittyKeyboardProtocolResponse(response, nowMillis)
   }
 
   override def disableKittyKeyboardProtocol(): Unit = synchronized {
-    if kittyCleanupPending then
-      write(KittyKeyboardProtocol.DisableSequence)
-    keyboardProtocolNegotiator.disable()
-    kittyCleanupPending = false
+    protocolSession.disableKittyKeyboardProtocol()
   }
 
   private def enableRawMode(): Unit =
@@ -407,8 +390,7 @@ final class PosixTerminal(
     if terminate then inputDelivery.stop(generation, inputBuffer.clear())
 
   private def hasCleanupObligations: Boolean =
-    inputCleanupPending || kittyCleanupPending || mouseCleanupPending || pasteCleanupPending ||
-      (savedState !== null)
+    inputCleanupPending || protocolSession.hasCleanupObligations || (savedState !== null)
 
   private def cleanup(): Option[Throwable] =
     var failure                                      = Option.empty[Throwable]
@@ -430,19 +412,12 @@ final class PosixTerminal(
         reapFlushThread()
         inputCleanupPending = false
       }
-    if kittyCleanupPending then attempt("kitty")(disableKittyKeyboardProtocol())
-    else keyboardProtocolNegotiator.disable()
-    if mouseCleanupPending then
-      attempt("mouse") {
-        write(Terminal.MouseProtocol.disable(mouseCleanupMode))
-        mouseCleanupMode = TerminalMouseTrackingMode.Disabled
-        mouseCleanupPending = false
-      }
-    if pasteCleanupPending then
-      attempt("paste") {
-        write("\u001b[?2004l")
-        pasteCleanupPending = false
-      }
+    if protocolSession.kittyCleanupPending then attempt("kitty")(disableKittyKeyboardProtocol())
+    else protocolSession.cancelPendingKittyNegotiation()
+    if protocolSession.mouseCleanupPending then
+      attempt("mouse")(protocolSession.disableMouse())
+    if protocolSession.pasteCleanupPending then
+      attempt("paste")(protocolSession.disablePaste())
     if savedState !== null then attempt("termios")(restoreMode())
     failure
 

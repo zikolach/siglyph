@@ -233,9 +233,10 @@ private[scalatui] object BenchmarkWorkloads:
       scale,
       "queryLength"       -> "6",
       "sourceOccurrences" -> scale.transcriptRows.toString,
-      "expectedMatches"   -> math
-        .min(scale.transcriptRows, ScrollView.MaxRetainedSearchMatches)
-        .toString
+      "expectedMatches"   ->
+        math
+          .min(scale.transcriptRows, ScrollView.MaxRetainedSearchMatches)
+          .toString
     ),
     () =>
       val view     = ScrollView(RangedTranscript(scale.transcriptRows), primary = true)

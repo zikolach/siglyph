@@ -164,5 +164,6 @@ private[components] object ViewportSelectionDocument:
 
   private def canJoin(left: WordKind, right: WordKind): Boolean =
     val selectable = (left !== WordKind.Other) && (right !== WordKind.Other)
-    selectable && (left === WordKind.Joiner || right === WordKind.Joiner ||
+    selectable &&
+    (left === WordKind.Joiner || right === WordKind.Joiner ||
       (left === WordKind.Word && right === WordKind.Word))
