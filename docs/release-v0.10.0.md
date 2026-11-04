@@ -1,4 +1,4 @@
-# v0.10.0 release (publication pending)
+# v0.10.0 release
 
 Publication of **0.10.0** is authorized for **2026-11-04**. This is a minor release rather than a
 patch because newly built artifacts raise the Scala compiler/TASTy baseline to 3.9.0 under the
@@ -6,8 +6,29 @@ project's pre-1.0 versioning policy.
 
 The [dated 0.10.0 changelog](../CHANGELOG.md#0100---2026-11-04) is the source for GitHub Release
 notes. The version comes from the authorized `v0.10.0` tag, not the local `0.1.0-SNAPSHOT` fallback.
-Finalized notes are not proof of publication: verify both publishing workflows and all artifacts
-before treating the release as available or updating published dependency examples.
+Publication is verified: both publishing workflows succeeded, all ten GitHub Release jars were
+downloaded and checked against API SHA-256 digests, and all ten Maven Central coordinates were
+resolved with POM, binary, sources and Javadoc artifacts. Published dependency examples now use
+0.10.0.
+
+## Publication verification
+
+- Tag `v0.10.0` points to reviewed main commit `41d48da0318316d523cca058e88d34e9467b66a2`.
+  Finalization is merged in [PR #80](https://github.com/zikolach/siglyph/pull/80).
+- [Final main Linux/macOS CI](https://github.com/zikolach/siglyph/actions/runs/41918785557) passed
+  both jobs; accepted local macOS verification also passed.
+- [Publish](https://github.com/zikolach/siglyph/actions/runs/41920497987) and
+  [Publish Maven Central](https://github.com/zikolach/siglyph/actions/runs/41920497876) both passed
+  after the single authorized tag push. No extra publication dispatch was used.
+- [GitHub Release v0.10.0](https://github.com/zikolach/siglyph/releases/tag/v0.10.0) contains all ten
+  binary jars; API SHA-256 digests, sizes, ZIP integrity and Native IR were checked.
+- All ten Maven Central coordinates were fetched anonymously, including forty POM/binary/source/
+  Javadoc payloads, matching SHA-1 sidecars and present PGP signature files.
+- Published JVM and Scala Native consumer programs compiled and ran on Scala 3.9.0 / JDK 21, using
+  all five platform-appropriate dependencies from Maven Central.
+- GitHub Packages publishing returned all forty artifact deployments successfully. Independent
+  package API enumeration requires `read:packages`, which the local token does not have; workflow
+  deployment receipts, not an unauthenticated package listing, are the evidence for that provider.
 
 ## Compatibility and migration
 
@@ -88,7 +109,7 @@ The source baseline is merged main `5970ece66e6cdfba502199bdcb1644177db66dc0`, w
 [Linux/macOS CI](https://github.com/zikolach/siglyph/actions/runs/41826729388) passed. That evidence
 predates this preparation's cleanup fix and specification changes; it is not final-candidate CI.
 
-Before publication:
+Release execution checklist:
 
 1. Review and merge this preparation, including the cleanup regression fix and promoted specs.
    Require successful exact-head Linux CI and either successful macOS CI or the approved local
@@ -111,7 +132,7 @@ Before publication:
 8. Only after availability is verified, update README and Scala CLI dependency examples from
    `0.9.2` to `0.10.0` and smoke-test published JVM/Native consumers with the new compiler baseline.
 
-## Expected release jars (not publication evidence)
+## Verified GitHub Release jars
 
 | JVM | Scala Native 0.5 |
 | --- | --- |

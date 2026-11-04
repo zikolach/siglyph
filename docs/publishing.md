@@ -1,13 +1,11 @@
 # Publishing
 
 siglyph publishes release jars to GitHub Releases and artifacts to GitHub Packages and Maven
-Central. README and Scala CLI examples use the latest published version, currently
-`0.9.2`. Keep them on that version while a subsequent release is only planned; update them after
-the new artifacts become available.
+Central. README and Scala CLI examples use the latest published version, currently **0.10.0**.
+Keep examples on an available published version while a subsequent release is only planned.
 
-The next proposed release is **0.10.0** because of the Scala compiler/TASTy baseline change.
-See [release preparation](release-v0.10.0.md) for migration notes, validation gates and the
-authorization boundary; preparation does not push a tag or publish artifacts.
+Version **0.10.0** uses the **Scala 3.9** compiler/TASTy baseline. See the [release record](release-v0.10.0.md)
+for migration notes, tag provenance and verified publication results.
 
 ## Version source
 
