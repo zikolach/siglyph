@@ -2,8 +2,7 @@ package scalatui.terminal.jvm
 
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{
-  KittyKeyboardProtocol,
-  KittyKeyboardProtocolNegotiator,
+  InteractiveProtocolSession,
   KittyKeyboardProtocolState,
   KittyKeyboardProtocolTerminal,
   StreamTerminal,
@@ -40,14 +39,13 @@ final class SttyTerminal(
       TerminalMouseProtocolSupport,
       TerminalTitleSupport,
       TerminalProgressSupport:
-  @volatile private var savedState: Option[String]                       = None
-  @volatile private var resizePolling                                    = false
-  private var sttyRunning                                                = false
-  private var sttyGeneration                                             = 0L
-  private var resizeFailureGeneration                                    = -1L
-  private var inputCleanupPending                                        = false
-  private var pasteCleanupPending                                        = false
-  private var kittyCleanupPending                                        = false
+  @volatile private var savedState: Option[String] = None
+  @volatile private var resizePolling              = false
+  private var sttyRunning                          = false
+  private var sttyGeneration                       = 0L
+  private var resizeFailureGeneration              = -1L
+  private var inputCleanupPending                  = false
+
   private[jvm] var cleanupFailureForTesting: String => Option[Throwable] = _ => None
   private[jvm] var sttyFailureForTesting: String => Option[Throwable]    = _ => None
   @volatile private var currentColumns                                   = columnsOverride
@@ -58,9 +56,7 @@ final class SttyTerminal(
   private var resizeHandler: () => Unit                                  = () => ()
   private var resizeThread: Thread | Null                                = null
   @volatile private var mouseTrackingMode                                = TerminalMouseTrackingMode.Disabled
-  private var mouseCleanupMode                                           = TerminalMouseTrackingMode.Disabled
-  private var mouseCleanupPending                                        = false
-  private val keyboardProtocolNegotiator                                 = KittyKeyboardProtocolNegotiator()
+  private val protocolSession                                            = InteractiveProtocolSession(write)
 
   override def mouseReportingEnabled_=(enabled: Boolean): Unit =
     mouseTrackingMode =
@@ -100,16 +96,11 @@ final class SttyTerminal(
     try
       refreshSize(notify = false)
       runStty("raw -echo min 1 time 0")
-      pasteCleanupPending = true
-      write("\u001b[?2004h")
-      val enabledMouseTrackingMode = mouseTrackingMode
-      if enabledMouseTrackingMode !== TerminalMouseTrackingMode.Disabled then
-        mouseCleanupMode = enabledMouseTrackingMode
-        mouseCleanupPending = true
-        write(Terminal.MouseProtocol.enable(enabledMouseTrackingMode))
+      protocolSession.enablePaste()
+      protocolSession.enableMouse(mouseTrackingMode)
       inputCleanupPending = true
       sttyGeneration += 1
-      val generation               = sttyGeneration
+      val generation = sttyGeneration
       super.start(onInput, onResize, onFailure)
       sttyRunning = true
       startResizePolling(generation, onFailure)
@@ -145,31 +136,22 @@ final class SttyTerminal(
     write(if active then Terminal.ProgressActiveSequence else Terminal.ProgressClearSequence)
 
   override def keyboardProtocolState: KittyKeyboardProtocolState = synchronized {
-    keyboardProtocolNegotiator.expire(System.currentTimeMillis())
-    keyboardProtocolNegotiator.state
+    protocolSession.keyboardProtocolState(System.currentTimeMillis())
   }
 
   override def requestKittyKeyboardProtocol(timeoutMillis: Long): Unit = synchronized {
-    keyboardProtocolNegotiator.begin(System.currentTimeMillis(), timeoutMillis)
-    write(KittyKeyboardProtocol.QuerySequence)
+    protocolSession.requestKittyKeyboardProtocol(System.currentTimeMillis(), timeoutMillis)
   }
 
   override def acceptKittyKeyboardProtocolResponse(
       response: String,
       nowMillis: Long
   ): Boolean = synchronized {
-    val accepted = keyboardProtocolNegotiator.receiveResponse(response, nowMillis)
-    if accepted then
-      kittyCleanupPending = true
-      write(KittyKeyboardProtocol.EnableSequence)
-    accepted
+    protocolSession.acceptKittyKeyboardProtocolResponse(response, nowMillis)
   }
 
   override def disableKittyKeyboardProtocol(): Unit = synchronized {
-    if kittyCleanupPending then
-      write(KittyKeyboardProtocol.DisableSequence)
-    keyboardProtocolNegotiator.disable()
-    kittyCleanupPending = false
+    protocolSession.disableKittyKeyboardProtocol()
   }
 
   private[jvm] def refreshSizeForTesting(): Boolean = refreshSize(notify = true)
@@ -234,8 +216,7 @@ final class SttyTerminal(
       catch case _: Throwable => ()
 
   private def hasCleanupObligations: Boolean =
-    inputCleanupPending || kittyCleanupPending || mouseCleanupPending || pasteCleanupPending ||
-      savedState.nonEmpty
+    inputCleanupPending || protocolSession.hasCleanupObligations || savedState.nonEmpty
 
   private def cleanup(): Option[Throwable] =
     var failure                                      = Option.empty[Throwable]
@@ -248,19 +229,12 @@ final class SttyTerminal(
             case Some(first) => first.addSuppressed(error)
             case None        => failure = Some(error)
 
-    if kittyCleanupPending then attempt("kitty") { disableKittyKeyboardProtocol() }
-    else keyboardProtocolNegotiator.disable()
-    if mouseCleanupPending then
-      attempt("mouse") {
-        write(Terminal.MouseProtocol.disable(mouseCleanupMode))
-        mouseCleanupMode = TerminalMouseTrackingMode.Disabled
-        mouseCleanupPending = false
-      }
-    if pasteCleanupPending then
-      attempt("paste") {
-        write("\u001b[?2004l")
-        pasteCleanupPending = false
-      }
+    if protocolSession.kittyCleanupPending then attempt("kitty") { disableKittyKeyboardProtocol() }
+    else protocolSession.cancelPendingKittyNegotiation()
+    if protocolSession.mouseCleanupPending then
+      attempt("mouse") { protocolSession.disableMouse() }
+    if protocolSession.pasteCleanupPending then
+      attempt("paste") { protocolSession.disablePaste() }
     if inputCleanupPending then
       attempt("input") {
         super.stop()
