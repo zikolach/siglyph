@@ -7,6 +7,8 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-04
+
 ### Added
 
 - Added read-only `RenderServices` for session geometry and terminal capability observations;
@@ -367,7 +369,8 @@ and this project uses semantic versioning while it remains pre-1.0.
 - GitHub Actions CI, jar packaging, GitHub Packages publishing, and GitHub
   release artifacts.
 
-[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/zikolach/siglyph/compare/v0.9.2...v0.10.0
 [0.9.2]: https://github.com/zikolach/siglyph/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/zikolach/siglyph/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/zikolach/siglyph/compare/v0.8.0...v0.9.0
