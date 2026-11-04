@@ -4,6 +4,7 @@
 - [x] Introduce renderer-neutral PreparedResizeRecovery and use it in policy render signatures.
 - [x] Remove unsupported fullscreen preparation/publishing stubs.
 - [x] Add tests covering supported capabilities in normal, width-only alternate, and fullscreen modes.
+- [x] Synchronize lifecycle-failure test startup after CI exposed a pre-existing runner-admission race; reproduce the exact failure on unchanged base and retain all assertions (four fixture tests pass on JVM and Native).
 
 ## 2. Parent runtime and component integration
 

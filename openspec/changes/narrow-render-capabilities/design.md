@@ -24,3 +24,7 @@ Optional recovery remains present in the shared render signature, but capability
 ## Migration Plan
 
 Land internal capabilities and mode coverage, integrate TUI dispatch and read-only rendering services, then run existing renderer suites and OpenSpec validation. No persistent-state migration is required.
+
+## CI verification: lifecycle fixture admission
+
+The final-stack Linux run exposed an existing lifecycle-test race: starting a runner thread did not prove `TUI.run()` had entered startup before failure injection and failed cleanup. A gated late-admission probe on unchanged dependency-base commit 7d0d1d0 reproduces the identical extra incomplete-restoration exception. The fixture now lets the runner own startup and waits for the existing Running diagnostic before injecting failures. Assertions and production lifecycle behavior are unchanged; this is deterministic synchronization, not a retry or weakened assertion.
