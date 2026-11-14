@@ -47,7 +47,8 @@ final class PosixTerminal(
       TerminalMouseProtocolSupport,
       KittyKeyboardProtocolTerminal,
       TerminalTitleSupport,
-      TerminalProgressSupport:
+      TerminalProgressSupport,
+      scalatui.terminal.TerminalProgramStatusSupport:
   private type Winsize = CStruct4[CUnsignedShort, CUnsignedShort, CUnsignedShort, CUnsignedShort]
   @volatile private var running                             = false
   @volatile private var resizePolling                       = false
@@ -152,6 +153,7 @@ final class PosixTerminal(
 
   override def stop(): Unit = synchronized {
     protocolSession.cancelPendingKittyNegotiation()
+    if !programStatusCleanupPending then resetProgramStatus()
     if running || hasCleanupObligations || (inputThread ne null) || (flushThread ne null) then
       running = false
       stopResizePolling()
@@ -390,7 +392,8 @@ final class PosixTerminal(
     if terminate then inputDelivery.stop(generation, inputBuffer.clear())
 
   private def hasCleanupObligations: Boolean =
-    inputCleanupPending || protocolSession.hasCleanupObligations || (savedState !== null)
+    inputCleanupPending || protocolSession.hasCleanupObligations || programStatusCleanupPending ||
+      (savedState !== null)
 
   private def cleanup(): Option[Throwable] =
     var failure                                      = Option.empty[Throwable]
@@ -414,6 +417,8 @@ final class PosixTerminal(
         reapFlushThread()
         inputCleanupPending = false
       }
+    if programStatusCleanupPending then attempt("program-status")(resetProgramStatus())
+    else resetProgramStatus()
     if protocolSession.kittyCleanupPending then attempt("kitty")(disableKittyKeyboardProtocol())
     else protocolSession.cancelPendingKittyNegotiation()
     if protocolSession.mouseCleanupPending then

@@ -172,6 +172,9 @@ final class TUI(
     private[core] val viewportRoot: Option[Component] = None
 ) extends TUIContext,
       OverlayHost:
+  private val programStatusTerminal                                     = terminal match
+    case capable: scalatui.terminal.TerminalProgramStatusSupport => Some(capable)
+    case _                                                       => None
   private val root                                                      = Container()
   private val lifecycleLock                                             = Object()
   private var wheelScrollController                                     = scalatui.components.WheelScrollController()
@@ -392,6 +395,15 @@ final class TUI(
     }
 
   /**
+   * Queue a negotiated OSC 7501 report through the existing serialized output boundary. False means
+   * unsupported or rejected; true means accepted, not confirmed displayed.
+   */
+  def setTerminalProgramStatus(status: scalatui.terminal.ProgramStatus): Boolean =
+    scheduleControlOutput(programStatusTerminal.exists(_.programStatusSupported)) {
+      terminalServices.write(programStatusTerminal.foreach(_.setProgramStatus(status)))
+    }
+
+  /**
    * Set terminal progress state when the backend supports progress operations.
    *
    * Unsupported terminals return `false`. Active runtimes serialize accepted non-discardable output
@@ -582,6 +594,9 @@ final class TUI(
         ))
         if startupMayContinue then rendererPolicy.start()
         if startupMayContinue then
+          programStatusTerminal.foreach(capable =>
+            terminalServices.write(capable.requestProgramStatus())
+          )
           keyboardTerminal.foreach(capable =>
             terminalServices.write(capable.requestKittyKeyboardProtocol())
           )
@@ -675,10 +690,11 @@ final class TUI(
    * Request terminal restoration. An uncontended caller performs cleanup synchronously. A reentrant
    * or concurrent caller marks `Stopping` and returns without waiting; the active startup or drain
    * owner completes single-owner cleanup. Calls during an active restoration attempt coalesce. If
-   * backend stop fails, the runtime retains the current screen and rejects [[start]]. A later
-   * explicit call retries backend stop before screen exit. If only screen exit failed, retry only
-   * screen exit. Retries do not repeat completed teardown or callback batches and do not rethrow
-   * older attempt failures after success. Input and automatic failure handling never retry.
+   * backend stop or status reset fails, the runtime retains the current screen and rejects
+   * [[start]]. A later explicit call retries backend stop before screen exit. If only status reset
+   * or screen exit remains, retry only that phase. Retries do not repeat completed teardown or
+   * callback batches and do not rethrow older attempt failures after success. Input and automatic
+   * failure handling never retry.
    */
   def stop(): Unit = requestStop(retryRestoration = true)
 
@@ -1046,7 +1062,15 @@ final class TUI(
       termination: TerminalRawTermination,
       correlation: TUI.RawCorrelation
   ): TUI.IngressClassification =
-    if termination === TerminalRawTermination.Complete && keyboardTerminal.nonEmpty &&
+    if termination === TerminalRawTermination.Complete &&
+      scalatui.terminal.ProgramStatusProtocol.isReply(data)
+    then
+      TUI.IngressClassification.Publish(
+        TUI.Ingress.ProgramStatusResponse(data, System.currentTimeMillis()),
+        Vector.empty,
+        () => rawCorrelation = None
+      )
+    else if termination === TerminalRawTermination.Complete && keyboardTerminal.nonEmpty &&
       KittyKeyboardProtocol.parseResponse(data).nonEmpty
     then
       TUI.IngressClassification.Publish(
@@ -1135,7 +1159,7 @@ final class TUI(
 
   private def rawReplyEligible(kind: TerminalRawKind): Boolean = kind match
     case TerminalRawKind.Csi => true
-    case TerminalRawKind.Osc => backgroundColorFlight.nonEmpty
+    case TerminalRawKind.Osc => true
     case _                   => false
 
   private def completeFlightLocked[A](
@@ -1294,7 +1318,15 @@ final class TUI(
     drainOwnerMarker.set(false)
 
   private def processIngress(ingress: TUI.Ingress): Unit = ingress match
-    case TUI.Ingress.KeyboardResponse(response, arrivalMillis) =>
+    case TUI.Ingress.ProgramStatusResponse(response, arrivalMillis) =>
+      terminalServices.write {
+        val running = lifecycleLock.synchronized {
+          lifecycleState === TUI.LifecycleState.Running
+        }
+        if running then
+          programStatusTerminal.foreach(_.acceptProgramStatusReply(response, arrivalMillis))
+      }
+    case TUI.Ingress.KeyboardResponse(response, arrivalMillis)      =>
       terminalServices.write {
         val running = lifecycleLock.synchronized {
           lifecycleState === TUI.LifecycleState.Running
@@ -1302,10 +1334,10 @@ final class TUI(
         if running then
           keyboardTerminal.foreach(_.acceptKittyKeyboardProtocolResponse(response, arrivalMillis))
       }
-    case TUI.Ingress.Input(input)                              => handleInput(input)
-    case TUI.Ingress.AppendCompletion(completion)              =>
+    case TUI.Ingress.Input(input)                                   => handleInput(input)
+    case TUI.Ingress.AppendCompletion(completion)                   =>
       processAppendCompletion(completion)
-    case TUI.Ingress.Protocol(completions, notifications)      =>
+    case TUI.Ingress.Protocol(completions, notifications)           =>
       completions.foreach(processQueryCompletion)
       val running = lifecycleLock.synchronized {
         lifecycleState === TUI.LifecycleState.Running
@@ -2524,8 +2556,18 @@ final class TUI(
         attempt(terminalServices.write(capable.disableKittyKeyboardProtocol()))
       )
     if restorationStage === TUI.RestorationStage.BackendStop then
+      // A failed status write must not prevent input shutdown or terminal-mode restoration.
+      attempt(terminalServices.write(programStatusTerminal.foreach(_.resetProgramStatus())))
       attempt {
         terminalServices.write(terminal.stop())
+        restorationStage = TUI.RestorationStage.StatusReset
+      }
+      if (restorationStage === TUI.RestorationStage.StatusReset) &&
+        !programStatusTerminal.exists(_.programStatusCleanupPending)
+      then restorationStage = TUI.RestorationStage.ScreenExit
+    else if restorationStage === TUI.RestorationStage.StatusReset then
+      attempt {
+        terminalServices.write(programStatusTerminal.foreach(_.resetProgramStatus()))
         restorationStage = TUI.RestorationStage.ScreenExit
       }
     // Each screen has its own keyboard stack. Preserve this screen after backend stop failure.
@@ -2860,7 +2902,7 @@ object TUI:
   ): TUI = new TUI(terminal, options, Some(layoutRoot))
 
   private enum RestorationStage derives CanEqual:
-    case BackendStop, ScreenExit, Complete
+    case BackendStop, StatusReset, ScreenExit, Complete
 
   private enum LifecycleState derives CanEqual:
     case Starting, Running, Stopping, Cleaning, Stopped
@@ -2888,6 +2930,7 @@ object TUI:
     case Done
 
   private enum Ingress:
+    case ProgramStatusResponse(response: String, arrivalMillis: Long)
     case KeyboardResponse(response: String, arrivalMillis: Long)
     case Input(input: TerminalInput)
     case AppendCompletion(completion: TUI.AppendCompletion)

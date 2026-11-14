@@ -114,7 +114,8 @@ object TerminalCapabilities:
     val terminalEmulator = env.getOrElse("TERMINAL_EMULATOR", "").toLowerCase
     val term             = env.getOrElse("TERM", "").toLowerCase
     val colorTerm        = env.getOrElse("COLORTERM", "").toLowerCase
-    val trueColorHint    = (colorTerm === "truecolor") || (colorTerm === "24bit")
+    val trueColorHint    =
+      (colorTerm === "truecolor") || (colorTerm === "24bit") || term.endsWith("-direct")
 
     if env.contains("TMUX") || term.startsWith("tmux") then
       TerminalCapabilities(
@@ -124,6 +125,21 @@ object TerminalCapabilities:
       )
     else if term.startsWith("screen") then
       TerminalCapabilities(trueColor = trueColorHint, hyperlinks = false, images = None)
+    else if termProgram === "herdr" then
+      TerminalCapabilities(
+        trueColor = trueColorHint,
+        hyperlinks = true,
+        images = Some(ImageProtocol.Kitty)
+      )
+    else if termProgram === "rex" then
+      TerminalCapabilities(trueColor = true, hyperlinks = true, images = Some(ImageProtocol.Kitty))
+    else if termProgram === "orca" then
+      TerminalCapabilities(
+        trueColor = true,
+        hyperlinks = true,
+        images = if env.get("ORCA_IMAGE_PROTOCOL").contains("kitty") then Some(ImageProtocol.Kitty)
+        else None
+      )
     else if env.contains("KITTY_WINDOW_ID") || (termProgram === "kitty") then
       TerminalCapabilities(trueColor = true, hyperlinks = true, images = Some(ImageProtocol.Kitty))
     else if (termProgram === "ghostty") || term.contains("ghostty") || env.contains(
@@ -142,7 +158,8 @@ object TerminalCapabilities:
       TerminalCapabilities(trueColor = true, hyperlinks = true, images = Some(ImageProtocol.ITerm2))
     else if env.contains(
         "WT_SESSION"
-      ) || (termProgram === "vscode") || (termProgram === "alacritty") || (termProgram === "zed")
+      ) || (termProgram === "vscode") || (termProgram === "alacritty") ||
+      term.startsWith("alacritty") || env.contains("ALACRITTY_WINDOW_ID") || (termProgram === "zed")
     then
       TerminalCapabilities(trueColor = true, hyperlinks = true, images = None)
     else if terminalEmulator === "jetbrains-jediterm" then

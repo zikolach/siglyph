@@ -388,6 +388,44 @@ class SttyTerminalPtySuite extends munit.FunSuite:
     assert(failure eq sizeFailure)
     assertEquals(failedSizeCommands.toVector, Vector("rows 24 cols 80", "saved-state"))
 
+  test("TUI still restores raw mode when program status clear writes fail"):
+    withPtyTest {
+      val originalState                   = runStty("-g")
+      val originalStableState             = stableSttyState()
+      val (originalRows, originalColumns) = querySize()
+      val clearFailure                    = RuntimeException("injected program status clear failure")
+      var failClear                       = false
+      val output                          = new ByteArrayOutputStream:
+        override def write(bytes: Array[Byte], offset: Int, length: Int): Unit =
+          val text = new String(bytes, offset, length, java.nio.charset.StandardCharsets.UTF_8)
+          if failClear && text.contains("7501;state=clear") then throw clearFailure
+          super.write(bytes, offset, length)
+      val terminal                        = SttyTerminal(input = InputStream.nullInputStream(), output = output)
+      val tui                             = TUI(terminal)
+      try
+        tui.start()
+        terminal.requestProgramStatus(60000L)
+        assert(terminal.acceptProgramStatusReply(
+          scalatui.terminal.ProgramStatusProtocol.Query,
+          System.currentTimeMillis()
+        ))
+        assert(tui.setTerminalProgramStatus(scalatui.terminal.ProgramStatus(
+          scalatui.terminal.ProgramStatusState.Working
+        )))
+        failClear = true
+        val error = intercept[RuntimeException](tui.stop())
+        assert(error eq clearFailure)
+        assert(terminal.programStatusCleanupPending)
+        assertEquals(stableSttyState(), originalStableState)
+        failClear = false
+        tui.stop()
+        assert(!terminal.programStatusCleanupPending)
+      finally
+        failClear = false
+        scala.util.Try(tui.stop())
+        restoreStty(originalState, originalRows, originalColumns)
+    }
+
   private def countOccurrences(value: String, needle: String): Int =
     value.sliding(needle.length).count(_ === needle)
 

@@ -45,4 +45,17 @@ Status meanings:
 | Unicode conformance | Extension | Committed Unicode 17.0.0 UAX #29 data and fixtures run on JVM and Scala Native. See [`UnicodeSuite`](../core/test/src/scalatui/unicode/UnicodeSuite.scala). |
 | Deterministic performance counters | Extension | Correctness tests gate algorithmic counters. Dedicated JVM and Native targets report timings outside normal tests. See [`PerformanceCounterBaselineSuite`](../core/test/src/scalatui/core/PerformanceCounterBaselineSuite.scala) and [`performance-benchmarks.md`](performance-benchmarks.md). |
 
+## Targeted November 2026 follow-up (unreleased)
+
+The tables above retain their September review baseline. This separate targeted review pins
+[`8636e211e7834e4ca46a22aec1d65dfd2eac8677`](https://github.com/earendil-works/pi/tree/8636e211e7834e4ca46a22aec1d65dfd2eac8677/packages/tui), reviewed on **2026-11-14**. Its newest image fixes were unreleased upstream. The following changes are in Siglyph source, not published **0.10.0**; this is not a renewed whole-tree parity or emulator-visual claim.
+
+| Area | Source behavior and evidence |
+| --- | --- |
+| Delayed protocol replies | [Bounded delimiter framing](terminal-reply-framing.md) and `TerminalReplyFramingSuite` prevent delayed reply tails/BEL becoming keys while retaining cancellation and EOF recovery. |
+| Graphics lifecycle | [Graphics-last painting and upload retention](pi-graphics-lifecycle.md), `GraphicsLifecycleSuite` and exact bounded-write tests cover full redraw, resize, covered-row changes and overlay restoration. Pixel-aware partial cropping remains deferred. |
+| Streaming Markdown | [Bounded block/highlight reuse](markdown-streaming-cache.md) and `MarkdownStreamingCacheSuite` cover append/resize reuse, eviction, invalidation and concurrent callbacks outside cache locks. Parsing remains whole-document. |
+| Input policies | [List paging, runtime wheel normalization and word joiners](scroll-input-policies.md) are opt-in/default-preserving and tested through real TUI routing, nested remainders and Unicode boundaries. |
+| Terminal integration | [Negotiated optional program status and profiles](terminal-program-status.md) preserve typed output, bounded messages, source-compatible base Terminal implementations and explicit unsupported behavior. |
+
 When upstream changes, update the pinned commit and review date first. Keep broader completeness claims in this matrix so each claim remains tied to one exact upstream tree.

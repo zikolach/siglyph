@@ -524,3 +524,39 @@ class PosixTerminalSuite extends munit.FunSuite:
     Thread.sleep(100)
 
     assertEquals(failures.get(), 0)
+
+  test("TUI attempts Native input and termios cleanup despite failed program status clear"):
+    val terminal     = PosixTerminal(initialColumns = 80, initialRows = 24)
+    val tui          = scalatui.core.TUI(terminal)
+    val clearFailure = RuntimeException("injected program status clear failure")
+    val attempts     = scala.collection.mutable.ArrayBuffer.empty[String]
+    var failClear    = false
+    terminal.writeFailureForTesting = data =>
+      Option.when(failClear && data.contains("7501;state=clear"))(clearFailure)
+    terminal.cleanupFailureForTesting = name =>
+      attempts += name
+      None
+    try
+      tui.start()
+      terminal.requestProgramStatus(60000L)
+      assert(terminal.acceptProgramStatusReply(
+        scalatui.terminal.ProgramStatusProtocol.Query,
+        System.currentTimeMillis()
+      ))
+      assert(tui.setTerminalProgramStatus(scalatui.terminal.ProgramStatus(
+        scalatui.terminal.ProgramStatusState.Working
+      )))
+      failClear = true
+      val error = intercept[RuntimeException](tui.stop())
+      assert(error eq clearFailure)
+      assert(attempts.contains("input"))
+      assert(attempts.contains("termios"))
+      assert(terminal.programStatusCleanupPending)
+      failClear = false
+      tui.stop()
+      assert(!terminal.programStatusCleanupPending)
+      assertEquals(attempts.count(_ === "input"), 1)
+      assertEquals(attempts.count(_ === "termios"), 1)
+    finally
+      failClear = false
+      scala.util.Try(tui.stop())

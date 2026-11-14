@@ -38,7 +38,8 @@ final class SttyTerminal(
       KittyKeyboardProtocolTerminal,
       TerminalMouseProtocolSupport,
       TerminalTitleSupport,
-      TerminalProgressSupport:
+      TerminalProgressSupport,
+      scalatui.terminal.TerminalProgramStatusSupport:
   @volatile private var savedState: Option[String] = None
   @volatile private var resizePolling              = false
   private var sttyRunning                          = false
@@ -216,7 +217,8 @@ final class SttyTerminal(
       catch case _: Throwable => ()
 
   private def hasCleanupObligations: Boolean =
-    inputCleanupPending || protocolSession.hasCleanupObligations || savedState.nonEmpty
+    inputCleanupPending || protocolSession.hasCleanupObligations || programStatusCleanupPending ||
+      savedState.nonEmpty
 
   private def cleanup(): Option[Throwable] =
     var failure                                      = Option.empty[Throwable]
@@ -229,6 +231,8 @@ final class SttyTerminal(
             case Some(first) => first.addSuppressed(error)
             case None        => failure = Some(error)
 
+    if programStatusCleanupPending then attempt("program-status") { resetProgramStatus() }
+    else resetProgramStatus()
     if protocolSession.kittyCleanupPending then attempt("kitty") { disableKittyKeyboardProtocol() }
     else protocolSession.cancelPendingKittyNegotiation()
     if protocolSession.mouseCleanupPending then
