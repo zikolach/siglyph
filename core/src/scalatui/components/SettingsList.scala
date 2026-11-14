@@ -214,11 +214,15 @@ final class SettingsList(
 
   private def handleNonPasteInput(input: TerminalInput, effects: ComponentEffects): InputResult =
     input match
-      case TerminalInput.Key(TerminalKey.Up, _)             => moveSelection(-1)
-      case TerminalInput.Key(TerminalKey.Down, _)           => moveSelection(1)
-      case TerminalInput.Key(TerminalKey.Enter, _)          => activateSelected(effects)
-      case TerminalInput.Key(TerminalKey.Character(" "), _) => activateSelected(effects)
-      case TerminalInput.Key(TerminalKey.Escape, _)         =>
+      case _ if ListPaging.delta(input, options.maxVisible).nonEmpty =>
+        moveSelection(ListPaging.delta(input, options.maxVisible).get) match
+          case InputResult.Ignored => InputResult.NoRender
+          case result              => result
+      case TerminalInput.Key(TerminalKey.Up, _)                      => moveSelection(-1)
+      case TerminalInput.Key(TerminalKey.Down, _)                    => moveSelection(1)
+      case TerminalInput.Key(TerminalKey.Enter, _)                   => activateSelected(effects)
+      case TerminalInput.Key(TerminalKey.Character(" "), _)          => activateSelected(effects)
+      case TerminalInput.Key(TerminalKey.Escape, _)                  =>
         val callback = cancelCallback
         effects.add(callback)
         InputResult.Render
@@ -232,7 +236,7 @@ final class SettingsList(
         filterQuery += text
         clampSelection()
         InputResult.Render
-      case _                                                => InputResult.Ignored
+      case _                                                         => InputResult.Ignored
 
   override def render(width: Int): ComponentRender =
     val snapshot = stateBoundary {

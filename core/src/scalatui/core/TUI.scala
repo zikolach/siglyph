@@ -174,6 +174,7 @@ final class TUI(
       OverlayHost:
   private val root                                                      = Container()
   private val lifecycleLock                                             = Object()
+  private var wheelScrollController                                     = scalatui.components.WheelScrollController()
   private val keyboardTerminal                                          = terminal match
     case capable: KittyKeyboardProtocolTerminal => Some(capable)
     case _                                      => None
@@ -287,6 +288,16 @@ final class TUI(
       emitRedrawDiagnostic
     )
   )
+
+  /** Per-runtime wheel policy, applied once before nested remainder routing. */
+  def wheelScrollPolicy: scalatui.components.WheelScrollPolicy =
+    lifecycleLock.synchronized(wheelScrollController.policy)
+
+  /** Replace wheel policy and reset gesture history; default behavior is unchanged. */
+  def wheelScrollPolicy_=(value: scalatui.components.WheelScrollPolicy): Unit =
+    lifecycleLock.synchronized {
+      wheelScrollController = scalatui.components.WheelScrollController(value)
+    }
 
   var handlesControlC: Boolean = true
   var exitsOnEscape: Boolean   = false
@@ -535,6 +546,8 @@ final class TUI(
         reattachRetainedContexts = contextDetachScheduled
         contextDetachScheduled = false
         exitRequested = false
+        wheelScrollController =
+          scalatui.components.WheelScrollController(wheelScrollController.policy)
         runtimeFailure = None
         committedRenderWidth = 0
         committedRenderHeight = 0
@@ -2009,7 +2022,10 @@ final class TUI(
       case MouseWheelDirection.Up   => -1
       case MouseWheelDirection.Down => 1
       case _                        => 0
-    val initial             = unitDelta * (if input.modifiers.alt then 5 else 1)
+    val nowMillis           = options.mouseGestures.clock.nanoTime() / 1000000L
+    val initial             = lifecycleLock.synchronized {
+      wheelScrollController.next(unitDelta, nowMillis, input.modifiers.alt)
+    }
     var remaining           = initial
     var handled             = false
     val targets             = semanticTargetsAt(input.row, input.col)

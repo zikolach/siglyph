@@ -26,8 +26,12 @@ private[components] final class ViewportSelectionDocument private (
     )
   }
 
-  def wordRange(row: Int, column: Int): Option[SelectionCellRange] =
-    rows.lift(row).flatMap(_.wordRange(column))
+  def wordRange(
+      row: Int,
+      column: Int,
+      policy: WordSelectionPolicy = WordSelectionPolicy()
+  ): Option[SelectionCellRange] =
+    rows.lift(row).flatMap(_.wordRange(column, policy))
 
   def selection(anchor: Int, focus: Int): Option[ViewportSelection] =
     val start = math.max(0, math.min(length, math.min(anchor, focus)))
@@ -80,16 +84,17 @@ private[components] object ViewportSelectionDocument:
           .map(i => SelectionCellRange(startOffset + i, startOffset + i + 1))
           .orElse(Option.when(safeColumn >= columns.last)(SelectionCellRange(endOffset, endOffset)))
 
-    def wordRange(column: Int): Option[SelectionCellRange] = cellRange(column)
-      .filter(cell => cell.end > cell.start).map { cell =>
-        val clicked = cell.start - startOffset
-        val kinds   = graphemes.map(wordKind)
-        var from    = clicked
-        var until   = clicked + 1
-        while from > 0 && canJoin(kinds(from - 1), kinds(from)) do from -= 1
-        while until < graphemes.length && canJoin(kinds(until - 1), kinds(until)) do until += 1
-        SelectionCellRange(startOffset + from, startOffset + until)
-      }
+    def wordRange(column: Int, policy: WordSelectionPolicy): Option[SelectionCellRange] =
+      cellRange(column)
+        .filter(cell => cell.end > cell.start).map { cell =>
+          val clicked = cell.start - startOffset
+          val kinds   = graphemes.map(g => wordKind(g, policy))
+          var from    = clicked
+          var until   = clicked + 1
+          while from > 0 && canJoin(kinds(from - 1), kinds(from)) do from -= 1
+          while until < graphemes.length && canJoin(kinds(until - 1), kinds(until)) do until += 1
+          SelectionCellRange(startOffset + from, startOffset + until)
+        }
 
   private enum WordKind:
     case Word, Joiner, Other
@@ -154,8 +159,8 @@ private[components] object ViewportSelectionDocument:
     while iterator.hasNext && !builder.isFull do builder.appendRow(iterator.next())
     builder.result()
 
-  private def wordKind(grapheme: String): WordKind =
-    if grapheme === "/" || grapheme === "-" then WordKind.Joiner
+  private def wordKind(grapheme: String, policy: WordSelectionPolicy): WordKind =
+    if grapheme === "/" || grapheme === "-" || policy.joins(grapheme) then WordKind.Joiner
     else if Unicode.codePoints(grapheme).exists(codePoint =>
         Character.isLetterOrDigit(codePoint) || codePoint === '_'.toInt
       )

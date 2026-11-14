@@ -97,16 +97,18 @@ final class SelectList private (
 
   private def handleNonPasteInput(input: TerminalInput, effects: ComponentEffects): InputResult =
     input match
-      case TerminalInput.Key(TerminalKey.Up, _)     => keyboardSelectionResult(-1, effects)
-      case TerminalInput.Key(TerminalKey.Down, _)   => keyboardSelectionResult(1, effects)
-      case TerminalInput.Key(TerminalKey.Enter, _)  =>
+      case _ if ListPaging.delta(input, options.maxVisible).nonEmpty =>
+        keyboardSelectionResult(ListPaging.delta(input, options.maxVisible).get, effects)
+      case TerminalInput.Key(TerminalKey.Up, _)                      => keyboardSelectionResult(-1, effects)
+      case TerminalInput.Key(TerminalKey.Down, _)                    => keyboardSelectionResult(1, effects)
+      case TerminalInput.Key(TerminalKey.Enter, _)                   =>
         selected match
           case Some(item) =>
             val callback = selectCallback
             effects.add(() => callback(item))
             InputResult.Render
           case None       => InputResult.NoRender
-      case TerminalInput.Key(TerminalKey.Escape, _) =>
+      case TerminalInput.Key(TerminalKey.Escape, _)                  =>
         val callback = cancelCallback
         effects.add(callback)
         InputResult.Render
@@ -119,7 +121,7 @@ final class SelectList private (
             !modifiers.superKey && text.nonEmpty =>
         updateFilter(filterQuery + text, effects)
         InputResult.Render
-      case _                                        => InputResult.Ignored
+      case _                                                         => InputResult.Ignored
 
   private def keyboardSelectionResult(delta: Int, effects: ComponentEffects): InputResult =
     moveSelectionResult(delta, effects) match
