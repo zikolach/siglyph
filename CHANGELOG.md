@@ -12,6 +12,9 @@ and this project uses semantic versioning while it remains pre-1.0.
 - Added consistent list page keys, opt-in runtime wheel policies and grapheme-safe path selection
   policies. Defaults and nested scroll remainder semantics are preserved. See
   [input policies](docs/scroll-input-policies.md).
+- Added optional negotiated OSC 7501 program status and conservative Herdr/Rex/Orca/Alacritty
+  capability hints, preserving existing progress support and override ceilings. See
+  [terminal program status](docs/terminal-program-status.md).
 
 ### Changed
 

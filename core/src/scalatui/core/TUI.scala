@@ -172,6 +172,9 @@ final class TUI(
     private[core] val viewportRoot: Option[Component] = None
 ) extends TUIContext,
       OverlayHost:
+  private val programStatusTerminal                                     = terminal match
+    case capable: scalatui.terminal.TerminalProgramStatusSupport => Some(capable)
+    case _                                                       => None
   private val root                                                      = Container()
   private val lifecycleLock                                             = Object()
   private var wheelScrollController                                     = scalatui.components.WheelScrollController()
@@ -392,6 +395,15 @@ final class TUI(
     }
 
   /**
+   * Queue a negotiated OSC 7501 report through the existing serialized output boundary. False means
+   * unsupported or rejected; true means accepted, not confirmed displayed.
+   */
+  def setTerminalProgramStatus(status: scalatui.terminal.ProgramStatus): Boolean =
+    scheduleControlOutput(programStatusTerminal.exists(_.programStatusSupported)) {
+      terminalServices.write(programStatusTerminal.foreach(_.setProgramStatus(status)))
+    }
+
+  /**
    * Set terminal progress state when the backend supports progress operations.
    *
    * Unsupported terminals return `false`. Active runtimes serialize accepted non-discardable output
@@ -582,6 +594,9 @@ final class TUI(
         ))
         if startupMayContinue then rendererPolicy.start()
         if startupMayContinue then
+          programStatusTerminal.foreach(capable =>
+            terminalServices.write(capable.requestProgramStatus())
+          )
           keyboardTerminal.foreach(capable =>
             terminalServices.write(capable.requestKittyKeyboardProtocol())
           )
@@ -1046,7 +1061,15 @@ final class TUI(
       termination: TerminalRawTermination,
       correlation: TUI.RawCorrelation
   ): TUI.IngressClassification =
-    if termination === TerminalRawTermination.Complete && keyboardTerminal.nonEmpty &&
+    if termination === TerminalRawTermination.Complete &&
+      scalatui.terminal.ProgramStatusProtocol.isReply(data)
+    then
+      TUI.IngressClassification.Publish(
+        TUI.Ingress.ProgramStatusResponse(data, System.currentTimeMillis()),
+        Vector.empty,
+        () => rawCorrelation = None
+      )
+    else if termination === TerminalRawTermination.Complete && keyboardTerminal.nonEmpty &&
       KittyKeyboardProtocol.parseResponse(data).nonEmpty
     then
       TUI.IngressClassification.Publish(
@@ -1135,7 +1158,7 @@ final class TUI(
 
   private def rawReplyEligible(kind: TerminalRawKind): Boolean = kind match
     case TerminalRawKind.Csi => true
-    case TerminalRawKind.Osc => backgroundColorFlight.nonEmpty
+    case TerminalRawKind.Osc => true
     case _                   => false
 
   private def completeFlightLocked[A](
@@ -1294,7 +1317,15 @@ final class TUI(
     drainOwnerMarker.set(false)
 
   private def processIngress(ingress: TUI.Ingress): Unit = ingress match
-    case TUI.Ingress.KeyboardResponse(response, arrivalMillis) =>
+    case TUI.Ingress.ProgramStatusResponse(response, arrivalMillis) =>
+      terminalServices.write {
+        val running = lifecycleLock.synchronized {
+          lifecycleState === TUI.LifecycleState.Running
+        }
+        if running then
+          programStatusTerminal.foreach(_.acceptProgramStatusReply(response, arrivalMillis))
+      }
+    case TUI.Ingress.KeyboardResponse(response, arrivalMillis)      =>
       terminalServices.write {
         val running = lifecycleLock.synchronized {
           lifecycleState === TUI.LifecycleState.Running
@@ -1302,10 +1333,10 @@ final class TUI(
         if running then
           keyboardTerminal.foreach(_.acceptKittyKeyboardProtocolResponse(response, arrivalMillis))
       }
-    case TUI.Ingress.Input(input)                              => handleInput(input)
-    case TUI.Ingress.AppendCompletion(completion)              =>
+    case TUI.Ingress.Input(input)                                   => handleInput(input)
+    case TUI.Ingress.AppendCompletion(completion)                   =>
       processAppendCompletion(completion)
-    case TUI.Ingress.Protocol(completions, notifications)      =>
+    case TUI.Ingress.Protocol(completions, notifications)           =>
       completions.foreach(processQueryCompletion)
       val running = lifecycleLock.synchronized {
         lifecycleState === TUI.LifecycleState.Running
@@ -2525,7 +2556,10 @@ final class TUI(
       )
     if restorationStage === TUI.RestorationStage.BackendStop then
       attempt {
-        terminalServices.write(terminal.stop())
+        terminalServices.write {
+          programStatusTerminal.foreach(_.resetProgramStatus())
+          terminal.stop()
+        }
         restorationStage = TUI.RestorationStage.ScreenExit
       }
     // Each screen has its own keyboard stack. Preserve this screen after backend stop failure.
@@ -2888,6 +2922,7 @@ object TUI:
     case Done
 
   private enum Ingress:
+    case ProgramStatusResponse(response: String, arrivalMillis: Long)
     case KeyboardResponse(response: String, arrivalMillis: Long)
     case Input(input: TerminalInput)
     case AppendCompletion(completion: TUI.AppendCompletion)
