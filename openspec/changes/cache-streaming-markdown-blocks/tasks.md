@@ -13,3 +13,5 @@
 
 Final integrated verification: quality and all-module compilation pass; 2,254 JVM/Native tests plus ten dedicated real-PTY tests pass; strict OpenSpec validation23/23 passes.
 Independent review reproduced callback/cache lock inversion. Immutable render sessions and generation-checked short-lock publication fix it; parser/highlighter invalidation and concurrent-miss tests pass (41 Markdown tests per platform).
+
+CI follow-up: Linux Native exposed a >30-second test timeout because the cache budget fixture also projected roughly two million glyphs. The fixture now retains equally oversized source keys with small rendered output and separately tests oversized output via structural line accounting. Entry/byte eviction and bypass assertions remain; no timeout was increased and no production behavior changed.
