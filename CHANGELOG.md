@@ -7,31 +7,42 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-14
+
 ### Added
 
-- Added typed vertical Kitty image cropping with known source dimensions, nested scroll clipping
+- Added typed vertical Kitty image cropping with declared source dimensions, nested scroll clipping
   and retained-upload reuse. Unknown geometry, horizontal and iTerm2 partial clips remain omitted.
-  See [vertical cropping](docs/kitty-vertical-cropping.md).
-- Added consistent list page keys, opt-in runtime wheel policies and grapheme-safe path selection
-  policies. Defaults and nested scroll remainder semantics are preserved. See
-  [input policies](docs/scroll-input-policies.md).
-- Added optional negotiated OSC 7501 program status and conservative Herdr/Rex/Orca/Alacritty
-  capability hints, preserving existing progress support and override ceilings. See
-  [terminal program status](docs/terminal-program-status.md).
+  Existing control-details extractor arity and full-image wire output are preserved. See
+  [vertical cropping](docs/kitty-vertical-cropping.md). #88
+- Added PageUp/PageDown handling to SelectList and SettingsList, consuming page keys without
+  accidentally scrolling the focused transcript. #85
+- Added opt-in `TUI.wheelScrollPolicy` and grapheme-safe path-selection policies. Default one-row
+  and Alt-five-row scrolling remains unchanged; nested remainders are not accelerated twice. See
+  [input policies](docs/scroll-input-policies.md). #85
+- Added optional negotiated OSC 7501 program status, including working, blocked and completion
+  states, alongside existing OSC 9;4 progress. The base Terminal contract is unchanged. See
+  [terminal program status](docs/terminal-program-status.md). #86
+- Added conservative Herdr/Rex/Orca capability hints and Alacritty detection without TERM_PROGRAM,
+  preserving multiplexer restrictions and session-disabled overrides. #86
 
 ### Changed
 
 - Reused bounded baseline Markdown block output and code highlighting across streaming updates and
-  resize, with generation-safe invalidation and callbacks outside cache locks. See
-  [streaming caches](docs/markdown-streaming-cache.md).
+  resize, with generation-safe invalidation and application callbacks outside cache locks. Parsing
+  remains whole-document; this is not a general rendering-speed guarantee. See
+  [streaming caches](docs/markdown-streaming-cache.md). #84
 
 ### Fixed
 
 - Preserved recognized terminal replies across idle and zero-read gaps without turning delayed
   payloads or BEL into keyboard input; bounded raw chunks, cancellation, resynchronization and
-  explicit EOF behavior remain defined. See [reply framing](docs/terminal-reply-framing.md).
+  explicit EOF behavior remain defined. See [reply framing](docs/terminal-reply-framing.md). #82
 - Painted fullscreen graphics after covered text/erase operations and preserved retained Kitty
-  uploads across full redraws and resize. See [graphics lifecycle](docs/pi-graphics-lifecycle.md).
+  uploads across full redraws and resize. See [graphics lifecycle](docs/pi-graphics-lifecycle.md). #83
+- Attempted backend shutdown independently when program-status cleanup fails, so input and terminal
+  modes can still be restored. Original errors remain primary and explicit retries do not repeat
+  successfully completed backend shutdown. #86
 
 ## [0.10.0] - 2026-11-04
 
@@ -395,7 +406,8 @@ and this project uses semantic versioning while it remains pre-1.0.
 - GitHub Actions CI, jar packaging, GitHub Packages publishing, and GitHub
   release artifacts.
 
-[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/zikolach/siglyph/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/zikolach/siglyph/compare/v0.9.2...v0.10.0
 [0.9.2]: https://github.com/zikolach/siglyph/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/zikolach/siglyph/compare/v0.9.0...v0.9.1

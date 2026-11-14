@@ -16,6 +16,10 @@ Requirements:
 The build header also selects Temurin JDK 21 for Mill and its compile/test/run tasks.
 See [toolchain compatibility](README.md#toolchain-compatibility) for the consumer baseline.
 
+Optional direnv configuration belongs in your local `.envrc`; it and `.direnv/` are ignored.
+Do not commit credentials or machine-specific environment configuration. The tracked build header
+remains the shared Mill/JDK version source.
+
 Useful commands:
 
 ```bash

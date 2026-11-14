@@ -21,4 +21,4 @@ None.
 
 ## Impact
 
-Shared core components, new policy helpers and focused tests; no dependencies, timers, global environment changes, TUI or Editor modifications. Constructors remain source-compatible through trailing default parameters. Existing retention and overscroll contracts remain intact.
+Shared core components, new policy helpers, focused tests and TUI wheel-policy integration; no dependencies, timers, global environment changes or Editor modifications. Constructors remain source-compatible through trailing default parameters. Existing retention and overscroll contracts remain intact.

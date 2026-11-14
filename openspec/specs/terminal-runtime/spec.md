@@ -91,7 +91,7 @@ The library SHALL provide a virtual terminal backend for tests that records writ
 - **THEN** the backend exposes the written escape stream and rendered viewport for assertions
 
 ### Requirement: Buffered terminal input
-The terminal runtime SHALL buffer incomplete raw input framing and emit bounded ordered typed input events without retaining complete paste or raw streams. Built-in backends SHALL measure idle cutoffs from the last pending read: 35 ms for lone Escape and 75 ms for other non-paste framing. A cutoff makes input eligible for flush, not a hard real-time callback guarantee. Stream EOF and zero-length reads flush immediately; active paste has no timeout.
+The runtime SHALL buffer fragmented input as bounded ordered typed events without whole-stream retention. Built-in backends SHALL measure idle cutoffs from the last pending read: 35 ms for lone Escape and 75 ms for other non-paste framing, except recognized delimited replies. Cutoffs indicate flush eligibility, not callback deadlines. EOF SHALL immediately flush pending non-paste input; zero-byte reads SHALL flush only idle-timed framing. Paste SHALL have no idle timeout.
 
 #### Scenario: Split escape sequence
 - **WHEN** a terminal backend receives an arrow-key escape sequence split across multiple read chunks before each applicable idle cutoff
@@ -110,11 +110,11 @@ The terminal runtime SHALL buffer incomplete raw input framing and emit bounded 
 - **THEN** the runtime flushes the incomplete data as bounded raw or best-effort input without blocking future input forever
 
 #### Scenario: Incomplete non-paste cutoff
-- **WHEN** an incomplete CSI, Alt UTF-8, or other non-paste sequence has no new fragment for 75 ms
+- **WHEN** an incomplete CSI, Alt UTF-8, or other idle-timed non-paste sequence has no new fragment for 75 ms
 - **THEN** the runtime becomes eligible to flush exact pending bytes as bounded raw or best-effort input without blocking future input forever
 
 #### Scenario: Fragment restarts the cutoff
-- **WHEN** a continuation fragment arrives before the current cutoff and leaves non-paste framing pending
+- **WHEN** a continuation fragment arrives before the current cutoff and leaves idle-timed non-paste framing pending
 - **THEN** the cutoff is measured anew from that fragment rather than a worker startup phase
 
 #### Scenario: Active paste does not time out
@@ -1303,3 +1303,75 @@ A fullscreen JVM session handling typed Ctrl+C SHALL complete normal shutdown wi
 #### Scenario: Fullscreen JVM Ctrl+C succeeds
 - **WHEN** typed Ctrl+C requests exit and no independent backend failure occurs
 - **THEN** the demo exits successfully after restoring terminal modes, cursor visibility, paste mode and alternate-screen state
+
+### Requirement: Recognized terminal reply framing survives keyboard idle deadlines
+A complete recognized terminal-reply header within the bounded recognition limit SHALL retain delimiter framing across keyboard idle deadlines and zero-byte stream reads. Ordinary Escape, CSI and unrecognized control strings SHALL retain existing idle recovery.
+
+#### Scenario: Delayed color response
+- **WHEN** an OSC11 response is split after its recognized header for longer than75ms
+- **THEN** its suffix and BEL terminator remain raw protocol bytes rather than typed characters or Ctrl+G
+- **AND** a genuine key after the response is delivered normally
+
+### Requirement: Reply framing is bounded and recoverable
+Reply framing SHALL stream bounded raw chunks, mark oversized replies, and preserve framing until termination or explicit recovery. CAN/SUB SHALL abort the reply. A new non-ST escape SHALL be reparsed as input. Explicit flush and clear SHALL recover pending reply state.
+
+#### Scenario: Oversized reply
+- **WHEN** a recognized reply exceeds the typed-sequence limit
+- **THEN** chunks remain bounded and the reply ends with LimitExceeded
+- **AND** its late terminator does not become a keyboard event
+
+#### Scenario: New key sequence interrupts an unterminated reply
+- **WHEN** a new ESC followed by a non-backslash byte arrives inside a recognized reply
+- **THEN** the old reply ends incomplete and the new escape sequence is parsed normally
+
+### Requirement: Optional negotiated root program status
+
+The runtime SHALL expose typed OSC 7501 status through an optional capability without adding abstract methods to Terminal or replacing OSC 9;4 progress. Reports SHALL require a timely positive query echo and unsupported reports SHALL emit nothing.
+
+#### Scenario: Positive and missing negotiation
+- **WHEN** a supporting backend receives a valid echo within its query deadline
+- **THEN** typed status reports are enabled
+- **AND** missing, malformed or expired replies do not enable reports
+
+#### Scenario: Late reply consumption
+- **WHEN** a complete valid OSC 7501 reply arrives after expiration or without capability support
+- **THEN** the runtime consumes it as protocol input without application callback delivery on ingress
+
+### Requirement: Bounded status encoding
+
+The formatter SHALL accept typed states and blocked reasons, omit invalid app identifiers, sanitize controls, and limit messages to 2048 UTF-8 bytes without splitting code points.
+
+#### Scenario: Hostile message
+- **WHEN** a report contains controls, a long multibyte message or invalid app identifier
+- **THEN** controls become spaces, the bounded message is base64 encoded, and invalid identity is omitted
+
+### Requirement: Serialized retryable status cleanup
+
+Status reports SHALL use the existing TUI output boundary. Cleanup SHALL independently attempt status reset and backend shutdown, preserving the first error and suppressing later failures. Failed clears SHALL remain retryable without repeating a successful backend shutdown; screen exit SHALL wait for both obligations.
+
+#### Scenario: Partial report and failed clear
+- **WHEN** report output or cleanup output fails
+- **THEN** restoration preserves the cleanup obligation and original lifecycle failure
+- **AND** successful later cleanup clears the obligation without duplicate clears
+
+#### Scenario: Status clear fails before backend shutdown
+- **WHEN** writing a status clear fails
+- **THEN** backend shutdown is still attempted so input and terminal-mode restoration can proceed
+- **AND** the status error remains primary with later backend failures suppressed
+
+#### Scenario: Only status reset remains
+- **WHEN** backend shutdown succeeds but a failed status-clear obligation remains
+- **THEN** restart is rejected and screen exit is deferred until explicit retry clears status
+- **AND** successful backend shutdown is not repeated
+
+### Requirement: Conservative terminal profile hints
+
+Detection SHALL recognize Herdr, Rex and Alacritty fallback hints, require explicit Orca Kitty advertisement, and preserve multiplexer conservatism and disabled overrides.
+
+#### Scenario: Leaked outer Kitty hint
+- **WHEN** Orca lacks ORCA_IMAGE_PROTOCOL=kitty but inherits KITTY_WINDOW_ID
+- **THEN** image support remains disabled
+
+#### Scenario: Multiplexer profile
+- **WHEN** a recognized terminal profile is inside TMUX or screen
+- **THEN** existing multiplexer image and hyperlink restrictions remain in force
