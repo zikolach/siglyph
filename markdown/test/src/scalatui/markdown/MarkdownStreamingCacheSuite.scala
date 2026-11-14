@@ -157,7 +157,8 @@ class MarkdownStreamingCacheSuite extends munit.FunSuite:
     val highlighter                = new MarkdownCodeHighlighter:
       def highlight(language: Option[String], code: String): Option[Vector[String]] =
         highlights += 1
-        Some(Vector(code))
+        // Retain full source keys, but avoid turning this budget test into a wrapping benchmark.
+        Some(Vector(code.take(8)))
     val renderer                   =
       BasicMarkdownRenderer(options = MarkdownRenderOptions(highlighter = Some(highlighter)))
     def code(index: Int): String   = s"```scala\n$index\n```"
@@ -180,3 +181,18 @@ class MarkdownStreamingCacheSuite extends munit.FunSuite:
     assert(renderer.retainedCacheUsage.forall { (entries, bytes) =>
       entries <= 256 && bytes <= 1024L * 1024L
     })
+
+    var outputCalls = 0
+    val outputHeavy = BasicMarkdownRenderer(options =
+      MarkdownRenderOptions(
+        highlighter = Some(new MarkdownCodeHighlighter:
+          def highlight(language: Option[String], code: String): Option[Vector[String]] =
+            outputCalls += 1
+            // Structural accounting exceeds 1 MiB without projecting a million glyphs.
+            Some(Vector.fill(17000)("")))
+      )
+    )
+    outputHeavy.render("```scala\nsmall\n```", 20)
+    outputHeavy.render("```scala\nsmall\n```", 20)
+    assertEquals(outputCalls, 2)
+    assertEquals(outputHeavy.retainedCacheUsage, Vector((0, 0L), (0, 0L)))
