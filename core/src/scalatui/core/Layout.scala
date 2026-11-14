@@ -900,17 +900,15 @@ object ViewportLayoutEngine:
 
         val paintRowOffset = box.rect.row - resolved.sourceRowOffset
         frame.controls.foreach { placement =>
-          val translatedRow = placement.row + paintRowOffset
-          if translatedRow >= 0 then
-            val translated   = TerminalControlPlacement(
-              translatedRow,
-              placement.column + box.rect.col,
-              placement.control
-            )
-            val viewportClip = ClipRect(0, 0, width, height).intersect(
-              ViewportRect(box.clip.row, box.clip.col, box.clip.width, box.clip.height)
-            )
-            TypedControlClipping.clipPlacement(translated, viewportClip).foreach(controls += _)
+          val viewportClip = ClipRect(0, 0, width, height).intersect(
+            ViewportRect(box.clip.row, box.clip.col, box.clip.width, box.clip.height)
+          )
+          TypedControlClipping.clipTranslatedPlacement(
+            placement,
+            box.rect.row.toLong - resolved.sourceRowOffset.toLong,
+            box.rect.col.toLong,
+            viewportClip
+          ).foreach(controls += _)
         }
         frame.cursorPlacements.foreach { placement =>
           val translatedRow = placement.row + paintRowOffset

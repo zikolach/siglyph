@@ -2,6 +2,7 @@ package scalatui.core
 
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{
+  ImageDimensions,
   TerminalImageProtocol,
   TerminalRenderControl,
   TerminalRenderControlDetails
@@ -41,6 +42,7 @@ private[core] final class FullscreenKittyRetention(options: KittyImageRetentionO
 
   private final case class Entry(
       sourceIdentity: SourceIdentity,
+      sourceDimensions: Option[ImageDimensions],
       width: Int,
       height: Int,
       lastVisibleGeneration: Long,
@@ -75,17 +77,21 @@ private[core] final class FullscreenKittyRetention(options: KittyImageRetentionO
     val transformed = frame.controls.map { placement =>
       placement.control.details match
         case kitty: TerminalRenderControlDetails.KittyImage =>
-          val imageId        = kitty.imageId
-          val sourceIdentity = identify(kitty.payload.value)
-          val matching       = entries.get(imageId).filter(entry =>
-            entry.sourceIdentity === sourceIdentity && entry.width === kitty.widthCells &&
-              entry.height === kitty.heightCells
+          val imageId          = kitty.imageId
+          val sourceIdentity   = identify(kitty.payload.value)
+          val sourceDimensions = placement.control.kittyGeometry.map(_.sourceDimensions)
+          val matching         = entries.get(imageId).filter(entry =>
+            entry.sourceIdentity === sourceIdentity &&
+              entry.sourceDimensions === sourceDimensions &&
+              (sourceDimensions.nonEmpty ||
+                (entry.width === kitty.widthCells && entry.height === kitty.heightCells))
           )
-          val admitted       = matching.orElse {
+          val admitted         = matching.orElse {
             entries.remove(imageId).foreach(_ => upperCleanup += imageId)
             admit(imageId, frameActiveIds, upperCleanup).map(_ =>
               Entry(
                 sourceIdentity,
+                sourceDimensions,
                 kitty.widthCells,
                 kitty.heightCells,
                 generation,
@@ -101,7 +107,8 @@ private[core] final class FullscreenKittyRetention(options: KittyImageRetentionO
               val samePlacement      = previousPlacement.exists(value =>
                 value.row === placement.row && value.column === placement.column &&
                   value.control.width === placement.control.width &&
-                  value.control.rows === placement.control.rows
+                  value.control.rows === placement.control.rows &&
+                  value.control.kittyGeometry === placement.control.kittyGeometry
               )
               // The renderer erases a suffix, including rows below an unchanged anchor.
               val coveredRowsChanged = previous.exists { old =>
@@ -130,7 +137,8 @@ private[core] final class FullscreenKittyRetention(options: KittyImageRetentionO
                   TerminalImageProtocol.placeKittyImage(
                     imageId,
                     kitty.widthCells,
-                    kitty.heightCells
+                    kitty.heightCells,
+                    placement.control.kittyGeometry
                   )
                 )
               else placement

@@ -197,7 +197,9 @@ object TerminalImageProtocol:
         case ImageProtocol.Kitty  =>
           val imageId = options.imageId.getOrElse(allocateImageId())
           ImageRenderResult(
-            encodeKitty(payload, imageId, size.widthCells, size.heightCells),
+            if dimensions.widthPx > 0 && dimensions.heightPx > 0 then
+              encodeKitty(payload, imageId, size.widthCells, size.heightCells, dimensions)
+            else encodeKitty(payload, imageId, size.widthCells, size.heightCells),
             size.widthCells,
             size.heightCells,
             Some(imageId)
@@ -226,6 +228,22 @@ object TerminalImageProtocol:
   ): TerminalRenderControl =
     TerminalRenderControl.kittyImage(payload, imageId, widthCells, heightCells)
 
+  /** Construct a vertically croppable Kitty control from positive declared source dimensions. */
+  def encodeKitty(
+      payload: Base64ImagePayload,
+      imageId: Int,
+      widthCells: Int,
+      heightCells: Int,
+      sourceDimensions: ImageDimensions
+  ): TerminalRenderControl =
+    TerminalRenderControl.kittyImage(
+      payload,
+      imageId,
+      widthCells,
+      heightCells,
+      Some(KittyImageGeometry(sourceDimensions, widthCells, heightCells, 0, heightCells))
+    )
+
   /**
    * Place retained Kitty image data without retaining or retransmitting its payload.
    *
@@ -235,17 +253,17 @@ object TerminalImageProtocol:
   private[scalatui] def placeKittyImage(
       imageId: Int,
       widthCells: Int,
-      heightCells: Int
+      heightCells: Int,
+      geometry: Option[KittyImageGeometry] = None
   ): TerminalRenderControl =
-    TerminalRenderControl.kittyPlacement(imageId, widthCells, heightCells)
+    TerminalRenderControl.kittyPlacement(imageId, widthCells, heightCells, geometry)
 
   /**
    * Validate a visible cell rectangle for one typed image control.
    *
-   * A complete footprint returns the original control. A fully clipped footprint and every partial
-   * Kitty or iTerm2 footprint return `None`. Cell geometry alone cannot validate Kitty source-pixel
-   * cropping, and iTerm2 has no equivalent safe relocation and cleanup contract. This method never
-   * rewrites protocol bytes or returns part of a control.
+   * A complete footprint returns the original control. Vertical Kitty clips require declared source
+   * geometry. Empty, horizontal, unknown-source and iTerm2 partial clips return `None`. Nested
+   * clips use the original pixel scale. This method never rewrites protocol bytes.
    */
   private[scalatui] def clipImage(
       control: TerminalRenderControl,
@@ -260,10 +278,13 @@ object TerminalImageProtocol:
     require(visibleRows >= 0, "Visible image rows must be non-negative")
     require(clippedLeft <= control.width - visibleWidth, "Visible image width exceeds footprint")
     require(clippedTop <= control.rows - visibleRows, "Visible image rows exceed footprint")
-    Option.when(
-      visibleWidth > 0 && visibleRows > 0 && clippedTop === 0 && clippedLeft === 0 &&
-        visibleWidth === control.width && visibleRows === control.rows
-    )(control)
+    if visibleWidth <= 0 || visibleRows <= 0 || clippedLeft > 0 || (visibleWidth !== control.width)
+    then None
+    else if clippedTop === 0 && visibleRows === control.rows then Some(control)
+    else
+      control.kittyGeometry.map { geometry =>
+        TerminalRenderControl.cropKitty(control, geometry.clip(clippedTop, visibleRows))
+      }
 
   /**
    * Construct a typed iTerm2 inline image control with unchanged validated payload text.
