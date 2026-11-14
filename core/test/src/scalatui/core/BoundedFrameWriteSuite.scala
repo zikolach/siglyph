@@ -109,13 +109,11 @@ class BoundedFrameWriteSuite extends munit.FunSuite:
       80
     )
     policy.render(frame, 80, 24, force = true, clear = true, recovery = None)
-    val expected =
-      new java.lang.StringBuilder(TUI.SyncStart + TUI.AutoWrapOff + TUI.AlternateScreenClear)
+    val expected = new java.lang.StringBuilder(TUI.SyncStart + TUI.AutoWrapOff)
     frame.lines.indices.foreach { row =>
-      expected.append(s"\u001b[${row + 1};1H\u001b[2K")
-      if row === 0 then expected.append("\u001b[1;1H").append(encodedImage)
-      expected.append(s"\u001b[${row + 1};1H").append(frame.lines(row))
+      expected.append(s"\u001b[${row + 1};1H\u001b[2K").append(frame.lines(row))
     }
+    expected.append("\u001b[1;1H").append(encodedImage)
     expected.append("\u001b[24;3H").append(TUI.SyncEnd).append(TUI.AutoWrapOn)
     assert(terminal.writes.length > 2)
     assert(terminal.writes.forall(_.length <= 65536))
