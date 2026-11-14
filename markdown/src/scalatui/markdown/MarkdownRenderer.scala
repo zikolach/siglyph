@@ -267,6 +267,24 @@ final class BasicMarkdownRenderer(
     parser: MarkdownParser = BasicMarkdownParser,
     options: MarkdownRenderOptions = MarkdownRenderOptions()
 ) extends MarkdownRenderer:
+  private val blockCache         = new MarkdownReuseCache[(MarkdownBlock, Int)]
+  private val highlightCache     = new MarkdownReuseCache[(Option[String], String)]
+  private var activeCapabilities = options.capabilities
+  private var generation         = 0L
+
+  override def cacheGeneration: Long = synchronized(generation)
+
+  /** Refresh mutable theme/highlighter state without changing the custom renderer contract. */
+  def invalidateCaches(): Unit = synchronized {
+    blockCache.clear()
+    highlightCache.clear()
+    generation += 1
+  }
+
+  private[markdown] def retainedCacheUsage: Vector[(Int, Long)] = synchronized {
+    Vector(blockCache.usage, highlightCache.usage)
+  }
+
   override def render(markdown: String, width: Int): Vector[String] =
     renderWithOptions(markdown, width, options)
 
@@ -284,172 +302,242 @@ final class BasicMarkdownRenderer(
       width: Int,
       renderOptions: MarkdownRenderOptions
   ): Vector[String] =
-    if renderOptions eq options then renderCurrentOptions(markdown, width)
-    else new BasicMarkdownRenderer(parser, renderOptions).render(markdown, width)
+    val token = synchronized {
+      if !activeCapabilities.equals(renderOptions.capabilities) then
+        invalidateCaches()
+        activeCapabilities = renderOptions.capabilities
+      generation
+    }
+    new RenderSession(renderOptions, token).renderCurrentOptions(markdown, width)
 
-  private def renderCurrentOptions(markdown: String, width: Int): Vector[String] =
-    if width <= 0 then Vector.empty
-    else
-      val rendered = parser.parse(markdown) match
-        case Right(blocks) => renderBlocks(blocks, width)
-        case Left(_)       => plainFallback(markdown, width)
-      if rendered.isEmpty && markdown.trim.nonEmpty then plainFallback(markdown, width)
-      else rendered.map(line => Ansi.truncateToWidth(line, width, ""))
-
-  private def renderBlocks(blocks: Vector[MarkdownBlock], width: Int): Vector[String] =
-    blocks.flatMap(renderBlock(_, width)).dropWhile(_.isEmpty).reverse.dropWhile(_.isEmpty).reverse
-
-  private def renderBlock(block: MarkdownBlock, width: Int): Vector[String] = block match
-    case MarkdownBlock.Heading(level, text)              =>
-      wrap(
-        styled(options.theme.heading(level, s"${"#".repeat(level)} ${renderInline(text)}")),
-        width
-      ) :+ ""
-    case MarkdownBlock.Paragraph(text)                   =>
-      wrap(styled(options.theme.paragraph(renderInline(text))), width) :+ ""
-    case MarkdownBlock.CodeBlock(language, text)         =>
-      val header = language.fold("```")(lang => s"```$lang")
-      val body   = options.highlighter
-        .flatMap(_.highlight(language, text))
-        .getOrElse(text.split("\n", -1).toVector)
-        .map(line => styled(options.theme.codeBlockLine(line)))
-      Vector(Ansi.truncateToWidth(styled(options.theme.codeBlockFence(header)), width, "")) ++
-        body.map(line => Ansi.truncateToWidth(line, width, "")) ++
-        Vector(Ansi.truncateToWidth(styled(options.theme.codeBlockFence("```")), width, ""), "")
-    case MarkdownBlock.ListBlock(ordered, items)         =>
-      items.zipWithIndex.flatMap { (item, index) =>
-        val marker = styled(options.theme.listMarker(if ordered then s"${index + 1}. " else "- "))
-        wrapWithPrefix(marker, renderInline(item), width)
-      } :+ ""
-    case MarkdownBlock.DetailedListBlock(ordered, items) =>
-      items.zipWithIndex.flatMap { (item, index) =>
-        val marker = styled(options.theme.listMarker(listMarkerText(ordered, item, index) + " "))
-        val prefix = item.taskMarker match
-          case Some(taskMarker) => marker + styled(options.theme.listMarker(taskMarker + " "))
-          case None             => marker
-        Vector.fill(item.blankLinesBefore)("") ++ wrapWithPrefix(
-          prefix,
-          renderInline(item.text),
-          width
-        )
-      } :+ ""
-    case MarkdownBlock.BlockQuote(text)                  =>
-      text.split("\n", -1).toVector.flatMap(line =>
-        wrapWithPrefix(
-          styled(options.theme.blockQuotePrefix("> ")),
-          styled(options.theme.blockQuoteText(renderInline(line))),
-          width
-        )
-      ) :+ ""
-    case MarkdownBlock.HorizontalRule                    =>
-      Vector(
-        Ansi.truncateToWidth(styled(options.theme.horizontalRule("─".repeat(width))), width, ""),
-        ""
-      )
-    case MarkdownBlock.Table(rows)                       =>
-      rows.map(row =>
-        Ansi.truncateToWidth(
-          styled(options.theme.tableRow(row.map(renderInline).mkString(" | "))),
-          width,
-          ""
-        )
-      ) :+ ""
-
-  private def renderInline(value: String): String =
-    val builder = StringBuilder()
-    var i       = 0
-    while i < value.length do
-      if value.startsWith("`", i) then
-        val end = value.indexOf('`', i + 1)
-        if end > i then
-          builder.append(styled(options.theme.codeSpan(value.substring(i + 1, end))))
-          i = end + 1
-        else
-          builder.append(value.charAt(i))
-          i += 1
-      else if value.startsWith("[", i) then
-        parseLink(value, i) match
-          case Some((label, url, next)) =>
-            builder.append(renderLink(renderInline(label), url))
-            i = next
-          case None                     =>
-            builder.append(value.charAt(i))
-            i += 1
-      else if value.startsWith("**", i) || value.startsWith("__", i) then
-        val marker = value.substring(i, i + 2)
-        val end    = value.indexOf(marker, i + 2)
-        if end > i then
-          builder.append(styled(options.theme.strong(renderInline(value.substring(i + 2, end)))))
-          i = end + 2
-        else
-          builder.append(value.charAt(i))
-          i += 1
-      else if value.startsWith("*", i) || value.startsWith("_", i) then
-        val marker = value.substring(i, i + 1)
-        val end    = value.indexOf(marker, i + 1)
-        if end > i then
-          builder.append(styled(options.theme.emphasis(renderInline(value.substring(i + 1, end)))))
-          i = end + 1
-        else
-          builder.append(value.charAt(i))
-          i += 1
-      else
-        builder.append(value.charAt(i))
-        i += 1
-    builder.result()
-
-  private def parseLink(value: String, offset: Int): Option[(String, String, Int)] =
-    val labelEnd = value.indexOf("](", offset + 1)
-    if labelEnd < 0 then None
-    else
-      val urlEnd = value.indexOf(')', labelEnd + 2)
-      Option.when(urlEnd >= 0) {
-        val label = value.substring(offset + 1, labelEnd)
-        val url   = value.substring(labelEnd + 2, urlEnd)
-        (label, url, urlEnd + 1)
+  private def cached[K](cache: MarkdownReuseCache[K], key: K, token: Long)(
+      compute: => Vector[String]
+  ): Vector[String] =
+    val hit = synchronized {
+      if token === generation then cache.get(key) else None
+    }
+    hit.getOrElse {
+      val lines  = compute
+      val weight = cache.weight(key, lines)
+      synchronized {
+        if token === generation then cache.publish(key, lines, weight)
       }
-
-  private def renderLink(label: String, url: String): String =
-    val safeUrl = stripTerminalControls(url)
-    if options.capabilities.hyperlinks && safeUrl === url then
-      val styledLabel = styled(options.theme.link(label, url))
-      s"\u001b]8;;$url\u0007$styledLabel\u001b]8;;\u0007"
-    else styled(options.theme.linkFallback(label, safeUrl))
-
-  private def stripTerminalControls(value: String): String =
-    value.filterNot(ch => Character.isISOControl(ch))
-
-  private def styled(value: String): String =
-    if value.contains("\u001b[") && !value.endsWith(Ansi.Reset) then value + Ansi.Reset else value
-
-  private def wrap(value: String, width: Int): Vector[String] =
-    Ansi.wrapLogicalLinesWithAnsi(value, width).map(Ansi.truncateToWidth(_, width, ""))
-
-  private def wrapWithPrefix(prefix: String, value: String, width: Int): Vector[String] =
-    val bodyWidth = math.max(1, width - Ansi.visibleWidth(prefix))
-    val wrapped   = wrap(value, bodyWidth)
-    wrapped.zipWithIndex.map { (line, index) =>
-      val actualPrefix = if index === 0 then prefix else " ".repeat(Ansi.visibleWidth(prefix))
-      Ansi.truncateToWidth(actualPrefix + line, width, "")
+      lines
     }
 
-  private def listMarkerText(
-      ordered: Boolean,
-      item: MarkdownBlock.ListItem,
-      index: Int
-  ): String =
-    if options.preserveSourceListMarkers then
-      item.sourceMarker.getOrElse(normalizedListMarker(
-        ordered,
-        index
-      ))
-    else normalizedListMarker(ordered, index)
+  private final class RenderSession(options: MarkdownRenderOptions, token: Long) {
 
-  private def normalizedListMarker(ordered: Boolean, index: Int): String =
-    if ordered then s"${index + 1}." else "-"
+    def renderCurrentOptions(markdown: String, width: Int): Vector[String] =
+      if width <= 0 then Vector.empty
+      else
+        val rendered = parser.parse(markdown) match
+          case Right(blocks) => renderBlocks(blocks, width)
+          case Left(_)       => plainFallback(markdown, width)
+        if rendered.isEmpty && markdown.trim.nonEmpty then plainFallback(markdown, width)
+        else rendered.map(line => Ansi.truncateToWidth(line, width, ""))
 
-  private def plainFallback(markdown: String, width: Int): Vector[String] =
-    Ansi.wrapLogicalLinesWithAnsi(markdown, width).map(Ansi.truncateToWidth(_, width, ""))
+    private def renderBlocks(blocks: Vector[MarkdownBlock], width: Int): Vector[String] =
+      blocks.flatMap { block =>
+        cached(blockCache, (block, width), token)(renderBlock(block, width))
+      }.dropWhile(_.isEmpty).reverse.dropWhile(_.isEmpty).reverse
+
+    private def renderBlock(block: MarkdownBlock, width: Int): Vector[String] = block match
+      case MarkdownBlock.Heading(level, text)              =>
+        wrap(
+          styled(options.theme.heading(level, s"${"#".repeat(level)} ${renderInline(text)}")),
+          width
+        ) :+ ""
+      case MarkdownBlock.Paragraph(text)                   =>
+        wrap(styled(options.theme.paragraph(renderInline(text))), width) :+ ""
+      case MarkdownBlock.CodeBlock(language, text)         =>
+        val header = language.fold("```")(lang => s"```$lang")
+        val body   = cached(highlightCache, (language, text), token) {
+          options.highlighter
+            .flatMap(_.highlight(language, text))
+            .getOrElse(text.split("\n", -1).toVector)
+            .map(line => styled(options.theme.codeBlockLine(line)))
+        }
+        Vector(Ansi.truncateToWidth(styled(options.theme.codeBlockFence(header)), width, "")) ++
+          body.map(line => Ansi.truncateToWidth(line, width, "")) ++
+          Vector(Ansi.truncateToWidth(styled(options.theme.codeBlockFence("```")), width, ""), "")
+      case MarkdownBlock.ListBlock(ordered, items)         =>
+        items.zipWithIndex.flatMap { (item, index) =>
+          val marker = styled(options.theme.listMarker(if ordered then s"${index + 1}. " else "- "))
+          wrapWithPrefix(marker, renderInline(item), width)
+        } :+ ""
+      case MarkdownBlock.DetailedListBlock(ordered, items) =>
+        items.zipWithIndex.flatMap { (item, index) =>
+          val marker = styled(options.theme.listMarker(listMarkerText(ordered, item, index) + " "))
+          val prefix = item.taskMarker match
+            case Some(taskMarker) => marker + styled(options.theme.listMarker(taskMarker + " "))
+            case None             => marker
+          Vector.fill(item.blankLinesBefore)("") ++ wrapWithPrefix(
+            prefix,
+            renderInline(item.text),
+            width
+          )
+        } :+ ""
+      case MarkdownBlock.BlockQuote(text)                  =>
+        text.split("\n", -1).toVector.flatMap(line =>
+          wrapWithPrefix(
+            styled(options.theme.blockQuotePrefix("> ")),
+            styled(options.theme.blockQuoteText(renderInline(line))),
+            width
+          )
+        ) :+ ""
+      case MarkdownBlock.HorizontalRule                    =>
+        Vector(
+          Ansi.truncateToWidth(styled(options.theme.horizontalRule("─".repeat(width))), width, ""),
+          ""
+        )
+      case MarkdownBlock.Table(rows)                       =>
+        rows.map(row =>
+          Ansi.truncateToWidth(
+            styled(options.theme.tableRow(row.map(renderInline).mkString(" | "))),
+            width,
+            ""
+          )
+        ) :+ ""
+
+    private def renderInline(value: String): String =
+      val builder = StringBuilder()
+      var i       = 0
+      while i < value.length do
+        if value.startsWith("`", i) then
+          val end = value.indexOf('`', i + 1)
+          if end > i then
+            builder.append(styled(options.theme.codeSpan(value.substring(i + 1, end))))
+            i = end + 1
+          else
+            builder.append(value.charAt(i))
+            i += 1
+        else if value.startsWith("[", i) then
+          parseLink(value, i) match
+            case Some((label, url, next)) =>
+              builder.append(renderLink(renderInline(label), url))
+              i = next
+            case None                     =>
+              builder.append(value.charAt(i))
+              i += 1
+        else if value.startsWith("**", i) || value.startsWith("__", i) then
+          val marker = value.substring(i, i + 2)
+          val end    = value.indexOf(marker, i + 2)
+          if end > i then
+            builder.append(styled(options.theme.strong(renderInline(value.substring(i + 2, end)))))
+            i = end + 2
+          else
+            builder.append(value.charAt(i))
+            i += 1
+        else if value.startsWith("*", i) || value.startsWith("_", i) then
+          val marker = value.substring(i, i + 1)
+          val end    = value.indexOf(marker, i + 1)
+          if end > i then
+            builder.append(styled(options.theme.emphasis(renderInline(value.substring(
+              i + 1,
+              end
+            )))))
+            i = end + 1
+          else
+            builder.append(value.charAt(i))
+            i += 1
+        else
+          builder.append(value.charAt(i))
+          i += 1
+      builder.result()
+
+    private def parseLink(value: String, offset: Int): Option[(String, String, Int)] =
+      val labelEnd = value.indexOf("](", offset + 1)
+      if labelEnd < 0 then None
+      else
+        val urlEnd = value.indexOf(')', labelEnd + 2)
+        Option.when(urlEnd >= 0) {
+          val label = value.substring(offset + 1, labelEnd)
+          val url   = value.substring(labelEnd + 2, urlEnd)
+          (label, url, urlEnd + 1)
+        }
+
+    private def renderLink(label: String, url: String): String =
+      val safeUrl = stripTerminalControls(url)
+      if options.capabilities.hyperlinks && safeUrl === url then
+        val styledLabel = styled(options.theme.link(label, url))
+        s"\u001b]8;;$url\u0007$styledLabel\u001b]8;;\u0007"
+      else styled(options.theme.linkFallback(label, safeUrl))
+
+    private def stripTerminalControls(value: String): String =
+      value.filterNot(ch => Character.isISOControl(ch))
+
+    private def styled(value: String): String =
+      if value.contains("\u001b[") && !value.endsWith(Ansi.Reset) then value + Ansi.Reset else value
+
+    private def wrap(value: String, width: Int): Vector[String] =
+      Ansi.wrapLogicalLinesWithAnsi(value, width).map(Ansi.truncateToWidth(_, width, ""))
+
+    private def wrapWithPrefix(prefix: String, value: String, width: Int): Vector[String] =
+      val bodyWidth = math.max(1, width - Ansi.visibleWidth(prefix))
+      val wrapped   = wrap(value, bodyWidth)
+      wrapped.zipWithIndex.map { (line, index) =>
+        val actualPrefix = if index === 0 then prefix else " ".repeat(Ansi.visibleWidth(prefix))
+        Ansi.truncateToWidth(actualPrefix + line, width, "")
+      }
+
+    private def listMarkerText(
+        ordered: Boolean,
+        item: MarkdownBlock.ListItem,
+        index: Int
+    ): String =
+      if options.preserveSourceListMarkers then
+        item.sourceMarker.getOrElse(normalizedListMarker(
+          ordered,
+          index
+        ))
+      else normalizedListMarker(ordered, index)
+
+    private def normalizedListMarker(ordered: Boolean, index: Int): String =
+      if ordered then s"${index + 1}." else "-"
+
+    private def plainFallback(markdown: String, width: Int): Vector[String] =
+      Ansi.wrapLogicalLinesWithAnsi(markdown, width).map(Ansi.truncateToWidth(_, width, ""))
+
+  }
+
+/** Deterministic LRU budgets: UTF-16 payload bytes plus structural charges, not heap sizing. */
+private final class MarkdownReuseCache[K]:
+  private val entries    = scala.collection.mutable.LinkedHashMap.empty[K, (Vector[String], Long)]
+  private var bytes      = 0L
+  private val maxEntries = 256
+  private val maxBytes   = 1024L * 1024L
+
+  def usage: (Int, Long) = (entries.size, bytes)
+
+  def clear(): Unit =
+    entries.clear()
+    bytes = 0L
+
+  // The renderer guards lookup/publication; computation and weighing happen outside its monitor.
+  def get(key: K): Option[Vector[String]] =
+    entries.remove(key).map { entry =>
+      entries.put(key, entry)
+      entry._1
+    }
+
+  def weight(key: K, lines: Vector[String]): Long =
+    retainedWeight(key) + retainedWeight(lines)
+
+  def publish(key: K, lines: Vector[String], weight: Long): Unit =
+    // Another miss may have published this key while our caller was computing.
+    if !entries.contains(key) && weight <= maxBytes then
+      while entries.nonEmpty && (entries.size >= maxEntries || bytes + weight > maxBytes) do
+        val oldest = entries.head
+        entries.remove(oldest._1)
+        bytes -= oldest._2._2
+      entries.put(key, (lines, weight))
+      bytes += weight
+
+  private def retainedWeight(value: Any): Long = value match
+    case text: String        => 64L + text.length.toLong * 2L
+    case values: Iterable[?] => 64L + values.iterator.map(retainedWeight).sum
+    case product: Product    => 64L + product.productIterator.map(retainedWeight).sum
+    case _                   => 64L
 
 object BasicMarkdownRenderer:
   val default: BasicMarkdownRenderer = BasicMarkdownRenderer(options =
@@ -475,6 +563,7 @@ final class Markdown(
   override def tuiContext_=(value: Option[TUIContext]): Unit =
     stateBoundary.transitionContext(tuiContext, value) { _ =>
       tuiContext = value
+      invalidateBaseline()
       invalidateLocked()
     }
 
@@ -498,7 +587,14 @@ final class Markdown(
   }
 
   /** Explicitly discard cached output, including output from a stateful custom renderer. */
-  override def invalidate(): Unit = stateBoundary(invalidateLocked())
+  override def invalidate(): Unit = stateBoundary {
+    invalidateBaseline()
+    invalidateLocked()
+  }
+
+  private def invalidateBaseline(): Unit = renderer match
+    case baseline: BasicMarkdownRenderer => baseline.invalidateCaches()
+    case _                               => ()
 
   override def render(width: Int): ComponentRender =
     val (textSnapshot, paddingXSnapshot, paddingYSnapshot, contextSnapshot, token) = stateBoundary {

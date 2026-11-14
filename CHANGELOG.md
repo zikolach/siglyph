@@ -7,6 +7,12 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Changed
+
+- Reused bounded baseline Markdown block output and code highlighting across streaming updates and
+  resize, with generation-safe invalidation and callbacks outside cache locks. See
+  [streaming caches](docs/markdown-streaming-cache.md).
+
 ### Fixed
 
 - Preserved recognized terminal replies across idle and zero-read gaps without turning delayed
