@@ -27,7 +27,7 @@ final class TerminalInputBuffer:
     if hasPendingNonPaste then lastPendingAtNanos = nowNanos
     out.result()
 
-  /** None means complete input or active paste; otherwise time until the idle framing cutoff. */
+  /** None means complete input, paste, or a delimiter-framed reply; otherwise an idle cutoff. */
   private[terminal] def nanosUntilFlush(nowNanos: Long): Option[Long] =
     Option.when(hasPendingNonPaste) {
       val timeout =
@@ -42,10 +42,16 @@ final class TerminalInputBuffer:
 
   private def hasPendingNonPaste: Boolean =
     mode match
-      case Mode.Normal       => candidate.nonEmpty
-      case Mode.Raw(_, _, _) => true
-      case Mode.Paste        => false
+      case Mode.Normal                      => candidate.nonEmpty
+      case Mode.Raw(_, _, _)                => true
+      case Mode.Paste | Mode.Reply(_, _, _) => false
 
+  /** A zero-byte read is not EOF: a recognized reply still owns its delayed terminator. */
+  private[terminal] def flushOnReadTimeout(): Vector[TerminalInput] = mode match
+    case Mode.Reply(_, _, _) => Vector.empty
+    case _                   => flush()
+
+  /** Explicitly end incomplete input, for example at EOF. */
   def flush(): Vector[TerminalInput] =
     val out = Vector.newBuilder[TerminalInput]
     mode match
@@ -54,6 +60,9 @@ final class TerminalInputBuffer:
       case Mode.Normal if candidate.nonEmpty                               =>
         emitRaw(candidate.toArray, kindOf(candidate), TerminalRawTermination.Incomplete, out)
       case Mode.Paste                                                      => ()
+      case Mode.Reply(_, seen, pendingEsc)                                 =>
+        val total = if pendingEsc then appendReplyByte(Esc, seen, out) else seen
+        finishReply(total, TerminalRawTermination.Incomplete, out)
       case Mode.Raw(kind, exceeded, _)                                     =>
         emitRawChunk(candidate.toArray, out)
         out += TerminalInput.RawEnd(if exceeded then TerminalRawTermination.LimitExceeded(false)
@@ -74,6 +83,7 @@ final class TerminalInputBuffer:
     case Mode.Raw(kind, exceeded, previousEsc) =>
       acceptRaw(byte, kind, exceeded, previousEsc, out)
     case Mode.Normal                           => acceptNormal(byte, out)
+    case Mode.Reply(kind, seen, pendingEsc)    => acceptReply(byte, kind, seen, pendingEsc, out)
 
   private def acceptNormal(byte: Byte, out: Builder): Unit =
     if candidate.length === MaxTypedSequenceBytes then
@@ -93,6 +103,13 @@ final class TerminalInputBuffer:
         candidate.clear()
         mode = Mode.Paste
         out += TerminalInput.PasteStart
+      else if TerminalReplyFraming.recognizes(candidate) then
+        val kind = kindOf(candidate)
+        val seen = candidate.length
+        out += TerminalInput.RawStart(kind)
+        emitRawChunk(candidate.toArray, out)
+        candidate.clear()
+        mode = Mode.Reply(kind, seen, pendingEsc = false)
       else if !isPrefixOf(PasteStart, candidate) then
         completeLength(candidate) match
           case Some(length) if length === candidate.length                 =>
@@ -161,6 +178,48 @@ final class TerminalInputBuffer:
       mode = Mode.Normal
     else mode = Mode.Raw(kind, exceeded, previousEsc = byte === Esc)
 
+  /** Hold an ESC until the following byte distinguishes ST from a new input sequence. */
+  private def acceptReply(
+      byte: Byte,
+      kind: TerminalRawKind,
+      seen: Int,
+      pendingEsc: Boolean,
+      out: Builder
+  ): Unit =
+    if (byte === 0x18.toByte) || (byte === 0x1a.toByte) then
+      val prefix = if pendingEsc then appendReplyByte(Esc, seen, out) else seen
+      finishReply(appendReplyByte(byte, prefix, out), TerminalRawTermination.Malformed, out)
+    else if pendingEsc then
+      if byte === '\\'.toByte then
+        val total = appendReplyByte(byte, appendReplyByte(Esc, seen, out), out)
+        finishReply(total, TerminalRawTermination.Complete, out)
+      else
+        finishReply(seen, TerminalRawTermination.Incomplete, out)
+        acceptNormal(Esc, out)
+        accept(byte, out)
+    else if byte === Esc then mode = Mode.Reply(kind, seen, pendingEsc = true)
+    else
+      val total = appendReplyByte(byte, seen, out)
+      if byte === 0x07.toByte then finishReply(total, TerminalRawTermination.Complete, out)
+      else mode = Mode.Reply(kind, total, pendingEsc = false)
+
+  private def appendReplyByte(byte: Byte, seen: Int, out: Builder): Int =
+    candidate += byte
+    if candidate.length === TerminalInputChunk.MaxBytes then
+      emitRawChunk(candidate.toArray, out)
+      candidate.clear()
+    math.min(MaxTypedSequenceBytes + 1, seen + 1)
+
+  private def finishReply(seen: Int, termination: TerminalRawTermination, out: Builder): Unit =
+    emitRawChunk(candidate.toArray, out)
+    candidate.clear()
+    out += TerminalInput.RawEnd(
+      if seen > MaxTypedSequenceBytes then
+        TerminalRawTermination.LimitExceeded(termination === TerminalRawTermination.Complete)
+      else termination
+    )
+    mode = Mode.Normal
+
   private def emitConfirmedPaste(out: Builder): Unit =
     if confirmedPaste.nonEmpty then
       out += TerminalInput.PasteChunk(TerminalInputChunk(confirmedPaste.toArray))
@@ -195,6 +254,7 @@ object TerminalInputBuffer:
   private enum Mode:
     case Normal, Paste
     case Raw(kind: TerminalRawKind, exceeded: Boolean, previousEsc: Boolean)
+    case Reply(kind: TerminalRawKind, seen: Int, pendingEsc: Boolean)
 
   private def startsWith(value: collection.Seq[Byte], prefix: Array[Byte]): Boolean =
     value.length >= prefix.length && prefix.indices.forall(index => value(index) === prefix(index))

@@ -115,7 +115,7 @@ class StreamTerminal(
         if read < 0 then
           flushPending(generation)
           terminateGeneration(generation)
-        else if read === 0 then flushPending(generation)
+        else if read === 0 then parseAndDeliver(generation, inputBuffer.flushOnReadTimeout())
         else
           val chunk = TerminalInputChunk(buffer, 0, read)
           parseAndDeliver(generation, inputBuffer.processAt(chunk, inputTiming.nanoTime()))
