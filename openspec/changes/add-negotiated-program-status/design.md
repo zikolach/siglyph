@@ -19,3 +19,7 @@ There is no protocol request identifier; unsolicited valid echoes during a pendi
 ## Migration Plan
 
 Existing Terminal implementors require no changes. Supporting interactive backends opt in; applications may add typed status calls alongside existing progress calls.
+
+## Review correction: independent restoration obligations
+
+F1 reproduced three failing fault-injection cases: status-clear failure short-circuited the shared write block, leaving zero backend stop calls. TUI now attempts each operation independently through the serialized write boundary. A private StatusReset restoration phase records that backend shutdown succeeded while status remains dirty, so retry does not repeat successful shutdown. Built-in backends may clear status during their own stop; if they succeed, screen exit may complete while the first observed failure is still propagated. Real JVM PTY and Native cleanup tests guard raw-mode/input restoration under a failing status sink.

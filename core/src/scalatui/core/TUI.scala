@@ -690,10 +690,11 @@ final class TUI(
    * Request terminal restoration. An uncontended caller performs cleanup synchronously. A reentrant
    * or concurrent caller marks `Stopping` and returns without waiting; the active startup or drain
    * owner completes single-owner cleanup. Calls during an active restoration attempt coalesce. If
-   * backend stop fails, the runtime retains the current screen and rejects [[start]]. A later
-   * explicit call retries backend stop before screen exit. If only screen exit failed, retry only
-   * screen exit. Retries do not repeat completed teardown or callback batches and do not rethrow
-   * older attempt failures after success. Input and automatic failure handling never retry.
+   * backend stop or status reset fails, the runtime retains the current screen and rejects
+   * [[start]]. A later explicit call retries backend stop before screen exit. If only status reset
+   * or screen exit remains, retry only that phase. Retries do not repeat completed teardown or
+   * callback batches and do not rethrow older attempt failures after success. Input and automatic
+   * failure handling never retry.
    */
   def stop(): Unit = requestStop(retryRestoration = true)
 
@@ -2555,11 +2556,18 @@ final class TUI(
         attempt(terminalServices.write(capable.disableKittyKeyboardProtocol()))
       )
     if restorationStage === TUI.RestorationStage.BackendStop then
+      // A failed status write must not prevent input shutdown or terminal-mode restoration.
+      attempt(terminalServices.write(programStatusTerminal.foreach(_.resetProgramStatus())))
       attempt {
-        terminalServices.write {
-          programStatusTerminal.foreach(_.resetProgramStatus())
-          terminal.stop()
-        }
+        terminalServices.write(terminal.stop())
+        restorationStage = TUI.RestorationStage.StatusReset
+      }
+      if (restorationStage === TUI.RestorationStage.StatusReset) &&
+        !programStatusTerminal.exists(_.programStatusCleanupPending)
+      then restorationStage = TUI.RestorationStage.ScreenExit
+    else if restorationStage === TUI.RestorationStage.StatusReset then
+      attempt {
+        terminalServices.write(programStatusTerminal.foreach(_.resetProgramStatus()))
         restorationStage = TUI.RestorationStage.ScreenExit
       }
     // Each screen has its own keyboard stack. Preserve this screen after backend stop failure.
@@ -2894,7 +2902,7 @@ object TUI:
   ): TUI = new TUI(terminal, options, Some(layoutRoot))
 
   private enum RestorationStage derives CanEqual:
-    case BackendStop, ScreenExit, Complete
+    case BackendStop, StatusReset, ScreenExit, Complete
 
   private enum LifecycleState derives CanEqual:
     case Starting, Running, Stopping, Cleaning, Stopped

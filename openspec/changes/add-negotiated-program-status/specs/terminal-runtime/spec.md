@@ -23,12 +23,22 @@ The formatter SHALL accept typed states and blocked reasons, omit invalid app id
 
 ### Requirement: Serialized retryable status cleanup
 
-Status reports SHALL use the existing TUI output boundary. Cleanup SHALL cancel negotiation and clear possibly written status, retaining failed clear obligations for explicit retry.
+Status reports SHALL use the existing TUI output boundary. Cleanup SHALL independently attempt status reset and backend shutdown, preserving the first error and suppressing later failures. Failed clears SHALL remain retryable without repeating a successful backend shutdown; screen exit SHALL wait for both obligations.
 
 #### Scenario: Partial report and failed clear
 - **WHEN** report output or cleanup output fails
 - **THEN** restoration preserves the cleanup obligation and original lifecycle failure
 - **AND** successful later cleanup clears the obligation without duplicate clears
+
+#### Scenario: Status clear fails before backend shutdown
+- **WHEN** writing a status clear fails
+- **THEN** backend shutdown is still attempted so input and terminal-mode restoration can proceed
+- **AND** the status error remains primary with later backend failures suppressed
+
+#### Scenario: Only status reset remains
+- **WHEN** backend shutdown succeeds but a failed status-clear obligation remains
+- **THEN** restart is rejected and screen exit is deferred until explicit retry clears status
+- **AND** successful backend shutdown is not repeated
 
 ### Requirement: Conservative terminal profile hints
 
