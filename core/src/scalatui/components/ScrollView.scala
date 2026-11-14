@@ -132,7 +132,8 @@ final class ScrollView(
     val maxSelectionUtf8Bytes: Int = ScrollView.MaxRetainedSelectionUtf8Bytes,
     val maxSearchQueryGraphemes: Int = ScrollView.MaxSearchQueryGraphemes,
     val maxSearchQueryUtf8Bytes: Int = ScrollView.MaxSearchQueryUtf8Bytes,
-    val maxSearchMatches: Int = ScrollView.MaxRetainedSearchMatches
+    val maxSearchMatches: Int = ScrollView.MaxRetainedSearchMatches,
+    val wordSelectionPolicy: WordSelectionPolicy = WordSelectionPolicy()
 ) extends Component,
       ContextualComponent,
       ViewportLayoutProvider,
@@ -499,6 +500,17 @@ final class ScrollView(
       wheel(wheelMultiplier(mouse.input.modifiers.alt))
     case _                                           => InputResult.Ignored
 
+  /**
+   * Apply an opt-in controller once to an original wheel event with explicit monotonic time. Route
+   * the returned remainder unchanged to ancestors via handleMouseEvent, not this method.
+   */
+  def handleWheelAt(
+      event: MouseEvent.Wheel,
+      nowMillis: Long,
+      controller: WheelScrollController
+  ): MouseHandlerResult =
+    handleMouseEvent(controller.normalize(event, nowMillis))
+
   override def handleMouseEvent(event: MouseEvent): MouseHandlerResult = event match
     case wheelEvent: MouseEvent.Wheel                                                     =>
       if wheelEvent.lineDelta === 0 then MouseHandlerResult.Ignored
@@ -753,7 +765,7 @@ final class ScrollView(
           case SelectionGranularity.Character =>
             document.cellRange(documentRow, math.max(0, localCol))
           case SelectionGranularity.Word      =>
-            document.wordRange(documentRow, math.max(0, localCol))
+            document.wordRange(documentRow, math.max(0, localCol), wordSelectionPolicy)
           case SelectionGranularity.Line      => document.rowRange(documentRow)
       }
       for
@@ -784,7 +796,7 @@ final class ScrollView(
       val line        = clickCount === 3
       val range       = selectionDocument.flatMap { document =>
         if line then document.rowRange(documentRow)
-        else document.wordRange(documentRow, math.max(0, localCol))
+        else document.wordRange(documentRow, math.max(0, localCol), wordSelectionPolicy)
       }
       range.foreach { value =>
         selectionAnchor = Some(value.start)

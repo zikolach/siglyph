@@ -7,6 +7,12 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Added
+
+- Added consistent list page keys, opt-in runtime wheel policies and grapheme-safe path selection
+  policies. Defaults and nested scroll remainder semantics are preserved. See
+  [input policies](docs/scroll-input-policies.md).
+
 ### Changed
 
 - Reused bounded baseline Markdown block output and code highlighting across streaming updates and
