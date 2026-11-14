@@ -35,7 +35,8 @@ Overlay restoration passed initially. Focused coverage also includes
 `FullscreenViewportSuite` and `TUITypedControlSuite` on JVM and Native.
 Tests inspect deterministic terminal output, not actual emulator pixels.
 
-Pixel-aware partial clipping remains deferred: cell geometry does not establish
-safe source-pixel crops. Existing conservative omission and iTerm2 behavior remain.
+Known-dimension Kitty images now support [typed vertical cropping](kitty-vertical-cropping.md).
+Unknown geometry, horizontal clips and iTerm2 retain conservative omission; partial-overlay
+occlusion cropping remains deferred.
 Normal-screen transcript rendering, capability detection, and TUI dispatch are
 outside this change.

@@ -48,7 +48,9 @@ enum TerminalRenderControlDetails derives CanEqual:
  */
 final class TerminalRenderControl private (
     /** Read-only semantic fields for this control. */
-    val details: TerminalRenderControlDetails
+    val details: TerminalRenderControlDetails,
+    /** Validated declared source geometry, when vertical pixel cropping is supported. */
+    val kittyGeometry: Option[KittyImageGeometry] = None
 ):
   /** Display-cell width occupied by this control; cleanup controls occupy zero columns. */
   val width: Int = details match
@@ -67,10 +69,11 @@ final class TerminalRenderControl private (
     case _: TerminalRenderControlDetails.KittyPlacementCleanup => 1
 
   override def equals(other: Any): Boolean = other match
-    case that: TerminalRenderControl => details === that.details
+    case that: TerminalRenderControl => details === that.details &&
+      kittyGeometry === that.kittyGeometry
     case _                           => false
 
-  override def hashCode(): Int = details.hashCode()
+  override def hashCode(): Int = (details, kittyGeometry).hashCode()
 
   /** Bounded diagnostic text that never includes image payload or filename content. */
   override def toString: String = details match
@@ -97,22 +100,52 @@ object TerminalRenderControl:
       payload: Base64ImagePayload,
       imageId: Int,
       widthCells: Int,
-      heightCells: Int
+      heightCells: Int,
+      geometry: Option[KittyImageGeometry] = None
   ): TerminalRenderControl =
     require(imageId > 0, "Kitty image ID must be positive")
     require(widthCells > 0, "Kitty image width must be positive")
     require(heightCells > 0, "Kitty image rows must be positive")
-    new TerminalRenderControl(Details.KittyImage(payload, imageId, widthCells, heightCells))
+    validateGeometry(geometry, widthCells, heightCells)
+    new TerminalRenderControl(
+      Details.KittyImage(payload, imageId, widthCells, heightCells),
+      geometry
+    )
 
   @static private[terminal] def kittyPlacement(
       imageId: Int,
       widthCells: Int,
-      heightCells: Int
+      heightCells: Int,
+      geometry: Option[KittyImageGeometry] = None
   ): TerminalRenderControl =
     require(imageId > 0, "Kitty image ID must be positive")
     require(widthCells > 0, "Kitty image width must be positive")
     require(heightCells > 0, "Kitty image rows must be positive")
-    new TerminalRenderControl(Details.KittyPlacement(imageId, widthCells, heightCells))
+    validateGeometry(geometry, widthCells, heightCells)
+    new TerminalRenderControl(Details.KittyPlacement(imageId, widthCells, heightCells), geometry)
+
+  private def validateGeometry(geometry: Option[KittyImageGeometry], width: Int, rows: Int): Unit =
+    require(
+      geometry.forall(g => g.fullWidthCells === width && g.visibleRows === rows),
+      "Kitty metadata must match display footprint"
+    )
+
+  private[scalatui] def cropKitty(
+      control: TerminalRenderControl,
+      geometry: KittyImageGeometry
+  ): TerminalRenderControl =
+    control.details match
+      case kitty: Details.KittyImage     =>
+        kittyImage(
+          kitty.payload,
+          kitty.imageId,
+          geometry.fullWidthCells,
+          geometry.visibleRows,
+          Some(geometry)
+        )
+      case kitty: Details.KittyPlacement =>
+        kittyPlacement(kitty.imageId, geometry.fullWidthCells, geometry.visibleRows, Some(geometry))
+      case _                             => throw IllegalArgumentException("Only Kitty controls support source cropping")
 
   @static private[terminal] def iTerm2Image(
       payload: Base64ImagePayload,
@@ -138,7 +171,7 @@ object TerminalRenderControl:
       imageId: Int
   ): TerminalRenderControl = control.details match
     case kitty: Details.KittyImage =>
-      kittyImage(kitty.payload, imageId, kitty.widthCells, kitty.heightCells)
+      kittyImage(kitty.payload, imageId, kitty.widthCells, kitty.heightCells, control.kittyGeometry)
     case _                         =>
       throw IllegalArgumentException("Only Kitty image controls can be remapped")
 
@@ -152,20 +185,28 @@ object TerminalRenderControl:
 
 /** Shared exhaustive raw encoder for core-owned semantic terminal controls. */
 private[scalatui] object TerminalRenderControlEncoder:
-  def encode(control: TerminalRenderControl): String = encodeDetails(control.details)
+  def encode(control: TerminalRenderControl): String =
+    encodeDetails(control.details, control.kittyGeometry)
 
-  private[terminal] def encodeDetails(details: TerminalRenderControlDetails): String =
+  private[terminal] def encodeDetails(
+      details: TerminalRenderControlDetails,
+      geometry: Option[KittyImageGeometry] = None
+  ): String =
+    val crop = geometry.filter(_.isCropped).fold("") { geometry =>
+      val rect = geometry.sourceRect
+      s",x=${rect.x},y=${rect.y},w=${rect.width},h=${rect.height}"
+    }
     details match
       case kitty: TerminalRenderControlDetails.KittyImage              =>
         require(kitty.imageId > 0, "Kitty image ID must be positive")
         require(kitty.widthCells > 0, "Kitty image width must be positive")
         require(kitty.heightCells > 0, "Kitty image rows must be positive")
-        s"\u001b_Ga=T,f=100,i=${kitty.imageId},c=${kitty.widthCells},r=${kitty.heightCells},C=1;${kitty.payload.value}\u001b\\"
+        s"\u001b_Ga=T,f=100,i=${kitty.imageId},c=${kitty.widthCells},r=${kitty.heightCells},C=1$crop;${kitty.payload.value}\u001b\\"
       case kitty: TerminalRenderControlDetails.KittyPlacement          =>
         require(kitty.imageId > 0, "Kitty image ID must be positive")
         require(kitty.widthCells > 0, "Kitty image width must be positive")
         require(kitty.heightCells > 0, "Kitty image rows must be positive")
-        s"\u001b_Ga=p,i=${kitty.imageId},c=${kitty.widthCells},r=${kitty.heightCells},C=1\u001b\\"
+        s"\u001b_Ga=p,i=${kitty.imageId},c=${kitty.widthCells},r=${kitty.heightCells},C=1$crop\u001b\\"
       case iterm: TerminalRenderControlDetails.ITerm2Image             =>
         require(iterm.widthCells > 0, "iTerm2 image width must be positive")
         require(iterm.heightCells > 0, "iTerm2 image rows must be positive")
