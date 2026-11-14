@@ -95,20 +95,29 @@ private[core] final class FullscreenKittyRetention(options: KittyImageRetentionO
           }
           admitted match
             case Some(entry) =>
-              val previousPlacement = previous.toVector.flatMap(_.controls).find(value =>
+              val previousPlacement  = previous.toVector.flatMap(_.controls).find(value =>
                 kittyImageId(value).contains(imageId)
               )
-              val samePlacement     = previousPlacement.exists(value =>
+              val samePlacement      = previousPlacement.exists(value =>
                 value.row === placement.row && value.column === placement.column &&
                   value.control.width === placement.control.width &&
                   value.control.rows === placement.control.rows
               )
-              val reuse             = matching.nonEmpty &&
-                (repaintAll || !samePlacement ||
+              // The renderer erases a suffix, including rows below an unchanged anchor.
+              val coveredRowsChanged = previous.exists { old =>
+                val firstChanged = old.lines.zip(frame.lines).indexWhere { case (before, after) =>
+                  before !== after
+                }
+                firstChanged >= 0 && firstChanged < placement.row + placement.control.rows
+              }
+              val reuse              = matching.nonEmpty &&
+                (repaintAll || coveredRowsChanged || !samePlacement ||
                   previousPlacement.exists(
                     _.control.details.isInstanceOf[TerminalRenderControlDetails.KittyPlacement]
                   ))
-              if reuse && previousPlacement.nonEmpty && (!samePlacement || repaintAll) then
+              if reuse && previousPlacement.nonEmpty &&
+                (!samePlacement || repaintAll || coveredRowsChanged)
+              then
                 lowerCleanup += imageId
               else if repaintAll && previousPlacement.nonEmpty && matching.isEmpty then
                 upperCleanup += imageId
@@ -169,6 +178,9 @@ private[core] final class FullscreenKittyRetention(options: KittyImageRetentionO
     activeIds = Set.empty
 
   private[core] def ownershipCount: Int = (activeIds ++ entries.keySet ++ pendingCleanupIds).size
+
+  // ED2 may release uploads with no placement, including temporarily occluded images.
+  def hasRetainedUploads: Boolean = entries.nonEmpty
 
   private def admit(
       imageId: Int,

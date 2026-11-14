@@ -12,6 +12,8 @@ and this project uses semantic versioning while it remains pre-1.0.
 - Preserved recognized terminal replies across idle and zero-read gaps without turning delayed
   payloads or BEL into keyboard input; bounded raw chunks, cancellation, resynchronization and
   explicit EOF behavior remain defined. See [reply framing](docs/terminal-reply-framing.md).
+- Painted fullscreen graphics after covered text/erase operations and preserved retained Kitty
+  uploads across full redraws and resize. See [graphics lifecycle](docs/pi-graphics-lifecycle.md).
 
 ## [0.10.0] - 2026-11-04
 

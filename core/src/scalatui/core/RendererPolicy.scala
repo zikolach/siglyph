@@ -693,26 +693,31 @@ private[core] final class FullscreenViewportPolicy(
       clearScreen: Boolean,
       cleanup: Vector[TerminalRenderControl]
   ): Unit =
-    val builder       = new FrameOutput().append(TUI.SyncStart).append(TUI.AutoWrapOff)
-    if clearScreen then builder.append(TUI.AlternateScreenClear)
+    val builder          = new FrameOutput().append(TUI.SyncStart).append(TUI.AutoWrapOff)
+    // Per-row EL below clears the viewport without discarding retained Kitty uploads.
+    if clearScreen && !kittyRetention.hasRetainedUploads then
+      builder.append(TUI.AlternateScreenClear)
     cleanup.foreach { control =>
       builder.append(TerminalRenderControlEncoder.encode(control))
       counters.recordControlEncode()
     }
-    val controlsByRow = frame.controls.filter(_.row >= fromRow).groupBy(_.row)
-    var row           = fromRow
+    val affectedControls = frame.controls.filter { placement =>
+      placement.row + placement.control.rows > fromRow
+    }
+    var row              = fromRow
     counters.recordPaintedRows(frame.lines.length - fromRow)
     while row < frame.lines.length do
       appendPosition(builder, row, 0)
       builder.append("\u001b[2K")
-      controlsByRow.getOrElse(row, Vector.empty).foreach { placement =>
-        appendPosition(builder, row, placement.column)
-        builder.append(TerminalRenderControlEncoder.encode(placement.control))
-        counters.recordControlEncode()
-      }
-      appendPosition(builder, row, 0)
+
       builder.append(frame.lines(row))
       row += 1
+    // Paint graphics last: text and EL anywhere in a footprint can erase image cells.
+    affectedControls.foreach { placement =>
+      appendPosition(builder, placement.row, placement.column)
+      builder.append(TerminalRenderControlEncoder.encode(placement.control))
+      counters.recordControlEncode()
+    }
     appendCursor(builder, frame.position)
     builder.append(TUI.SyncEnd).append(TUI.AutoWrapOn)
     autoWrapRestoreNeeded = true
