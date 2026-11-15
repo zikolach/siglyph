@@ -1,5 +1,7 @@
 # TauTUI Test Comparison
 
+> Historical early-MVP comparison. References below to pending Native raw mode, editor, Markdown and overlays describe that milestone, not current gaps. See the [current compatibility matrix](pi-tui-compatibility.md) and [documentation index](README.md).
+
 TauTUI was reviewed as the Node-free porting reference. The first Scala slice ports the same broad seams rather than copying Swift code directly.
 
 ## Tests and features already reflected

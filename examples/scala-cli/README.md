@@ -10,18 +10,20 @@ Run from this repository:
 ./examples/scala-cli/markdown.scala
 ./examples/scala-cli/hello.scala
 ./examples/scala-cli/editor-autocomplete.scala
-./examples/scala-cli/image.scala /path/to/image.png
+./examples/scala-cli/image.scala docs/assets/siglyph-logo.png
 ./examples/scala-cli/alternate-screen-maven.scala
 ./examples/scala-cli/mouse.scala
 ```
 
-After replacing the dependency versions with a released Maven Central version, a script can also run from a raw Gist URL:
+No checkout is needed for the [copy-pastable first application](../../README.md#quickstart). It includes the same published dependencies as `hello.scala`; save it as `hello.scala` and run `scala-cli run hello.scala --jvm 21`.
+
+For Scala Native, follow the [toolchain setup](../../docs/getting-started.md#scala-native), then run:
 
 ```bash
-curl -L -o hello.scala https://gist.githubusercontent.com/zikolach/<gist-id>/raw/hello.scala
-chmod +x hello.scala
-./hello.scala
+scala-cli run examples/scala-cli/hello-native.scala --jvm 21
 ```
+
+Run each example separately; these files have independent entry points and platform directives.
 
 `hello.scala`, `editor-autocomplete.scala`, `image.scala`, `alternate-screen-maven.scala`, and `mouse.scala` require a real macOS/Linux TTY.
 `markdown.scala` is non-interactive and renders to standard output.
@@ -95,5 +97,5 @@ For the image example, include the image module and pass the image path after `-
 ```bash
 scala-cli run --workspace /tmp/siglyph-image-demo \
   examples/scala-cli/image.scala core/src terminalJvm/src image/src -- \
-  /path/to/image.png
+  docs/assets/siglyph-logo.png
 ```

@@ -7,6 +7,12 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Changed
+
+- Reorganized documentation around a runnable quickstart, installation guide and audience-based
+  index, preserving detailed rendering/input reference material and historical release records.
+  Added a published Scala Native hello example and local documentation validation.
+
 ## [0.11.0] - 2026-11-15
 
 ### Added

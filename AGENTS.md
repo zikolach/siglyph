@@ -1,10 +1,10 @@
-# Working on scala-tui
+# Working on siglyph
 
 Internals and conventions for hacking on the library itself, for both
 human contributors and AI assistants. End-user documentation lives in
 the [README](README.md).
 
-`scala-tui` is a Scala 3 terminal UI library inspired by
+`siglyph` is a Scala 3 terminal UI library inspired by
 [`pi-tui`](https://github.com/earendil-works/pi/tree/main/packages/tui). The
 project aims to provide a Node-free, dependency-light TUI for Scala
 applications on the JVM and Scala Native, preserving important `pi-tui`
@@ -17,7 +17,7 @@ Use OpenSpec for feature work. Active and archived change artifacts live under
 ## Project layout
 
 ```
-scala-tui/
+siglyph/
 ├── build.mill
 ├── core/                  # shared component/core/terminal/unicode/ANSI APIs + tests
 ├── coreNative/            # Scala Native module compiling shared core/src via Mill
@@ -57,14 +57,7 @@ reuse them through Mill source-root configuration rather than filesystem symlink
 
 ## Build and test
 
-```bash
-mill __.compile                         # build every module
-mill core.test                          # run core unit tests
-mill core.test.testOnly scalatui.core.TUISuite
-mill scalafmtCheck                      # verify Scalafmt formatting
-mill scalafixCheck                      # verify baseline Scalafix rules
-openspec validate --all --strict        # validate specs and active changes
-```
+Use the canonical [validation checklist](CONTRIBUTING.md#validation) and [focused tests](CONTRIBUTING.md#focused-tests). For documentation-only changes, run the local documentation checks described there.
 
 Build or run demos:
 

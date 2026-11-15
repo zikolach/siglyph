@@ -101,18 +101,18 @@ Do not use raw terminal casts as a video source without rendering them first.
 ## Narration and AI disclosure
 
 1. Draft the narration from verified claims only.
-2. State AI involvement precisely. For example: “OpenAI GPT-5.6 and Codex assisted specification, implementation exploration, code review, and testing.”
+2. Include acknowledgements when relevant or required, based on verified involvement. Do not hard-code provider or model promotion into reusable project copy.
 3. Do not say an AI model built the project unless that claim is literally accurate.
 4. Review the final spoken delivery. Automatic speech recognition can verify coverage, but it cannot verify naturalness, pronunciation, or brand-name delivery.
 5. If using local macOS `say`, select and approve a voice before rendering the final video.
 6. If using a third-party TTS model or service, verify its current license, commercial-use terms, voice-consent requirements, and required attribution before generating the final narration.
 
-For Fish Audio specifically, read the current upstream model license before use. Do not assume a hackathon or public release is non-commercial. At the time this skill was created, the upstream Fish Audio materials used the Fish Audio Research License and required separate permission for commercial use plus attribution for covered distribution. Confirm the current terms and obtain the user’s explicit classification before use.
+Read the current upstream license for any narration model or service before use. A demo or public release is not necessarily non-commercial. Confirm commercial-use permission, attribution obligations and voice consent, and obtain the user’s explicit classification before use.
 
 ## Subtitles and publication text
 
 1. Generate an English SRT file from the final narration timing.
-2. Correct automatic-transcription errors manually against the approved narration source. Brand names such as `Siglyph`, `pi-tui`, `OpenAI`, `GPT-5.6`, and `Codex` must be exact.
+2. Correct automatic-transcription errors manually against the approved narration source. Project names such as `siglyph` and `pi-tui` must be exact.
 3. Validate the SRT with:
 
 ```bash
