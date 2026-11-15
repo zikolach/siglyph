@@ -4,7 +4,7 @@
 - [x] Add keyboard navigation and explicit model-replacement semantics.
 
 ## 2. Integration and validation
-- [ ] Integrate the table into the bounded log explorer without rebuilding IDs on navigation (dependent PR).
+- [x] Integrate the table into the bounded log explorer without rebuilding IDs on navigation.
 - [x] Add shared tests including 100,000-row visible-render counters and reentrancy.
 - [x] Run JVM/Native tests, Native linking and PTY smoke.
 - [x] Validate formatting/lint, OpenSpec and documentation.

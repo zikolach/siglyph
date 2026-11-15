@@ -11,6 +11,7 @@
 
 - [Experimental data table](data-table.md): typed rows, stable selection and visible-range rendering (unreleased).
 
+- [Log explorer discovery prototype](log-explorer.md): bounded generated events, filtering and selection.
 
 - [Normal-screen, fullscreen and scrollback output](screen-modes.md)
 - [Input, editors, autocomplete, optional widgets and terminal helpers](input-and-terminal.md)
