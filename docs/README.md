@@ -9,6 +9,8 @@
 
 ## Recipes
 
+- [Executor scheduling](executor-scheduling.md): bounded one-shot tasks on an explicitly owned executor (unreleased).
+
 - [Virtual-time scheduling](virtual-time.md): cancellable deadlines and bounded test advancement (unreleased).
 
 - [Application update scopes](application-scopes.md): bounded, session-owned update delivery (unreleased).

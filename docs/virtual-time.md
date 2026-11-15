@@ -47,7 +47,7 @@ Construct a clock and pass `clock = Some(clock)` to `TUITestDriver.withSession`.
 
 `driver.pendingScheduledTasks` and `assertNoPendingTasks()` expose unfinished work. A fixture that exits with queued callbacks **fails**, but first cancels them and restores its terminal. Pending-task diagnostics do not replace a primary body/runtime error; independent cleanup errors are suppressed. Explicitly cancel work that a test intentionally leaves outstanding. Factory failure also closes the transferred clock.
 
-A manual scheduler and an ApplicationScope have separate ownership. `clock.schedule(50) { scope.submit { ... } }` guards UI delivery but does **not** bind that timer registration to scope close. An old scope rejects delivery after TUI restart; the caller still owns the scheduled handle. Automatic scope-owned timers and production clock adapters are the next implementation slice.
+A manual scheduler and an ApplicationScope have separate ownership. `clock.schedule(50) { scope.submit { ... } }` guards UI delivery but does **not** bind that timer registration to scope close. An old scope rejects delivery after TUI restart; the caller still owns the scheduled handle. A [borrowed-executor adapter](executor-scheduling.md) now supplies production one-shot scheduling. Automatic scope-owned timers and recurring registration remain the next implementation slice.
 
 ## Verification
 
