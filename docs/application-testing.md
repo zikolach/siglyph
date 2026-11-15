@@ -22,7 +22,7 @@ The [complete example](../examples/scala-cli/testing.scala) imports local `core/
 
 ## Managed fixtures
 
-Use `TUITestDriver.withSession(columns, rows, limits)(create)(body)`. The factory receives a VirtualTerminal and must return an **unstarted TUI built against that terminal**. Returning a TUI transfers cleanup ownership to the fixture, including on contract violations: never return a shared or already-running instance. The driver owns start and stop, including startup/body failures. A primary failure remains primary; an independent cleanup error is suppressed onto it. Stop failure is not silently swallowed.
+Use `TUITestDriver.withSession(columns, rows, limits, clock)(create)(body)`; `clock` is optional and defaults to `None`. The factory receives a VirtualTerminal and must return an **unstarted TUI built against that terminal**. Returning a TUI transfers cleanup ownership to the fixture, including on contract violations: never return a shared or already-running instance. The driver owns start and stop, including startup/body failures. A primary failure remains primary; an independent cleanup error is suppressed onto it. Stop failure is not silently swallowed.
 
 Inside the body:
 
@@ -36,6 +36,14 @@ Inside the body:
 - `close()` explicitly restores the terminal; managed scope exit does this automatically. Later actions are rejected. Failed cleanup may be retried explicitly.
 
 For example, a complete two-row expectation is `ScreenSnapshot(8, 2, Vector("界é", ""))`. Snapshots validate visible width and preserve Unicode text. Assertion failures include dimensions and up to six differing rows, with bounded escaped previews rather than an entire transcript.
+
+## Owned virtual time
+
+Pass `clock = Some(ManualTaskScheduler())` to transfer a manual clock to the fixture. `advanceTimeBy` and `advanceTimeTo` consume one script step and a separate callback budget, flush/observe TUI failures after every callback, and return an explicit `TimeAdvance` result. Check `reachedTarget`; a limited advance may leave due work pending without moving to the requested target.
+
+Use `pendingScheduledTasks` and `assertNoPendingTasks()` for explicit assertions. On fixture exit, pending registrations are atomically cancelled and reported with `PendingScheduledTasksException`; terminal cleanup is still attempted, and earlier failures remain primary. Explicitly cancel intentionally outstanding work before leaving a successful test. A failed factory also releases its transferred clock.
+
+See the [virtual-time guide](virtual-time.md) and its standalone source-checkout example. This clock has no worker or timer and does not wait for unrelated asynchronous work.
 
 ## Ownership and limits
 
@@ -59,7 +67,7 @@ Write history is cleared between actions; only the capped last-action prefix rem
 
 - The helper uses `TUI.start`, not the blocking `TUI.run` loop. Escape/requestExit does not itself make this helper wait for run-loop completion; explicitly close or leave the fixture to assert restoration.
 - `flush()` processes available synchronous work once; it is **not** a global idle barrier. Fixtures must own any external resources and must not assume background work has completed.
-- Virtual time, scheduler advancement, pending-task assertions and late async-result scenarios await the #94 execution contract. The terminal parser's internal clock is not exposed as a public application scheduler.
+- Virtual time, bounded advancement, pending-task diagnostics and late scoped-result tests are supported for the explicitly owned manual clock. Production wall-clock adapters and automatic scope ownership of timers remain pending under #94. The terminal parser's internal clock is not exposed as an application scheduler.
 - Modeled rows do not prove emulator fonts, image pixels, screen-reader accessibility or full protocol conformance. Keep PTY/real-terminal smoke tests separate.
 
 ## Verification
@@ -69,4 +77,4 @@ mill core.test.testOnly scalatui.testing.TUITestDriverSuite
 mill coreNative.test.testOnly scalatui.testing.TUITestDriverSuite
 ```
 
-The shared suite covers deterministic repeated scripts, grapheme typing, fragmented paste, resize/focus, preflight limits, bounded mismatch output, output retention, thread/reentrancy guards, runtime failures and cleanup failure propagation/retry. The log-explorer and generic-table journey tests now use this driver. Log filtering deliberately uses one-byte paste chunks; table Home/End and resize checks use managed snapshots. The log model still owns its cancellation policy, while the driver owns TUI teardown. Low-level tests retain direct VirtualTerminal control where they inspect backend/run semantics. Virtual-time/async scenarios remain deferred.
+The shared suite covers deterministic repeated scripts, grapheme typing, fragmented paste, resize/focus, preflight limits, bounded mismatch output, output retention, thread/reentrancy guards, runtime failures and cleanup failure propagation/retry. The log-explorer and generic-table journey tests now use this driver. Log filtering deliberately uses one-byte paste chunks; table Home/End and resize checks use managed snapshots. The log model still owns its cancellation policy, while the driver owns TUI teardown. Low-level tests retain direct VirtualTerminal control where they inspect backend/run semantics. Virtual-time coverage now includes delayed log inputs, cancelled deadlines and stale scoped results after restart; production timer integration remains pending.

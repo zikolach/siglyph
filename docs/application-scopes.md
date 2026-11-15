@@ -60,4 +60,4 @@ Shared tests cover FIFO, per-scope/shared limits, closed-slot reuse, cancellatio
 
 ## Next slice
 
-Scheduled ticks, injectable clocks, scheduler registration/cancellation, virtual-time driver advancement and automatic log production remain pending under #94/#96/#93. These boundaries are documented before adding an adapter; no timer or effect-runtime dependency is smuggled into this update primitive.
+The [scheduling contract and manual clock](virtual-time.md) now support deterministic deadlines, cancellation and virtual-time driver advancement. Production wall-clock adapters, scope-owned timer registration/cancellation, recurring ticks and automatic log production remain pending under #94/#93. Scheduling a callback that calls `scope.submit` does not yet make that registration scope-owned: cancel its handle explicitly.

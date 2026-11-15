@@ -9,6 +9,8 @@
 
 ## Recipes
 
+- [Virtual-time scheduling](virtual-time.md): cancellable deadlines and bounded test advancement (unreleased).
+
 - [Application update scopes](application-scopes.md): bounded, session-owned update delivery (unreleased).
 
 - [Application testing](application-testing.md): managed typed scripts and screen assertions (unreleased).
