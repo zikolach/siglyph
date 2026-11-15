@@ -67,7 +67,7 @@ Write history is cleared between actions; only the capped last-action prefix rem
 
 - The helper uses `TUI.start`, not the blocking `TUI.run` loop. Escape/requestExit does not itself make this helper wait for run-loop completion; explicitly close or leave the fixture to assert restoration.
 - `flush()` processes available synchronous work once; it is **not** a global idle barrier. Fixtures must own any external resources and must not assume background work has completed.
-- Virtual time, bounded advancement, pending-task diagnostics and late scoped-result tests are supported for the explicitly owned manual clock. Production wall-clock adapters and automatic scope ownership of timers remain pending under #94. The terminal parser's internal clock is not exposed as an application scheduler.
+- Virtual time, bounded advancement, pending-task diagnostics and late scoped-result tests are supported for the explicitly owned manual clock. A [borrowed-executor adapter](executor-scheduling.md) is available for production one-shot tasks; automatic scope ownership of timers remains pending under #94. The terminal parser's internal clock is not exposed as an application scheduler.
 - Modeled rows do not prove emulator fonts, image pixels, screen-reader accessibility or full protocol conformance. Keep PTY/real-terminal smoke tests separate.
 
 ## Verification

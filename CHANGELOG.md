@@ -9,6 +9,8 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ### Added
 
+- Added an experimental borrowed-executor scheduler with bounded admission, cancellation-race
+  handling, explicit asynchronous failure reporting and retryable cancellation obligations.
 - Added experimental scheduling contracts, a bounded manual clock and managed virtual-time
   advancement with pending-task leak diagnostics in application tests.
 - Added experimental session-owned `ApplicationScope` update delivery with explicit admission,
