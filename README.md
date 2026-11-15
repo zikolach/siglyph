@@ -40,17 +40,17 @@ compiler, test, or demo runtime. Scala Native remains **0.5.12**.
 
 Artifacts built from this revision require Scala **3.9.0 or a compatible newer compiler**
 to read their TASTy; Scala 3.7.x consumers must upgrade. JDK 21 is the supported build
-and JVM runtime baseline. Published **0.10.0** artifacts use this compiler baseline; earlier
+and JVM runtime baseline. Published **0.11.0** artifacts use this compiler baseline; earlier
 **0.9.2** artifacts retain their original requirements. Unicode data remains **17.0.0**.
 
 ### SBT
 
 ```scala
 libraryDependencies ++= Seq(
-  "io.github.zikolach" %% "siglyph-core" % "0.10.0",
-  "io.github.zikolach" %% "siglyph-terminal-jvm" % "0.10.0",
-  "io.github.zikolach" %% "siglyph-markdown" % "0.10.0",
-  "io.github.zikolach" %% "siglyph-image" % "0.10.0"
+  "io.github.zikolach" %% "siglyph-core" % "0.11.0",
+  "io.github.zikolach" %% "siglyph-terminal-jvm" % "0.11.0",
+  "io.github.zikolach" %% "siglyph-markdown" % "0.11.0",
+  "io.github.zikolach" %% "siglyph-image" % "0.11.0"
 )
 ```
 
@@ -61,18 +61,18 @@ object app extends ScalaModule {
   def scalaVersion = "3.9.0"
 
   def mvnDeps = Seq(
-    mvn"io.github.zikolach::siglyph-core::0.10.0",
-    mvn"io.github.zikolach::siglyph-terminal-jvm::0.10.0",
-    mvn"io.github.zikolach::siglyph-markdown::0.10.0",
-    mvn"io.github.zikolach::siglyph-image::0.10.0"
+    mvn"io.github.zikolach::siglyph-core::0.11.0",
+    mvn"io.github.zikolach::siglyph-terminal-jvm::0.11.0",
+    mvn"io.github.zikolach::siglyph-markdown::0.11.0",
+    mvn"io.github.zikolach::siglyph-image::0.11.0"
   )
 }
 ```
 
 To include optional `siglyph-extras`, add it to your dependency list:
 
-- **SBT:** `"io.github.zikolach" %% "siglyph-extras" % "0.10.0"`
-- **Mill:** `mvn"io.github.zikolach::siglyph-extras::0.10.0"`
+- **SBT:** `"io.github.zikolach" %% "siglyph-extras" % "0.11.0"`
+- **Mill:** `mvn"io.github.zikolach::siglyph-extras::0.11.0"`
 
 For Scala Native versions that include optional Native artifacts, add these platform-aware Mill coordinates from a `ScalaNativeModule` in addition to `siglyph-core` and `siglyph-terminal-native`:
 

@@ -1,6 +1,6 @@
 # Vertical Kitty image cropping
 
-Unreleased source behavior; published **0.10.0** does not include this extension.
+Available since **0.11.0**; published **0.10.0** does not include this extension.
 
 Images with known positive source dimensions remain visible when their top or bottom crosses a
 scroll viewport. Layout intersects signed translated anchors before constructing non-negative typed

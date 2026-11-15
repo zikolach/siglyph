@@ -1,13 +1,34 @@
-# v0.11.0 release (publication pending)
+# v0.11.0 release
 
-**0.11.0** is the selected next release after **0.10.0**. This is a feature release, not a patch:
+**0.11.0** follows **0.10.0**. This is a feature release, not a patch:
 it adds public image-geometry/cropping helpers, runtime wheel/selection policies and negotiated
 program-status APIs. No new major-version toolchain migration or 1.0 stability claim is proposed.
 
 The [0.11.0 changelog](../CHANGELOG.md#0110---2026-11-15) is finalized for
 **2026-11-15**, with a fresh Unreleased section. The maintainer has explicitly authorized the
-release and its tag push. Publication must still be verified before claiming artifact availability. Keep published dependency examples at **0.10.0**
-and the build fallback at `0.1.0-SNAPSHOT` until publication is explicitly approved and verified.
+release and its tag push. Both publishing workflows and all ten Maven Central coordinates are
+verified. Published dependency examples now use **0.11.0**; the local build fallback remains
+`0.1.0-SNAPSHOT`.
+
+## Publication verification
+
+- [GitHub Release v0.11.0](https://github.com/zikolach/siglyph/releases/tag/v0.11.0) was published
+  on 2026-11-15 from tag commit `351391d65168644bd928cee4bae6143350d4f87d` after merged PRs #89/#90.
+- [Final main CI](https://github.com/zikolach/siglyph/actions/runs/43709691200) passed Linux and
+  macOS. Its first Linux attempt hit a Scala compiler assertion; the unchanged commit passed a
+  failed-job rerun. No compiler/toolchain change or protection bypass was made.
+- [Publish](https://github.com/zikolach/siglyph/actions/runs/43710737799) and
+  [Publish Maven Central](https://github.com/zikolach/siglyph/actions/runs/43710737732) both passed
+  after one authorized tag push. No additional publication dispatch was used.
+- All ten GitHub Release JARs were downloaded and checked against API SHA-256 digests, sizes and
+  ZIP integrity. Native artifacts contain Native IR.
+- All ten Central coordinates resolved anonymously: forty POM/binary/source/Javadoc payloads passed
+  coordinate/version, SHA-1 and ZIP checks; PGP signature files are present. This is not independent
+  cryptographic signer-trust verification.
+- Published JVM and Native consumer programs compiled and ran successfully with all five relevant
+  platform dependencies, exercising crop geometry, wheel policy and program-status APIs.
+- GitHub Packages returned forty successful deployment receipts. Local independent package API
+  enumeration requires read:packages, which the local token does not provide.
 
 ## Scope and compatibility
 
@@ -27,7 +48,7 @@ and the build fallback at `0.1.0-SNAPSHOT` until publication is explicitly appro
 - Markdown parsing remains whole-document. Cache budgets and work-counter tests are not universal
   throughput or heap-size guarantees.
 
-## Evidence and remaining release gates
+## Preparation evidence and release procedure
 
 Preparation baseline: merged main `eb5e75347722ca4b7c008358e377eb42c8b16cb9`. The cropping PR
 passed Linux/macOS CI; implementation validation recorded 2,290 JVM/Native tests plus 11 dedicated
@@ -44,7 +65,7 @@ JVM/Native tests plus 11 dedicated PTY tests**, and local versioned packaging. A
 POMs identify version **0.11.0**; existing nonfatal Scaladoc link/plugin warnings remain. No publishing
 provider was invoked. Runtime/build sources are unchanged from the merged implementation.
 
-Before tagging:
+Release procedure (completed for this release):
 
 1. Review and merge these release-preparation notes and synchronized specifications. Revalidate the
    final canonical specs strictly; confirm no new unreviewed change entered the release scope.
