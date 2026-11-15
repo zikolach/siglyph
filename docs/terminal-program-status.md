@@ -1,6 +1,36 @@
 # Negotiated terminal program status
 
-Inspired by pi-tui `8636e211e7834e4ca46a22aec1d65dfd2eac8677` (`program-status.ts` and its tests). This is not a claim of emulator-wide verification.
+## Try it
+
+Use the [JVM quickstart dependencies](getting-started.md), then run this app in a real terminal. Type a status message and press Enter; Esc or Ctrl+C exits.
+
+<!-- compile-example -->
+```scala
+import scalatui.components.{Input, Text}
+import scalatui.core.TUI
+import scalatui.terminal.{ProgramStatus, ProgramStatusState}
+import scalatui.terminal.jvm.SttyTerminal
+
+@main def statusDemo(): Unit =
+  val tui = TUI(SttyTerminal())
+  val status = Text("Type a status message and press Enter")
+  val input = Input()
+  input.onSubmit = message =>
+    status.text = message // Always provide an on-screen fallback.
+    tui.setTerminalProgramStatus(
+      ProgramStatus(ProgramStatusState.Working, app = Some("demo"), message = message)
+    )
+    input.setValue("")
+  tui.addChild(status)
+  tui.addChild(input)
+  tui.setFocus(input)
+  tui.exitsOnEscape = true
+  tui.run()
+```
+
+Status reporting is best-effort. Negotiation is asynchronous: a call immediately after startup may return false, as it does on unsupported terminals. Reports are not queued; keep the on-screen fallback and report again only when your application has a new update.
+
+## Protocol and lifecycle
 
 `TerminalProgramStatusSupport` is an optional mixin, implemented by SttyTerminal and PosixTerminal. The base Terminal API and OSC 9;4 progress are unchanged. TUI starts a bounded OSC 7501 support query; only a positive echo arriving within 100 ms enables reports. Missing, malformed and expired replies do not enable output. Complete valid late replies are consumed internally even without the optional capability. No application callback runs on ingress, and no executor or timer is added.
 
@@ -10,4 +40,8 @@ States are Idle, Working, Blocked, Done, Error and Clear. Blocked reasons are Pe
 
 Cleanup cancels negotiation and clears a possibly written report. Status reset and backend shutdown are attempted independently: a failed status write cannot skip input shutdown or terminal-mode restoration. The first error remains primary and later errors are suppressed. Failed clear obligations remain available for explicit stop retry; successful backend shutdown is not repeated while only status reset remains. Screen exit and restart wait for completion. Restart requires a fresh handshake. Backend standalone stop also clears.
 
-Herdr takes priority over leaked outer terminal variables and retains conservative true-color hints. Rex enables Kitty images. Orca requires exactly `ORCA_IMAGE_PROTOCOL=kitty` even when outer Kitty variables leak. Alacritty is recognized by TERM_PROGRAM, an alacritty TERM prefix, or ALACRITTY_WINDOW_ID. TMUX/screen conservatism and session hard-disabled overrides remain authoritative. No partial image clipping is introduced.
+Herdr takes priority over leaked outer terminal variables and retains conservative true-color hints. Rex enables Kitty images. Orca requires exactly `ORCA_IMAGE_PROTOCOL=kitty` even when outer Kitty variables leak. Alacritty is recognized by TERM_PROGRAM, an alacritty TERM prefix, or ALACRITTY_WINDOW_ID. TMUX/screen conservatism and session hard-disabled overrides remain authoritative. These status and detection changes do not define image clipping; see [vertical Kitty cropping](kitty-vertical-cropping.md) for the supported image behavior.
+
+## Provenance
+
+Inspired by pi-tui `8636e211e7834e4ca46a22aec1d65dfd2eac8677` (`program-status.ts` and its tests). This is not a claim of emulator-wide verification.

@@ -41,7 +41,7 @@ resolved with POM, binary, sources and Javadoc artifacts. Published dependency e
   dependency or expanded platform/emulator support is claimed.
 - `TUIContext` remains source-compatible and extends the new read-only `RenderServices` interface.
   Existing component implementations do not need to adopt a new attachment API.
-- See [README toolchain compatibility](../README.md#toolchain-compatibility) for the current
+- See [toolchain compatibility](getting-started.md#toolchain-compatibility) for the current
   compiler baseline and [the pinned compatibility matrix](pi-tui-compatibility.md) for upstream scope.
 
 ## Scope

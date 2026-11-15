@@ -1,0 +1,27 @@
+#!/usr/bin/env -S scala-cli shebang
+//> using scala 3.9.0
+//> using platform native
+//> using nativeVersion 0.5.12
+//> using dep io.github.zikolach::siglyph-core::0.11.0
+//> using dep io.github.zikolach::siglyph-terminal-native::0.11.0
+
+import scalatui.components.*
+import scalatui.core.TUI
+import scalatui.terminal.native.PosixTerminal
+
+@main def helloNativeSiglyph(): Unit =
+  val tui    = TUI(PosixTerminal())
+  val status = Text("Type text and press Enter. Esc or Ctrl+C exits.")
+  val input  = Input()
+  input.onSubmit = value =>
+    status.text = s"Last submission: ${if value.trim.isEmpty then "(empty)" else value}"
+    input.setValue("")
+
+  tui.addChild(Text("siglyph Scala CLI demo"))
+  tui.addChild(Spacer(1))
+  tui.addChild(status)
+  tui.addChild(Spacer(1))
+  tui.addChild(input)
+  tui.setFocus(input)
+  tui.exitsOnEscape = true
+  tui.run()

@@ -7,6 +7,9 @@ out/
 target/
 .scala-build/
 
+# Local documentation-check bytecode
+/scripts/__pycache__/
+
 # Mill / BSP / Scala tooling
 .bsp/
 .bloop/

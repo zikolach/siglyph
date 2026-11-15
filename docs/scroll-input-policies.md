@@ -2,6 +2,27 @@
 
 SelectList and SettingsList recognize the existing default SelectPageUp/SelectPageDown commands. Pages move by `max(1, maxVisible)` items, matching Editor autocomplete, clamp to filtered results, and consume even empty/boundary pages. Arrows, filtering and effect ownership are unchanged. TUI focused-first key routing and Editor are unchanged.
 
+## Quickstart
+
+With the [JVM quickstart dependencies](getting-started.md), this app scrolls three rows per wheel step. Run in a real terminal; Esc or Ctrl+C exits.
+
+<!-- compile-example -->
+```scala
+import scalatui.components.{ScrollView, Text, WheelScrollPolicy}
+import scalatui.core.TUI
+import scalatui.terminal.jvm.SttyTerminal
+
+@main def wheelDemo(): Unit =
+  val document = Text((1 to 100).map(n => s"Row $n").mkString("\n"))
+  val view = ScrollView(document, primary = true)
+  val tui = TUI.fullscreen(SttyTerminal(), view)
+  tui.wheelScrollPolicy = WheelScrollPolicy(fixedLines = 3)
+  tui.exitsOnEscape = true
+  tui.run()
+```
+
+Ordinary TUI dispatch owns normalization. Custom dispatchers should follow the normalize-once rules below instead of applying a second controller.
+
 ## Wheel input
 
 Default automatic runtime routing remains one row, or five with Alt. Set `tui.wheelScrollPolicy = WheelScrollPolicy(fixedLines = 3)` or an accelerating policy to configure ordinary terminal input. The runtime samples its existing injected monotonic mouse clock and normalizes once before routing nested remainders; changing policy or starting a new session resets gesture history. `WheelScrollPolicy()` preserves that behavior. `WheelScrollController(WheelScrollPolicy(fixedLines = 3))` opts into a fixed step; `accelerate = true` opts into bounded velocity scaling (default cap six, configuration cap 100, Alt multiplier five).

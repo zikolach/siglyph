@@ -1,13 +1,13 @@
-# Post-MVP Plan
+# Roadmap and completed foundations
 
-The first milestone intentionally stopped at the core renderer, terminal abstraction, virtual terminal, and MVP components (`Text`, `Box`, `Spacer`, `SelectList`, `Input`). The project has since added the main `pi-tui`-style runtime and component behaviors: multiline editing, overlays, loaders, Markdown, image protocol helpers, JVM and Scala Native interactive backends, resize-safe rendering, and hardware cursor marker support.
+The first milestone intentionally stopped at the core renderer, terminal abstraction, virtual terminal, and MVP components (`Text`, `Box`, `Spacer`, `SelectList`, `Input`). The project has since added the main `pi-tui`-style runtime and component behaviors: multiline editing, overlays, loaders, Markdown, image protocol helpers, JVM and Scala Native interactive backends, resize-safe rendering, and typed hardware cursor placement support.
 
 The remaining post-MVP work is tracked as parity hardening rather than foundational bring-up. The
 completed component-surface work and current behavioral gaps are recorded in the version-pinned
 [`pi-tui` compatibility matrix](pi-tui-compatibility.md); completed OpenSpec batches live under
 `openspec/changes/archive/` rather than being listed here as active work.
 
-## Components
+## Completed component foundations
 
 - `TruncatedText`: single-line status/header component with ANSI-safe truncation and padding. Initial implementation is in place.
 - `SettingsList`: selectable setting rows with value cycling, descriptions, scroll indicators, cancellation callbacks, optional containment filtering, optional fuzzy ranking, and application-provided submenus through overlay contracts.
@@ -19,7 +19,7 @@ completed component-surface work and current behavioral gaps are recorded in the
 ## Editor and autocomplete
 
 - `EditorBuffer`: pure text model for multiline editing, grapheme-aware movement, split/merge, delete, paste insertion, large-paste marker compaction, and marker expansion. Initial foundation is in place.
-- Multiline `Editor`: rendered editor with visual wrapping, fake cursor, cursor marker emission, core editing keys, callbacks, configurable submit/newline behavior, undo/kill-ring/yank/yank-pop, autocomplete overlays, and large paste markers. Opt-in runtime hardware cursor positioning is in place.
+- Multiline `Editor`: rendered editor with visual wrapping, fake cursor, typed `CursorPlacement` emission, core editing keys, callbacks, configurable submit/newline behavior, undo/kill-ring/yank/yank-pop, autocomplete overlays, and large paste markers. Opt-in runtime hardware cursor positioning is in place.
 - Autocomplete APIs: slash commands, path/attachment parsing, dependency-free filesystem completion, cancellable provider abstraction, selectable suggestion UI, combined provider contracts, optional fuzzy ranking, debounce/cancellation behavior, and stacked/natural trigger prefixes such as `#` are in place.
 - Paste expansion: visible large-paste markers expand in `onSubmit` and through explicit editor APIs.
 

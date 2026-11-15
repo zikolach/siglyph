@@ -11,16 +11,19 @@ Requirements:
 - JDK 21
 - Mill 1.3.1 (pinned in the build header)
 - Scala 3.9.0 LTS (resolved by Mill)
+- [Native toolchain and system libraries](docs/getting-started.md#scala-native) for all-module compile/test commands
 - `openspec` for spec/change validation when working on user-visible behavior
 
 The build header also selects Temurin JDK 21 for Mill and its compile/test/run tasks.
-See [toolchain compatibility](README.md#toolchain-compatibility) for the consumer baseline.
+See [toolchain compatibility](docs/getting-started.md#toolchain-compatibility) for the consumer baseline.
 
 Optional direnv configuration belongs in your local `.envrc`; it and `.direnv/` are ignored.
 Do not commit credentials or machine-specific environment configuration. The tracked build header
 remains the shared Mill/JDK version source.
 
-Useful commands:
+## Validation
+
+For library code changes, run:
 
 ```bash
 mill __.compile
@@ -30,6 +33,8 @@ mill scalafixCheck
 openspec validate --all --strict
 ```
 
+### Focused tests
+
 Focused tests are usually faster while iterating:
 
 ```bash
@@ -37,6 +42,23 @@ mill core.test
 mill core.test.testOnly scalatui.components.EditorSuite
 mill interactiveDemo.test
 ```
+
+### Documentation checks
+
+Python 3.9+ is sufficient for the offline checks (no added dependencies or GitHub Actions budget):
+
+```bash
+python3 scripts/check-docs.py
+python3 -m unittest discover -s scripts -p 'test_check_docs.py'
+```
+
+When changing examples, also compile the canonical JVM/Native quickstarts and marked guide snippets against published artifacts (requires Scala CLI, JDK 21 and dependency downloads):
+
+```bash
+python3 scripts/check-docs.py --compile
+```
+
+The [checker](scripts/check-docs.py) and its [regression tests](scripts/test_check_docs.py) validate local Markdown targets/anchors, primary installation versions and placeholders, and the README's canonical example. Keep the README block synchronized with `examples/scala-cli/hello.scala`; mark additional standalone Scala recipes with `<!-- compile-example -->` before their code fence. Compilation does not verify real-terminal appearance; use the [interactive smoke checklist](docs/interactive-smoke.md) when behavior changes. Historical release records are not forced to the latest version.
 
 ## Contribution workflow
 
@@ -57,20 +79,7 @@ mill interactiveDemo.test
 
 ## Pull requests
 
-Before opening a pull request, run at least:
-
-```bash
-mill __.compile
-mill __.test
-```
-
-If the change affects formatting, linting, or OpenSpec artifacts, also run:
-
-```bash
-mill scalafmtCheck
-mill scalafixCheck
-openspec validate --all --strict
-```
+Use the [validation checklist](#validation) appropriate to your change. Record commands and any verification gaps in the PR description. Documentation-only changes do not require rerunning the full library suite.
 
 ## License
 

@@ -6,6 +6,16 @@ Images with known positive source dimensions remain visible when their top or bo
 scroll viewport. Layout intersects signed translated anchors before constructing non-negative typed
 placements, so an image anchored above the viewport can still contribute its visible rows.
 
+## Try it
+
+From a checkout, the [complete image example](../examples/scala-cli/image.scala) loads the project logo and chooses a supported terminal protocol or text fallback. Replace the filename with your own image if desired:
+
+```bash
+scala-cli run examples/scala-cli/image.scala -- docs/assets/siglyph-logo.png
+```
+
+For fullscreen scrolling, place that Image component inside a ScrollView as described in [screen modes](screen-modes.md#height-aware-fullscreen). Known image dimensions enable vertical Kitty cropping automatically; there is no separate crop toggle. Other clipping limits are listed below.
+
 ## Metadata and compatible helpers
 
 `TerminalRenderControl.kittyGeometry` exposes optional immutable `KittyImageGeometry`. It records
@@ -21,11 +31,22 @@ attach positive dimensions already supplied to them. Invalid legacy dimensions r
 behavior. `ImageSource` obtains dimensions from supported file headers; core does not decode or
 verify that arbitrary caller-supplied dimensions match payload contents.
 
+For custom controls, load validated source metadata before encoding (requires the optional `siglyph-image` dependency):
+
+<!-- compile-example -->
 ```scala
-val control = TerminalImageProtocol.encodeKitty(
-  source.payload, imageId = 42, widthCells = 20, heightCells = 40,
-  sourceDimensions = source.dimensions
-)
+import java.nio.file.Paths
+import scalatui.image.ImageSource
+import scalatui.terminal.{TerminalImageProtocol, TerminalRenderControl}
+
+def imageControl(path: String): TerminalRenderControl =
+  val source = ImageSource.fromFile(Paths.get(path)) match
+    case Right(value) => value
+    case Left(error) => throw IllegalArgumentException(error.message)
+  TerminalImageProtocol.encodeKitty(
+    source.payload, imageId = 42, widthCells = 20, heightCells = 40,
+    sourceDimensions = source.dimensions
+  )
 ```
 
 ## Clipping and retention

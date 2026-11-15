@@ -1,4 +1,6 @@
-# v0.9.1 release execution (publication pending)
+# v0.9.1 release preparation (historical record)
+
+> This records preparation-time state, not current publication status. Use [Getting started](getting-started.md) for current published artifacts; subsequent release evidence is in the [0.11.0 release record](release-v0.11.0.md).
 
 The patch release after `v0.9.0` (2026-09-06) was authorized for 2026-10-13. Its finalized
 [0.9.1 changelog section](../CHANGELOG.md#091---2026-10-13) covers merged PRs #63–#66.
