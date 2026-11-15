@@ -47,6 +47,10 @@ final class TUITestDriver private (
 
   private def admit(count: Int): Unit =
     checkOwner()
+    if !closing && !closed && !failed then
+      try tui.rethrowRuntimeFailure()
+      catch
+        case error: Throwable => failed = true; throw error
     if closing || closed || failed || !terminal.isRunning then
       throw new IllegalStateException("test driver session is closed, failed or not running")
     if count > limits.maxSteps - used then

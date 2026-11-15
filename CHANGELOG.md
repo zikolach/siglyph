@@ -9,6 +9,8 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ### Added
 
+- Added experimental session-owned `ApplicationScope` update delivery with explicit admission,
+  bounded pending work, cooperative closure and stale-result rejection across TUI restart.
 - Added an experimental framework-independent `TUITestDriver` for managed synchronous application
   tests, bounded typed scripts, fragmented paste and screen assertions on JVM/Native.
 - Added experimental `TableData`, `TableColumn` and `DataTable` components with stable row identity,

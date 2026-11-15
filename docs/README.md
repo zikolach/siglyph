@@ -9,6 +9,8 @@
 
 ## Recipes
 
+- [Application update scopes](application-scopes.md): bounded, session-owned update delivery (unreleased).
+
 - [Application testing](application-testing.md): managed typed scripts and screen assertions (unreleased).
 
 - [Experimental data table](data-table.md): typed rows, stable selection and visible-range rendering (unreleased).
