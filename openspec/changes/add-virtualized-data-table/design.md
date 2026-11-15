@@ -1,0 +1,20 @@
+## Placement and scope
+DataTable belongs in shared core components alongside SelectList and ScrollView: it supplies generic typed input/render behavior and depends only on existing core APIs. Keep log records, filtering/sorting and ingestion in applications. This advances #95 independently of #94; asynchronous file integration remains deferred.
+
+## Model contract
+TableData[A] snapshots a Vector[A] and application-supplied stable String IDs, validates non-null unique IDs, and builds an index once outside the component state boundary. Rows must be immutable; model replacement is explicit. String IDs avoid invoking user-defined hash/equality implementations inside component state locks. Construction and application sorting/filtering are O(n) or greater and not part of the visible-row rendering claim.
+
+DataTable owns a monotonically updated revision and selected row index. Replacing data preserves the selected ID when present; otherwise it clamps the old index to the new dataset (or selects the first row after an empty dataset). Empty data has no selected row. SelectIndex clamps; selecting an unknown ID is a no-op. Data replacement publishes the selected row even when its ID is unchanged, so detail panes receive updated content. Navigation at a bound consumes the key without a duplicate change callback.
+
+## Rendering
+The first document row is a non-sticky header. Every record occupies one display row. One through 64 immutable columns have positive preferred widths. Two cells are reserved for selection/focus markers; remaining width is allocated left-to-right, with one separator cell between visible columns. Oversized columns clip, hidden columns are not formatted, and unused width is padded. Cells use existing ANSI/grapheme slicing so controls remain subject to the normal trusted-output boundary and cell styles/hyperlinks are closed before the next cell.
+
+contentExtent is O(1). renderRange snapshots component state and invokes only visible column formatters for requested data rows after releasing its lock. Width <= 0 or count <= 0 produces no rows; negative start clamps to zero, oversized requests clip with overflow-safe arithmetic. There is no render cache or overscan (zero retained formatted rows). render(width) remains the full-document compatibility path and is not appropriate for large tables; use ScrollView/fullscreen range rendering. Cell string processing costs depend on cell text length. Search/selection may intentionally scan bounded additional ranges.
+
+## State and effects
+Use ComponentStateBoundary for focus, selection and data mutation. Capture callbacks and request-render effects during the transition and dispatch through the existing coordinator. Formatters and callbacks never run under the component boundary. Up/Down, PageUp/PageDown (configurable positive page size), Home/End operate only when focused with unmodified press/repeat events; releases are ignored. No scheduler is added.
+
+Scroll ownership remains explicit: callers use ScrollView and reveal selected rows (document index = selected index + 1), invalidate search documents on data replacement, and choose follow-latest policy. The log explorer retains its domain policy (oldest matching row after eviction and filter reset), projects TableData only when rows change, and supplies selection explicitly. It must not rebuild an O(n) ID index for each arrow-key move.
+
+## Validation and non-goals
+Shared tests cover identity, callbacks/reentrancy, empty data, Unicode, ANSI/control safety, sizing, keyboard behavior and viewport geometry. A 100,000-row dataset with counting formatters proves only visible rows are formatted; model memory is O(n), render snapshot/output O(requested rows * visible columns). No machine-time thresholds. Fullscreen JVM/Native examples and PTY smoke verify integration separately from pixel appearance. Sticky headers, built-in sorting/filtering, column dragging, trees, editing, public theme tokens and automatic parent scrolling remain future work.

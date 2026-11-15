@@ -7,6 +7,12 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Added
+
+- Added experimental `TableData`, `TableColumn` and `DataTable` components with stable row identity,
+  visible-range formatting, keyboard selection and shared JVM/Native coverage.
+  `--table` launches a standalone 100,000-row example.
+
 ### Changed
 
 - Reorganized documentation around a runnable quickstart, installation guide and audience-based
