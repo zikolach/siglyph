@@ -51,7 +51,7 @@ Default `TUITestLimits`:
 | Dimension ceiling | 10,000 per axis |
 | Last-action output | 4,096 UTF-16 units |
 
-Each typed event, resize or explicit flush consumes one step. A text/paste batch checks its entire input and step budget **before delivering its first event**. Invalid geometry likewise fails before delivery. A failed admitted action rejects subsequent actions but still permits inspection/cleanup.
+Each typed event, resize or explicit flush consumes one step. A text/paste batch checks its entire input and step budget **before delivering its first event**. Invalid geometry likewise fails before delivery. A failed admitted action rejects subsequent actions but still permits inspection/cleanup. Recorded failures from direct runtime/update-scope work are surfaced before a generic inactive-session error on the next action.
 
 Write history is cleared between actions; only the capped last-action prefix remains. These are limits on the driver, **not a sandbox**: application callbacks can block or allocate arbitrary data, and one application call can produce more output before it returns. No timeout thread, forced interruption or hidden sleep is introduced.
 

@@ -1,7 +1,9 @@
 package scalatui.core
 
 import scalatui.ansi.Ansi
-import scalatui.components.{ComponentEffectCoordinator, ScrollView, ViewportSearchState}
+import scalatui.components.{
+  ComponentEffectAdmissionException, ComponentEffectCoordinator, ScrollView, ViewportSearchState
+}
 import scalatui.syntax.Equality.*
 import scalatui.syntax.Containment.*
 import scalatui.terminal.{
@@ -245,6 +247,7 @@ final class TUI(
       () => drainOrReturn(deferRender = true),
       error => recordFailure(error)
     )
+  private val applicationScopes                                                               = scala.collection.mutable.HashSet.empty[ApplicationScope.State]
   private var nextOverlayId                                                                   = 0L
   private var nextFocusOrder                                                                  = 0L
   private def backgroundColorFlight                                                           = queryCoordinator.backgroundColorFlight
@@ -1660,6 +1663,95 @@ final class TUI(
           else drainOrReturn()
           true
 
+  /**
+   * Open an experimental update scope for this running session. At most 64 may be open; each has a
+   * separate pending cap in addition to the existing shared effect-queue cap. Old handles never
+   * reopen.
+   */
+  def openApplicationScope(maxPending: Int = 256): ApplicationScope = lifecycleLock.synchronized {
+    require(maxPending >= 1 && maxPending <= 4096, "maxPending must be 1..4096")
+    require(
+      lifecycleState === TUI.LifecycleState.Running,
+      "application scopes require a running TUI"
+    )
+    require(applicationScopes.size < 64, "at most 64 application scopes may be open")
+    val state = new ApplicationScope.State(maxPending)
+    applicationScopes.add(state)
+    new ApplicationScope(this, state)
+  }
+
+  private[core] def inspectApplicationScope(state: ApplicationScope.State)
+      : (Boolean, Boolean, Int) =
+    lifecycleLock.synchronized((
+      !state.open,
+      !state.open && state.executing.isEmpty,
+      state.pending.size
+    ))
+
+  private[core] def submitApplicationUpdate(
+      state: ApplicationScope.State,
+      update: () => Unit
+  ): ApplicationSubmission =
+    val publication = lifecycleLock.synchronized {
+      if !state.open || (lifecycleState !== TUI.LifecycleState.Running) then
+        ApplicationSubmission.Closed -> Option.empty[ComponentEffectCoordinator.Admission[Unit]]
+      else if state.pending.size >= state.capacity then
+        ApplicationSubmission.Full -> Option.empty[ComponentEffectCoordinator.Admission[Unit]]
+      else
+        val pending = new ApplicationScope.Pending(Some(update))
+        try
+          val admission = componentEffectCoordinator.admit { effects =>
+            state.pending.add(pending)
+            effects.add(() => runApplicationUpdate(state, pending))
+          }
+          ApplicationSubmission.Accepted -> Some(admission)
+        catch
+          case _: ComponentEffectAdmissionException =>
+            ApplicationSubmission.Full -> Option.empty[ComponentEffectCoordinator.Admission[Unit]]
+    }
+    publication._2.foreach { admission =>
+      componentEffectCoordinator.dispatch(admission)
+      flushRender()
+    }
+    publication._1
+
+  private def runApplicationUpdate(
+      state: ApplicationScope.State,
+      pending: ApplicationScope.Pending
+  ): Unit =
+    val action = lifecycleLock.synchronized {
+      state.pending.remove(pending)
+      val callback = if state.open && (lifecycleState === TUI.LifecycleState.Running) then
+        pending.action
+      else None
+      pending.action = None
+      if callback.nonEmpty then state.executing = Some(Thread.currentThread())
+      callback
+    }
+    action.foreach { callback =>
+      try
+        callback()
+        requestRender()
+      finally
+        lifecycleLock.synchronized {
+          state.executing = None
+          lifecycleLock.notifyAll()
+        }
+    }
+
+  private def invalidateApplicationScopeLocked(state: ApplicationScope.State): Unit =
+    state.pending.foreach(_.action = None)
+    state.pending.clear()
+    applicationScopes.remove(state)
+    state.cancelled.countDown()
+
+  private[core] def closeApplicationScope(state: ApplicationScope.State): Unit =
+    lifecycleLock.synchronized {
+      invalidateApplicationScopeLocked(state)
+      while state.executing.exists(thread => thread ne Thread.currentThread()) do
+        lifecycleLock.wait()
+    }
+
   private def publishAction(action: () => Unit): Unit =
     val publication = lifecycleLock.synchronized {
       lifecycleState match
@@ -1833,6 +1925,7 @@ final class TUI(
     lifecycleLock.notifyAll()
 
   private def transitionToStoppingLocked(): Unit =
+    applicationScopes.toVector.foreach(invalidateApplicationScopeLocked)
     componentEffectCoordinator.closeGeneration()
     lifecycleState = TUI.LifecycleState.Stopping
     mouseCapture = None

@@ -2,7 +2,7 @@
 
 Small single-file demos intended for `scala-cli`.
 
-The released examples use Maven Central `0.11.0` artifacts. Exception: [testing.scala](testing.scala) exercises the unreleased application-test driver against local `core/src` and requires a source checkout; see [application testing](../../docs/application-testing.md).
+The released examples use Maven Central `0.11.0` artifacts. Exceptions: [testing.scala](testing.scala) and [application-scope.scala](application-scope.scala) exercise unreleased APIs against local `core/src` and require a source checkout; see [application testing](../../docs/application-testing.md) and [update scopes](../../docs/application-scopes.md).
 
 Run from this repository:
 
