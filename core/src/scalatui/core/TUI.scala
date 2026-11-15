@@ -739,6 +739,12 @@ final class TUI(
   override def flushRender(): Unit = drainOrReturn()
 
   /**
+   * Surface the recorded failure to synchronous internal fixtures without entering run's wait loop.
+   */
+  private[scalatui] def rethrowRuntimeFailure(): Unit =
+    lifecycleLock.synchronized(runtimeFailure).foreach(throw _)
+
+  /**
    * Append one detached component above the retained normal-screen frame.
    *
    * Admission requires a running normal-screen TUI configured with

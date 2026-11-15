@@ -1,0 +1,18 @@
+## Placement and boundaries
+Use `scalatui.testing` in shared core: VirtualTerminal is already available there, and the helper requires no framework dependency. This is the synchronous foundation of #96, not the complete issue. Scheduling/virtual time awaits #94; fixtures must not start unmanaged workers. Factory callbacks return an unstarted TUI using the supplied VirtualTerminal. The driver starts it without a blocking TUI.run loop and always attempts stop on exit.
+
+## Script semantics
+Each typed event, resize or explicit flush consumes one step. Text produces one Character event per grapheme; paste produces start, bounded UTF-8 chunks and end. Validate complete text/paste requests and reserve sufficient remaining step budget before delivering any event. Text rejects control characters; use explicit keys or paste instead. Byte-chunk paste may split UTF-8 intentionally so the application's decoder is exercised.
+
+Default limits: 10,000 steps, 65,536 input bytes, 1,000,000 viewport cells, 10,000 cells per dimension, 4,096 retained UTF-16 units per output slot (last action and cleanup). Geometry/input limits are checked before allocation or delivery. App-supplied callbacks and cell content remain application-owned; this is not a memory or execution sandbox. A single call into arbitrary application code can block; no background timeout thread or forced cancellation is introduced.
+
+The driver is single-owner-thread and non-reentrant. Each action drains currently available TUI work once via flushRender; it does not claim global asynchronous quiescence. A failed action poisons further actions but permits inspection and close. Escape/requestExit does not simulate the blocking run loop: managed teardown or explicit close performs restoration.
+
+## Recording and assertions
+VirtualTerminal's write buffer is cleared before/after each driver action. Retain only a capped prefix of that action's writes and a truncation flag for opt-in protocol assertions. Cleanup uses a separate capped slot so it cannot overwrite failing-action diagnostics. This bounds retained history across a script, not arbitrary output produced inside one application call. Screen snapshots are immutable, include columns/rows and preserve wide/grapheme text. Expected screen rows are plain text and compare with trailing ASCII blanks normalized to VirtualTerminal's screenLines behavior. Diagnostics show geometry and at most six differing rows, with capped escaped line previews; no full terminal transcript is embedded in failures.
+
+## Ownership and failure
+The fixture owns start/stop even if startup or the body fails. A package-private TUI failure-observation method surfaces recorded callback/render failures without entering the blocking run loop; the driver checks it after each action and on cleanup for previously unobserved failures. Preserve the original failure and suppress an independent cleanup failure. Close is idempotent after success; failed cleanup may be retried explicitly, with further input rejected. If stop returns while the backend remains running, report incomplete cleanup instead of silently claiming completion. Factories must not create resources outside the returned TUI without their own ownership rules. No virtual-time clock, ingress-clock exposure or new timer adapter is added in this slice.
+
+## Validation
+Shared JVM/Native tests cover text/graphemes, fragmented paste, resize and focus changes, geometry/step/input limits, snapshots/diffs, capped output, action failure and cleanup. Existing runtime tests remain authoritative for terminal restoration and protocol semantics. Follow with a separate PR migrating log/table journeys, retaining real-terminal PTY checks independently.

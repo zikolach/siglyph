@@ -9,6 +9,8 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ### Added
 
+- Added an experimental framework-independent `TUITestDriver` for managed synchronous application
+  tests, bounded typed scripts, fragmented paste and screen assertions on JVM/Native.
 - Added experimental `TableData`, `TableColumn` and `DataTable` components with stable row identity,
   visible-range formatting, keyboard selection and shared JVM/Native coverage. The log explorer now
   uses the table, and `--table` launches a standalone 100,000-row example.
