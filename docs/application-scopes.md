@@ -60,4 +60,4 @@ Shared tests cover FIFO, per-scope/shared limits, closed-slot reuse, cancellatio
 
 ## Next slice
 
-The [scheduling contract and manual clock](virtual-time.md) now support deterministic deadlines, cancellation and virtual-time driver advancement. The [borrowed-executor adapter](executor-scheduling.md) supplies production one-shot scheduling. Scope-owned timer registration/cancellation, recurring ticks and automatic log production remain pending under #94/#93. Scheduling a callback that calls `scope.submit` does not yet make that registration scope-owned: cancel its handle explicitly.
+The [scheduling contract and manual clock](virtual-time.md) now support deterministic deadlines, cancellation and virtual-time driver advancement. The [borrowed-executor adapter](executor-scheduling.md) supplies production one-shot scheduling. [Scope-owned delayed/recurring timers](scoped-timers.md) now bind those registrations to scope/TUI cleanup. Bare scheduler callbacks that call `scope.submit` remain independently owned. Automatic/file-backed log production remains the next #93 integration slice.

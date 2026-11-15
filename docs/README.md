@@ -9,6 +9,8 @@
 
 ## Recipes
 
+- [Scope-owned timers](scoped-timers.md): delayed/recurring updates and retryable shutdown (unreleased).
+
 - [Executor scheduling](executor-scheduling.md): bounded one-shot tasks on an explicitly owned executor (unreleased).
 
 - [Virtual-time scheduling](virtual-time.md): cancellable deadlines and bounded test advancement (unreleased).

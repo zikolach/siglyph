@@ -2,7 +2,7 @@
 
 Small single-file demos intended for `scala-cli`.
 
-The released examples use Maven Central `0.11.0` artifacts. Exceptions: [testing.scala](testing.scala), [application-scope.scala](application-scope.scala) [virtual-time.scala](virtual-time.scala) and [executor-scheduling.scala](executor-scheduling.scala) exercise unreleased APIs against local `core/src` and require a source checkout; see [application testing](../../docs/application-testing.md) and [update scopes](../../docs/application-scopes.md).
+The released examples use Maven Central `0.11.0` artifacts. Exceptions: [testing.scala](testing.scala), [application-scope.scala](application-scope.scala) [virtual-time.scala](virtual-time.scala) [executor-scheduling.scala](executor-scheduling.scala) and [scoped-timers.scala](scoped-timers.scala) exercise unreleased APIs against local `core/src` and require a source checkout; see [application testing](../../docs/application-testing.md) and [update scopes](../../docs/application-scopes.md).
 
 Run from this repository:
 
