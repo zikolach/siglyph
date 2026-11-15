@@ -9,4 +9,4 @@
 - [x] Publish source-checkout usage and clearly defer scheduler-aware tests to #94.
 
 ## 3. Dependent adoption
-- [ ] Migrate reference-app journeys in a separate stacked PR.
+- [x] Migrate reference-app journeys in a separate stacked PR.

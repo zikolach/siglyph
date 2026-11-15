@@ -1,6 +1,7 @@
 package scalatui.demo
 
 import scalatui.ansi.Ansi
+import scalatui.testing.TUITestDriver
 import scalatui.terminal.{
   KeyEventType, KeyModifiers, Terminal, TerminalInput, TerminalKey, VirtualTerminal
 }
@@ -88,51 +89,55 @@ class LogExplorerSuite extends munit.FunSuite:
     assertEquals(model.snapshot.generated, 2L)
     assertEquals(model.snapshot.evicted, 1L)
 
+  private def withLogDriver(capacity: Int =
+    200)(test: (LogExplorerDemo, TUITestDriver) => Unit): Unit =
+    var application = Option.empty[LogExplorerDemo]
+    TUITestDriver.withSession(90, 16)(terminal =>
+      val demo = LogExplorerDemo(terminal, capacity)
+      application = Some(demo)
+      demo.tui
+    ) { driver =>
+      val demo = application.get
+      try test(demo, driver)
+      finally demo.model.cancel() // Application-owned source state, not a driver task scope.
+    }
+
   private def key(terminal: VirtualTerminal, value: TerminalKey, ctrl: Boolean = false): Unit =
     terminal.sendInput(TerminalInput.Key(value, KeyModifiers(ctrl = ctrl)))
 
   test("typed UI filtering, navigation, steps, pause and cancel share one model"):
-    val terminal = VirtualTerminal(90, 16)
-    val demo     = LogExplorerDemo(terminal, capacity = 60)
-    try
-      demo.tui.start()
-      "ERROR".foreach(c => key(terminal, TerminalKey.Character(c.toString)))
-      key(terminal, TerminalKey.Enter)
-      key(terminal, TerminalKey.Up)
-      demo.tui.flushRender()
+    withLogDriver(capacity = 60) { (demo, driver) =>
+      driver.paste("ERROR", chunkBytes = 1)
+      driver.key(TerminalKey.Enter)
+      driver.key(TerminalKey.Up)
       assertEquals(demo.model.snapshot.selected.map(_.id), Some(17L))
-      assert(terminal.screenLines.exists(_.contains("Selected #17")))
-      key(terminal, TerminalKey.Character("n"), ctrl = true)
+      driver.assertContains("Selected #17")
+      driver.key(TerminalKey.Character("n"), KeyModifiers(ctrl = true))
       assertEquals(demo.model.snapshot.generated, 60L)
       assertEquals(demo.model.snapshot.selected.map(_.id), Some(17L))
-      key(terminal, TerminalKey.Character("p"), ctrl = true)
-      key(terminal, TerminalKey.Character("n"), ctrl = true)
+      driver.key(TerminalKey.Character("p"), KeyModifiers(ctrl = true))
+      driver.key(TerminalKey.Character("n"), KeyModifiers(ctrl = true))
       assertEquals(demo.model.snapshot.generated, 60L)
-      key(terminal, TerminalKey.Character("p"), ctrl = true)
-      key(terminal, TerminalKey.Character("g"), ctrl = true)
+      driver.key(TerminalKey.Character("p"), KeyModifiers(ctrl = true))
+      driver.key(TerminalKey.Character("g"), KeyModifiers(ctrl = true))
       assertEquals(demo.model.snapshot.selected.map(_.id), Some(51L))
-      key(terminal, TerminalKey.Character("x"), ctrl = true)
-      key(terminal, TerminalKey.Character("n"), ctrl = true)
+      driver.key(TerminalKey.Character("x"), KeyModifiers(ctrl = true))
+      driver.key(TerminalKey.Character("n"), KeyModifiers(ctrl = true))
       assertEquals(demo.model.snapshot.generated, 60L)
       assert(demo.model.snapshot.cancelled)
-    finally demo.stop()
-    assert(!terminal.isRunning)
+    }
 
   test("table integration reuses indexed data during selection and replaces it on ingestion"):
-    val terminal = VirtualTerminal(90, 16)
-    val demo     = LogExplorerDemo(terminal)
-    try
-      demo.tui.start()
+    withLogDriver() { (demo, driver) =>
       val initial = demo.table.data
-      key(terminal, TerminalKey.Up)
+      driver.key(TerminalKey.Up)
       assert(demo.table.data eq initial)
       assertEquals(demo.table.selection.map(_.id), demo.model.snapshot.selected.map(_.id.toString))
-      key(terminal, TerminalKey.Character("n"), ctrl = true)
+      driver.key(TerminalKey.Character("n"), KeyModifiers(ctrl = true))
       assert(!(demo.table.data eq initial))
       assertEquals(demo.table.selection.map(_.id), demo.model.snapshot.selected.map(_.id.toString))
-      demo.tui.flushRender()
-      assert(terminal.screenLines.exists(_.contains("Selected #39")))
-    finally demo.stop()
+      driver.assertContains("Selected #39")
+    }
 
   test("release events do not advance the source and stop rejects later ticks"):
     val terminal = VirtualTerminal(60, 12)

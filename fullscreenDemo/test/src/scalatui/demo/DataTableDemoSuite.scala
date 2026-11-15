@@ -1,27 +1,23 @@
 package scalatui.demo
 
 import scalatui.ansi.Ansi
-import scalatui.terminal.{TerminalInput, TerminalKey, VirtualTerminal}
+import scalatui.terminal.TerminalKey
+import scalatui.testing.TUITestDriver
 
 class DataTableDemoSuite extends munit.FunSuite:
   test("generic table reveals Home and End selection and survives narrow resize"):
-    val terminal = VirtualTerminal(80, 12)
-    val tui      = DataTableDemo(terminal)
-    try
-      tui.start()
-      terminal.sendInput(TerminalInput.Key(TerminalKey.End))
-      tui.flushRender()
-      assert(terminal.screenLines.exists(_.contains("item-99999")))
-      terminal.resize(70, 8)
-      tui.flushRender()
-      assert(terminal.screenLines.exists(_.contains("item-99999")))
-      terminal.sendInput(TerminalInput.Key(TerminalKey.Home))
-      tui.flushRender()
-      assert(terminal.screenLines.exists(_.contains("item-0")))
-      assert(terminal.screenLines.exists(_.contains("Name")))
-      terminal.resize(5, 3)
-      tui.flushRender()
-      assertEquals(terminal.screenLines.length, 3)
-      assert(terminal.screenLines.forall(line => Ansi.visibleWidth(line) <= 5))
-    finally tui.stop()
-    assert(!terminal.isRunning)
+    val completed = TUITestDriver.withSession(80, 12)(DataTableDemo.apply) { driver =>
+      driver.key(TerminalKey.End)
+      driver.assertContains("item-99999")
+      driver.resize(70, 8)
+      driver.assertContains("item-99999")
+      driver.key(TerminalKey.Home)
+      driver.assertContains("item-0")
+      driver.assertContains("Name")
+      driver.resize(5, 3)
+      val screen = driver.screen
+      assertEquals(screen.rows, 3)
+      assert(screen.lines.forall(line => Ansi.visibleWidth(line) <= 5))
+      driver
+    }
+    assert(completed.isClosed)

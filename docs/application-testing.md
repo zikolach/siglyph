@@ -69,4 +69,4 @@ mill core.test.testOnly scalatui.testing.TUITestDriverSuite
 mill coreNative.test.testOnly scalatui.testing.TUITestDriverSuite
 ```
 
-The shared suite covers deterministic repeated scripts, grapheme typing, fragmented paste, resize/focus, preflight limits, bounded mismatch output, output retention, thread/reentrancy guards, runtime failures and cleanup failure propagation/retry. Reference-app migration is a separate dependent PR.
+The shared suite covers deterministic repeated scripts, grapheme typing, fragmented paste, resize/focus, preflight limits, bounded mismatch output, output retention, thread/reentrancy guards, runtime failures and cleanup failure propagation/retry. The log-explorer and generic-table journey tests now use this driver. Log filtering deliberately uses one-byte paste chunks; table Home/End and resize checks use managed snapshots. The log model still owns its cancellation policy, while the driver owns TUI teardown. Low-level tests retain direct VirtualTerminal control where they inspect backend/run semantics. Virtual-time/async scenarios remain deferred.
