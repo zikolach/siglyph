@@ -10,8 +10,10 @@ and this project uses semantic versioning while it remains pre-1.0.
 ### Added
 
 - Added experimental `TableData`, `TableColumn` and `DataTable` components with stable row identity,
-  visible-range formatting, keyboard selection and shared JVM/Native coverage.
-  `--table` launches a standalone 100,000-row example.
+  visible-range formatting, keyboard selection and shared JVM/Native coverage. The log explorer now
+  uses the table, and `--table` launches a standalone 100,000-row example.
+- Added an opt-in, step-driven log explorer discovery prototype to the shared JVM/Native fullscreen
+  demos, with bounded event retention, filtering, selection, pause/cancellation and deterministic tests.
 
 ### Changed
 

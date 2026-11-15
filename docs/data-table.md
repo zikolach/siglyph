@@ -17,7 +17,7 @@ mill fullscreenNativeDemo.nativeLink
 ./out/fullscreenNativeDemo/nativeLink.dest/out --table
 ```
 
-The example builds 100,000 indexed rows. Up/Down, PageUp/PageDown (ten rows), Home and End navigate. Esc/Ctrl+C exits. The [complete shared example](../fullscreenDemo/src/scalatui/demo/DataTableDemo.scala) shows focus, parent scrolling, layout and lifecycle. Log-explorer integration follows in a dependent PR.
+The example builds 100,000 indexed rows. Up/Down, PageUp/PageDown (ten rows), Home and End navigate. Esc/Ctrl+C exits. The [complete shared example](../fullscreenDemo/src/scalatui/demo/DataTableDemo.scala) shows focus, parent scrolling, layout and lifecycle. Use `--log-explorer` for the separate bounded ingestion/filtering example.
 
 ## Construct typed data and columns
 
@@ -69,7 +69,7 @@ Call `tui.setFocus(table)` to enable unmodified arrow/page/Home/End navigation. 
 
 Mutations use the shared component state/effect boundary. Formatters receive a consistent per-call snapshot and run outside the lock; keep them side-effect free. Selection callbacks are ordered effects and may reenter the component. Attached callbacks/request-render effects use the existing TUI coordinator, not a new worker or scheduler.
 
-The parent still owns scrolling. Reveal a selection using its document row and the current ScrollView offset/viewport extent; [DataTableDemo](../fullscreenDemo/src/scalatui/demo/DataTableDemo.scala) implements this explicitly. After replacing table data, invalidate any owning ScrollView search document before relying on its cached search/selection mapping. Application-specific eviction, filter and follow policies remain outside the table.
+The parent still owns scrolling. Reveal a selection using its document row and the current ScrollView offset/viewport extent; [DataTableDemo](../fullscreenDemo/src/scalatui/demo/DataTableDemo.scala) implements this explicitly. After replacing table data, invalidate any owning ScrollView search document before relying on its cached search/selection mapping. The log explorer deliberately keeps its own eviction/filter/follow policy and supplies the corresponding selected ID to the table.
 
 ## Validation
 
@@ -80,7 +80,7 @@ mill fullscreenDemo.test
 mill fullscreenDemoNative.test
 ```
 
-The table suite checks 100,000-row viewport formatting counts, identity capture, model replacement, bounds, Unicode/control safety, keyboard input and callback/formatter lock isolation. The standalone demo tests cover Home/End visibility and narrow resizing. The table was validated on JVM and Native, including standalone PTY restoration checks; PTY output cannot prove emulator pixel appearance. Additional log-explorer integration tests belong to the dependent PR.
+The table suite checks 100,000-row viewport formatting counts, identity capture, model replacement, bounds, Unicode/control safety, keyboard input and callback/formatter lock isolation. Demo tests cover indexed-data reuse during navigation, Home/End visibility, narrow resizing and existing log interactions. Local verification passed the full JVM core suite (1,002 tests), the 12 table tests on Native, and 15 shared demo tests on each platform. Native linking, formatting/lint, all OpenSpec validation and documentation checks passed. Both table and log-explorer launchers passed JVM/Native PTY smoke, including terminal restoration. A resize-at-End issue in the standalone demo was fixed with explicit follow-end intent and a regression. PTY output cannot prove emulator pixel appearance.
 
 ## Deliberately deferred
 
