@@ -33,7 +33,7 @@ Adapter counts do not bound bytes captured by callbacks or the executor's own qu
 
 ## Scope boundary
 
-Scheduling a callback that calls `scope.submit` guards UI delivery, but does not make the registration scope-owned. Owners must still cancel those handles. Automatic scope-owned registration, recurring ticks and automatic/file-backed log production remain pending under #94/#93.
+Scheduling a callback that calls `scope.submit` guards UI delivery, but does not make the registration scope-owned. Owners must still cancel those handles. Use [scope.schedule/scheduleEvery](scoped-timers.md) for automatic registration ownership and fixed-delay recurrence. Automatic/file-backed log production remains a separate #93 integration slice.
 
 ## Validation
 

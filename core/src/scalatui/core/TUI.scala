@@ -247,7 +247,8 @@ final class TUI(
       () => drainOrReturn(deferRender = true),
       error => recordFailure(error)
     )
-  private val applicationScopes                                                               = scala.collection.mutable.HashSet.empty[ApplicationScope.State]
+  private val applicationScopes                                                               =
+    scala.collection.mutable.LinkedHashSet.empty[ApplicationScope.State]
   private var nextOverlayId                                                                   = 0L
   private var nextFocusOrder                                                                  = 0L
   private def backgroundColorFlight                                                           = queryCoordinator.backgroundColorFlight
@@ -1668,23 +1669,25 @@ final class TUI(
    * separate pending cap in addition to the existing shared effect-queue cap. Old handles never
    * reopen.
    */
-  def openApplicationScope(maxPending: Int = 256): ApplicationScope = lifecycleLock.synchronized {
-    require(maxPending >= 1 && maxPending <= 4096, "maxPending must be 1..4096")
-    require(
-      lifecycleState === TUI.LifecycleState.Running,
-      "application scopes require a running TUI"
-    )
-    require(applicationScopes.size < 64, "at most 64 application scopes may be open")
-    val state = new ApplicationScope.State(maxPending)
-    applicationScopes.add(state)
-    new ApplicationScope(this, state)
-  }
+  def openApplicationScope(maxPending: Int = 256, maxScheduled: Int = 64): ApplicationScope =
+    lifecycleLock.synchronized {
+      require(maxScheduled >= 1 && maxScheduled <= 4096, "maxScheduled must be 1..4096")
+      require(maxPending >= 1 && maxPending <= 4096, "maxPending must be 1..4096")
+      require(
+        lifecycleState === TUI.LifecycleState.Running,
+        "application scopes require a running TUI"
+      )
+      require(applicationScopes.size < 64, "at most 64 application scopes may be open")
+      val state = new ApplicationScope.State(maxPending, maxScheduled)
+      applicationScopes.add(state)
+      new ApplicationScope(this, state)
+    }
 
   private[core] def inspectApplicationScope(state: ApplicationScope.State)
       : (Boolean, Boolean, Int) =
     lifecycleLock.synchronized((
       !state.open,
-      !state.open && state.executing.isEmpty,
+      !state.open && state.executing.isEmpty && state.timers.isEmpty,
       state.pending.size
     ))
 
@@ -1739,15 +1742,74 @@ final class TUI(
         }
     }
 
+  private[core] def withApplicationLock[A](operation: => A): A =
+    lifecycleLock.synchronized(operation)
+
+  private[core] def applicationScopeRunningLocked(state: ApplicationScope.State): Boolean =
+    state.open && (lifecycleState === TUI.LifecycleState.Running)
+
+  private[core] def retireScheduledTimerLocked(
+      state: ApplicationScope.State,
+      timer: ScopeTimer
+  ): Unit =
+    state.timers.remove(timer)
+    if !state.open && state.timers.isEmpty then applicationScopes.remove(state)
+
+  private[core] def failApplicationTimer(error: Throwable): Unit = handleRuntimeFailure(error)
+
+  private[core] def scheduleApplicationTimer(
+      state: ApplicationScope.State,
+      scheduler: scalatui.scheduling.TaskScheduler,
+      delayMillis: Long,
+      interval: Option[Long],
+      update: ScopedTask => Unit
+  ): ScopedTask =
+    require(delayMillis >= 0L, "delay must be non-negative")
+    val timer = lifecycleLock.synchronized {
+      if !applicationScopeRunningLocked(state) then
+        throw new scalatui.scheduling.SchedulingRejectedException(
+          scalatui.scheduling.SchedulingRejection.Closed
+        )
+      if state.timers.size >= state.timerCapacity then
+        throw new scalatui.scheduling.SchedulingRejectedException(
+          scalatui.scheduling.SchedulingRejection.Capacity
+        )
+      val value = new ScopeTimer(this, state, scheduler, interval)
+      value.setActionLocked(() => update(value.task))
+      state.timers.add(value)
+      value
+    }
+    timer.start(delayMillis)
+    timer.task
+
   private def invalidateApplicationScopeLocked(state: ApplicationScope.State): Unit =
     state.pending.foreach(_.action = None)
     state.pending.clear()
-    applicationScopes.remove(state)
+    state.timers.foreach(_.disarmLocked())
+    if state.timers.isEmpty then applicationScopes.remove(state)
     state.cancelled.countDown()
 
+  private def cancelApplicationTimers(state: ApplicationScope.State, reportPending: Boolean): Unit =
+    var failure   = Option.empty[Throwable]
+    lifecycleLock.synchronized(state.timers.toVector).foreach { timer =>
+      try timer.cancel()
+      catch
+        case error: Throwable => failure match
+            case Some(first) => if (first ne error) && !first.getSuppressed.exists(_ eq error) then
+                first.addSuppressed(error)
+            case None        => failure = Some(error)
+    }
+    failure.foreach(throw _)
+    val remaining = lifecycleLock.synchronized(state.timers.size)
+    if reportPending && remaining > 0 then throw new ScheduledCleanupPendingException(remaining)
+
   private[core] def closeApplicationScope(state: ApplicationScope.State): Unit =
-    lifecycleLock.synchronized {
+    val self = lifecycleLock.synchronized {
       invalidateApplicationScopeLocked(state)
+      state.executing.exists(_ eq Thread.currentThread())
+    }
+    cancelApplicationTimers(state, reportPending = !self)
+    lifecycleLock.synchronized {
       while state.executing.exists(thread => thread ne Thread.currentThread()) do
         lifecycleLock.wait()
     }
@@ -2638,6 +2700,9 @@ final class TUI(
             case Some(first) if first ne e => first.addSuppressed(e)
             case None                      => failure = Some(e)
             case _                         => ()
+    lifecycleLock.synchronized(applicationScopes.toVector).foreach(state =>
+      attempt(cancelApplicationTimers(state, reportPending = true))
+    )
     val firstAttempt                   = !postRestorationCutoff
     if firstAttempt then
       attempt(rendererPolicy.parkCursorForCleanup())
@@ -2710,7 +2775,8 @@ final class TUI(
       }
     val restored                       = lifecycleLock.synchronized {
       failure.foreach(recordFailureLocked)
-      val complete = restorationStage === TUI.RestorationStage.Complete
+      val complete = (restorationStage === TUI.RestorationStage.Complete) &&
+        applicationScopes.forall(_.timers.isEmpty)
       if complete then lifecycleState = TUI.LifecycleState.Stopped
       cleanupOwned = false
       lifecycleLock.notifyAll()
