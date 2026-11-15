@@ -9,6 +9,8 @@
 
 ## Recipes
 
+- [Application testing](application-testing.md): managed typed scripts and screen assertions (unreleased).
+
 - [Experimental data table](data-table.md): typed rows, stable selection and visible-range rendering (unreleased).
 
 - [Log explorer discovery prototype](log-explorer.md): bounded generated events, filtering and selection.
