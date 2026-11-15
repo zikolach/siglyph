@@ -9,6 +9,9 @@
 
 ## Recipes
 
+- [Experimental data table](data-table.md): typed rows, stable selection and visible-range rendering (unreleased).
+
+
 - [Normal-screen, fullscreen and scrollback output](screen-modes.md)
 - [Input, editors, autocomplete, optional widgets and terminal helpers](input-and-terminal.md)
 - [Scroll, wheel and selection policies](scroll-input-policies.md)
