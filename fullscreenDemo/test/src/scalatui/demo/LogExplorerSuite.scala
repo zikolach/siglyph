@@ -1,6 +1,7 @@
 package scalatui.demo
 
 import scalatui.ansi.Ansi
+import scalatui.scheduling.ManualTaskScheduler
 import scalatui.testing.TUITestDriver
 import scalatui.terminal.{
   KeyEventType, KeyModifiers, Terminal, TerminalInput, TerminalKey, VirtualTerminal
@@ -126,6 +127,32 @@ class LogExplorerSuite extends munit.FunSuite:
       assertEquals(demo.model.snapshot.generated, 60L)
       assert(demo.model.snapshot.cancelled)
     }
+
+  test("virtual input deadlines deterministically advance and pause the reference app"):
+    val clock       = ManualTaskScheduler()
+    var application = Option.empty[LogExplorerDemo]
+    TUITestDriver.withSession(90, 16, clock = Some(clock))(terminal =>
+      val demo = LogExplorerDemo(terminal)
+      application = Some(demo)
+      clock.schedule(50) { key(terminal, TerminalKey.Character("n"), ctrl = true) }
+      clock.schedule(100) { key(terminal, TerminalKey.Character("p"), ctrl = true) }
+      clock.schedule(150) { key(terminal, TerminalKey.Character("n"), ctrl = true) }
+      demo.tui
+    ) { driver =>
+      val demo = application.get
+      try
+        driver.advanceTimeBy(49)
+        assertEquals(demo.model.snapshot.generated, 40L)
+        driver.advanceTimeBy(1)
+        assertEquals(demo.model.snapshot.generated, 60L)
+        driver.assertContains("Logs 60/200")
+        driver.advanceTimeTo(150)
+        assertEquals(demo.model.snapshot.generated, 60L)
+        assert(demo.model.snapshot.paused)
+        driver.assertNoPendingTasks()
+      finally demo.model.cancel()
+    }
+    assert(clock.isClosed)
 
   test("table integration reuses indexed data during selection and replaces it on ingestion"):
     withLogDriver() { (demo, driver) =>

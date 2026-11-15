@@ -2,6 +2,7 @@ package scalatui.testing
 
 import java.nio.charset.StandardCharsets
 import scalatui.core.TUI
+import scalatui.scheduling.{ManualTaskScheduler, TimeAdvance}
 import scalatui.terminal.{
   KeyEventType, KeyModifiers, TerminalInput, TerminalInputChunk, TerminalKey, VirtualTerminal
 }
@@ -27,7 +28,8 @@ final case class TUITestLimits(
 final class TUITestDriver private (
     val tui: TUI,
     terminal: VirtualTerminal,
-    val limits: TUITestLimits
+    val limits: TUITestLimits,
+    clock: Option[ManualTaskScheduler]
 ):
   private val owner           = Thread.currentThread()
   private var busy            = false
@@ -92,7 +94,7 @@ final class TUITestDriver private (
         case recording: Throwable =>
           failed = true
           primary match
-            case Some(error) => if error ne recording then error.addSuppressed(recording)
+            case Some(error) => TUITestDriver.suppressOnce(error, recording)
             case None        => throw recording
       finally busy = false
 
@@ -169,6 +171,33 @@ final class TUITestDriver private (
     TUITestDriver.validateGeometry(columns, rows, limits)
     step(terminal.resize(columns, rows))
 
+  /**
+   * Advance an owned virtual clock with a separate callback budget; this is not wall-clock waiting.
+   */
+  def advanceTimeBy(deltaMillis: Long, maxCallbacks: Int = 1000): TimeAdvance =
+    checkOwner()
+    val scheduler = clock.getOrElse(throw new IllegalStateException("fixture has no virtual clock"))
+    advanceTimeTo(scheduler.targetAfter(deltaMillis), maxCallbacks)
+
+  def advanceTimeTo(targetMillis: Long, maxCallbacks: Int = 1000): TimeAdvance =
+    checkOwner()
+    val scheduler = clock.getOrElse(throw new IllegalStateException("fixture has no virtual clock"))
+    scheduler.validateTarget(targetMillis, maxCallbacks)
+    var result    = Option.empty[TimeAdvance]
+    step {
+      result = Some(scheduler.advanceObserved(targetMillis, maxCallbacks) {
+        tui.flushRender()
+        tui.rethrowRuntimeFailure()
+      })
+    }
+    result.get
+
+  def pendingScheduledTasks: Int = { checkOwner(); clock.map(_.pendingCount).getOrElse(0) }
+
+  def assertNoPendingTasks(): Unit =
+    val pending = pendingScheduledTasks
+    if pending > 0 then throw new AssertionError(s"$pending scheduled callbacks remain pending")
+
   /** One explicit flush, not an asynchronous idle barrier or a timeout around application code. */
   def flush(): Unit = step(())
 
@@ -187,20 +216,48 @@ final class TUITestDriver private (
   def assertScreen(expected: ScreenSnapshot): Unit = screen.assertMatches(expected)
   def assertContains(value: String): Unit          = screen.assertContains(value)
 
-  /** Explicit restoration. Failed cleanup may be retried, but no more input is accepted. */
+  /** Restore the TUI and owned clock independently; report leaked tasks after cancelling them. */
   def close(): Unit =
     checkOwner()
     if !closed then
       closing = true
       execute(cleanup = true) {
-        tui.stop()
-        if terminal.isRunning then
-          throw new IllegalStateException("TUI stop returned before terminal cleanup completed")
-        closed = true
+        var cleanupFailure                 = Option.empty[Throwable]
+        var terminalRestored               = false
+        def attempt(action: => Unit): Unit =
+          try action
+          catch
+            case error: Throwable => cleanupFailure match
+                case Some(first) => TUITestDriver.suppressOnce(first, error)
+                case None        => cleanupFailure = Some(error)
+        if !failed then attempt(tui.rethrowRuntimeFailure())
+        attempt {
+          tui.stop()
+          if terminal.isRunning then
+            throw new IllegalStateException("TUI stop returned before terminal cleanup completed")
+          terminalRestored = true
+        }
+        if !failed then attempt(tui.rethrowRuntimeFailure())
+        attempt(TUITestDriver.closeClock(clock))
+        if terminalRestored then closed = true
+        cleanupFailure.foreach(throw _)
         if !failed then tui.rethrowRuntimeFailure()
       }
 
+final class PendingScheduledTasksException(val pending: Int)
+    extends IllegalStateException(
+      s"fixture closed with $pending pending scheduled callbacks (cancelled)"
+    )
+
 object TUITestDriver:
+  private def suppressOnce(primary: Throwable, secondary: Throwable): Unit =
+    if (primary ne secondary) && !primary.getSuppressed.exists(_ eq secondary) then
+      primary.addSuppressed(secondary)
+
+  private def closeClock(clock: Option[ManualTaskScheduler]): Unit =
+    val discarded = clock.map(_.closeAndCountPending()).getOrElse(0)
+    if discarded > 0 then throw new PendingScheduledTasksException(discarded)
+
   private def validateGeometry(columns: Int, rows: Int, limits: TUITestLimits): Unit =
     require(
       columns >= 0 && columns <= 10000 && rows >= 0 && rows <= 10000,
@@ -214,15 +271,21 @@ object TUITestDriver:
    * suppressed. Direct calls to the returned TUI bypass driver budgets. Fixtures must own external
    * resources.
    */
-  def withSession[A](columns: Int = 80, rows: Int = 24, limits: TUITestLimits = TUITestLimits())(
+  def withSession[A](
+      columns: Int = 80,
+      rows: Int = 24,
+      limits: TUITestLimits = TUITestLimits(),
+      clock: Option[ManualTaskScheduler] = None
+  )(
       create: VirtualTerminal => TUI
   )(body: TUITestDriver => A): A =
     validateGeometry(columns, rows, limits)
+    clock.foreach(value => value.validateTarget(value.nowMillis, 1))
     val terminal = VirtualTerminal(columns, rows)
     var driver   = Option.empty[TUITestDriver]
     var failure  = Option.empty[Throwable]
     try
-      val instance = new TUITestDriver(create(terminal), terminal, limits)
+      val instance = new TUITestDriver(create(terminal), terminal, limits, clock)
       driver = Some(instance)
       instance.start()
       body(instance)
@@ -232,10 +295,19 @@ object TUITestDriver:
       try
         driver match
           case Some(instance) => instance.close()
-          case None           => terminal.stop()
+          case None           =>
+            var stopFailure = Option.empty[Throwable]
+            try terminal.stop()
+            catch case error: Throwable => stopFailure = Some(error)
+            try closeClock(clock)
+            catch
+              case clockFailure: Throwable => stopFailure match
+                  case Some(first) => suppressOnce(first, clockFailure)
+                  case None        => throw clockFailure
+            stopFailure.foreach(throw _)
       catch
         case cleanup: Throwable =>
           failure match
-            case Some(primary) => if primary ne cleanup then primary.addSuppressed(cleanup)
+            case Some(primary) => suppressOnce(primary, cleanup)
             case None          => throw cleanup
       finally terminal.clearWrites()
