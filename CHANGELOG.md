@@ -9,6 +9,8 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ### Added
 
+- Added opt-in `--live-log-explorer` mode on JVM/Native, with scoped automatic batches, pause/resume,
+  immediate source cancellation and explicit worker cleanup; the original step mode is unchanged.
 - Added bounded scope-owned delayed and fixed-delay recurring updates, with automatic timer
   cancellation, explicit overload outcomes and retryable cleanup independent of terminal restoration.
 - Added an experimental borrowed-executor scheduler with bounded admission, cancellation-race

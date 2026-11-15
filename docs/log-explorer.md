@@ -4,6 +4,8 @@
 
 This started with **Phase A** and now integrates the experimental [DataTable](data-table.md) from the independent #95 widget workstream. The source is deterministic and **step-driven**, not an automatically streaming file/network source. It owns no workers, timers, external dependencies or data-source descriptors.
 
+For automatic generation, use the opt-in [live mode](live-log-explorer.md). This page retains the deterministic step-mode instructions; neither mode follows files yet.
+
 ## Run from a checkout
 
 Use the [contributor toolchains](../CONTRIBUTING.md#development-setup) and a real macOS/Linux terminal.
@@ -47,18 +49,18 @@ The initial fixture has 40 events. Every seventeenth event is ERROR; otherwise e
 - Case folding is ASCII-only because generated labels are ASCII. It preserves the committed filter length and avoids locale-dependent behavior or unsupported Native `Locale` APIs; broader Unicode search belongs to a future data-model contract.
 - The application still projects its bounded matching set in O(retained data) work. It rebuilds indexed `TableData` only when generated data or the committed filter changes, not on arrow-key navigation. `DataTable` formats the requested viewport rows, with a non-sticky header; model filtering and indexing are not virtualized.
 - Pause and cancellation affect generation only. No queued events are hidden, and cancellation cannot be resumed. Application stop/run completion also cancels the model, including terminal-start failure.
-- Terminal stdin is reserved for keyboard input. File following, rotation/truncation policy and background delivery remain Phase B work.
+- Terminal stdin is reserved for keyboard input. File following and rotation/truncation policy remain Phase B work; background generated batches are available in [live mode](live-log-explorer.md).
 
 ## Discovery findings and candidate contracts
 
 | Current application-owned work | Evidence in this slice | Candidate follow-up |
 | --- | --- | --- |
-| Source lifetime | Explicit model cancellation in run/stop and exit shortcuts; manual source ticks | [#94](https://github.com/zikolach/siglyph/issues/94): owned cancellation, injectable clock and serialized bounded updates. No async safety has been validated yet. |
+| Source lifetime | Explicit model cancellation in run/stop and exit shortcuts; manual source ticks | [#94](https://github.com/zikolach/siglyph/issues/94): owned cancellation, injectable clock and serialized bounded updates. Implemented runtime ownership is now exercised by [live mode](live-log-explorer.md); this step-mode baseline itself has no worker. |
 | Data projection and selection | Queue retention and bounded filtering stay application-owned; the new table supplies columns and visible-row formatting | [#95](https://github.com/zikolach/siglyph/issues/95): indexed stable IDs and viewport ranges are implemented; explicit parent scrolling and domain selection policy remain in the app. |
 | Test setup | VirtualTerminal start/flush/resize/input and explicit finally-stop in each scenario | [#96](https://github.com/zikolach/siglyph/issues/96): consumer driver and lifecycle assertions, with virtual time when scheduling is introduced. |
 | Presentation | Application-owned row prefix, detail text, footer and keyboard commands | [#97](https://github.com/zikolach/siglyph/issues/97): semantic roles and navigation conventions after table usage validates the states. |
 
-The table is an experimental public component; the other seams remain candidates, not newly public runtime APIs. This baseline intentionally has zero background workers and zero timers; a reduction in asynchronous plumbing cannot be measured until a real producer is integrated. Keeping this distinction avoids claiming a solved lifecycle problem from a synchronous prototype.
+This step-mode baseline intentionally has zero background workers and zero timers. The [live integration](live-log-explorer.md) now uses the delivered scheduling, scope and testing APIs; it documents the remaining application-owned wiring and verification. Themes and file ingestion remain separate work.
 
 ## Validation
 
