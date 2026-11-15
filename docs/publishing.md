@@ -8,8 +8,8 @@ Version **0.10.0** uses the **Scala 3.9** compiler/TASTy baseline. See the [rele
 for migration notes, tag provenance and verified publication results.
 
 The next recommended feature release is **0.11.0**. See the
-[release preparation](release-v0.11.0.md) for scope, compatibility notes and pre-tag gates; it is not
-yet published or authorized for tagging.
+[release record](release-v0.11.0.md) for scope, compatibility notes and verification gates.
+Publication is authorized for 2026-11-15; availability must be verified after the tag workflows.
 
 ## Version source
 
