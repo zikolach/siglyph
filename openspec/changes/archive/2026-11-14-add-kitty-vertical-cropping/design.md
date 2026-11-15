@@ -19,3 +19,7 @@ The baseline high-level ImageViewportCropSuite reproduced both partial-image omi
 ## Emulator validation limitation
 
 Ghostty1.4.0 is installed, but the isolated launch did not start the smoke program and desktop control attempts produced no observable window change. Further desktop attempts were stopped. The generated PNG, standalone smoke program and command-file driver are retained for a manual visual pass. No actual pixel-rendering success is claimed.
+
+## Maintainer visual feedback
+
+After running the supplied manual demo, the maintainer reported that it looked good. This supplements the automated JVM/Native tests; it is not an automated screenshot assertion or a claim that every terminal, viewport or overlay combination was visually verified.

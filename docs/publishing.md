@@ -7,6 +7,10 @@ Keep examples on an available published version while a subsequent release is on
 Version **0.10.0** uses the **Scala 3.9** compiler/TASTy baseline. See the [release record](release-v0.10.0.md)
 for migration notes, tag provenance and verified publication results.
 
+The next recommended feature release is **0.11.0**. See the
+[release preparation](release-v0.11.0.md) for scope, compatibility notes and pre-tag gates; it is not
+yet published or authorized for tagging.
+
 ## Version source
 
 `build.mill` derives the package version from:

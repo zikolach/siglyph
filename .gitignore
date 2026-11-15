@@ -1,3 +1,7 @@
+# Local direnv configuration (may contain machine-specific settings or credentials)
+/.envrc
+/.direnv/
+
 # Build outputs
 out/
 target/
