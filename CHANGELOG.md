@@ -7,7 +7,7 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
-## [0.11.0] - 2026-11-14
+## [0.11.0] - 2026-11-15
 
 ### Added
 

@@ -1,12 +1,12 @@
-# v0.11.0 release candidate (not published)
+# v0.11.0 release (publication pending)
 
 **0.11.0** is the selected next release after **0.10.0**. This is a feature release, not a patch:
 it adds public image-geometry/cropping helpers, runtime wheel/selection policies and negotiated
 program-status APIs. No new major-version toolchain migration or 1.0 stability claim is proposed.
 
-The [0.11.0 changelog](../CHANGELOG.md#0110---2026-11-14) is finalized with the preparation date
-**2026-11-14** and a fresh Unreleased section. This prepares main for release; it does not authorize
-a tag push or publication. Keep published dependency examples at **0.10.0**
+The [0.11.0 changelog](../CHANGELOG.md#0110---2026-11-15) is finalized for
+**2026-11-15**, with a fresh Unreleased section. The maintainer has explicitly authorized the
+release and its tag push. Publication must still be verified before claiming artifact availability. Keep published dependency examples at **0.10.0**
 and the build fallback at `0.1.0-SNAPSHOT` until publication is explicitly approved and verified.
 
 ## Scope and compatibility
