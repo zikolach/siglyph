@@ -1,29 +1,189 @@
 package scalatui.demo
 
+import java.util.concurrent.{ScheduledThreadPoolExecutor, TimeUnit}
+import java.util.concurrent.atomic.AtomicReference
+import scalatui.scheduling.{
+  ExecutorTaskScheduler, SchedulingRejectedException, SchedulingRejection, TaskScheduler
+}
 import scalatui.ansi.Ansi
 import scalatui.components.{
   DataTable, Input, ScrollView, ScrollbarMode, StackEntry, StackEntryOptions, TableColumn,
   TableData, VStack
 }
-import scalatui.core.{Component, ComponentRender, InputResult, TUI}
+import scalatui.core.{
+  ApplicationScope, ApplicationSubmission, Component, ComponentRender, InputResult,
+  ScheduledCleanupPendingException, ScopedTask, TUI
+}
 import scalatui.syntax.Equality.*
 import scalatui.terminal.{KeyEventType, KeyModifiers, Terminal, TerminalInput, TerminalKey}
 
 /**
- * Step-driven discovery prototype for roadmap #93; deliberately not an async runtime or table API.
+ * Shared step-driven/live generated-log example for roadmap #93; file ingestion remains separate.
  */
 final class LogExplorerDemo private (
     val tui: TUI,
     private[demo] val model: LogExplorerModel,
-    private[demo] val table: DataTable[LogEvent]
+    private[demo] val table: DataTable[LogEvent],
+    private[demo] val viewport: ScrollView,
+    generate: Int => Unit,
+    markLive: () => Unit
 ):
-  def run(): Unit =
-    try tui.run()
-    finally model.cancel()
+  private val sourceLock    = new Object
+  private var sourceStopped = false
+  private var sourceStarted = false
+  private var sourceScope   = Option.empty[ApplicationScope]
+  private var sourceTask    = Option.empty[ScopedTask]
 
-  def stop(): Unit =
+  private[demo] def sourceStatus: String =
+    val snapshot = sourceLock.synchronized(sourceStarted -> sourceTask)
+    if !snapshot._1 then "ready"
+    else
+      snapshot._2 match
+        case Some(task) if task.failure.nonEmpty                                        => "failed"
+        case Some(task) if task.lastSubmission.exists(_ === ApplicationSubmission.Full) =>
+          "overloaded"
+        case Some(task) if task.isDone                                                  => "stopped"
+        case _                                                                          => "live"
+
+  private def validateStream(intervalMillis: Long, batchSize: Int): Unit =
+    require(intervalMillis > 0L, "stream interval must be positive")
+    require(batchSize >= 1 && batchSize <= 1000, "stream batch must be 1..1000")
+
+  /** Start once after TUI startup; cancellation is terminal for this demo instance. */
+  private[demo] def startStreaming(
+      scheduler: TaskScheduler,
+      intervalMillis: Long = 250L,
+      batchSize: Int = 20
+  ): Option[ApplicationScope] =
+    validateStream(intervalMillis, batchSize)
+    val start = sourceLock.synchronized {
+      if sourceStopped then false
+      else
+        require(!sourceStarted, "source streaming was already started")
+        sourceStarted = true
+        true
+    }
+    if !start then None
+    else
+      val created = try Some(tui.openApplicationScope(maxScheduled = 1))
+      catch
+        case error: Throwable =>
+          try tui.rethrowRuntimeFailure()
+          catch
+            case runtime: Throwable =>
+              suppress(runtime, error)
+              throw runtime
+          if error.isInstanceOf[IllegalArgumentException] && sourceLock.synchronized(sourceStopped)
+          then None
+          else throw error
+      created.map { scope =>
+        val install = sourceLock.synchronized {
+          sourceScope = Some(scope)
+          !sourceStopped
+        }
+        try
+          if install then
+            scope.submit { markLive() }
+            val task = scope.scheduleEvery(scheduler, intervalMillis, intervalMillis) { _ =>
+              if model.snapshot.cancelled then scope.close()
+              else generate(batchSize)
+            }
+            sourceLock.synchronized { sourceTask = Some(task) }
+            tui.requestRender()
+            tui.flushRender()
+          else scope.close()
+        catch
+          case rejected: SchedulingRejectedException
+              if (rejected.reason === SchedulingRejection.Closed) && model.snapshot.cancelled => ()
+          case error: Throwable =>
+            try scope.close()
+            catch case cleanup: Throwable => suppress(error, cleanup)
+            throw error
+        scope
+      }
+
+  private[demo] def cancelSource(allowPending: Boolean = false): Unit =
     model.cancel()
-    tui.stop()
+    val scope = sourceLock.synchronized {
+      sourceStopped = true
+      sourceScope
+    }
+    scope.foreach { current =>
+      try current.close()
+      catch case _: ScheduledCleanupPendingException if allowPending => ()
+    }
+
+  private def suppress(primary: Throwable, secondary: Throwable): Unit =
+    if (primary ne secondary) && !primary.getSuppressed.exists(_ eq secondary) then
+      primary.addSuppressed(secondary)
+
+  private def managed(body: => Unit)(cleanup: (() => Unit)*): Unit =
+    var failure = Option.empty[Throwable]
+    try body
+    catch case error: Throwable => failure = Some(error)
+    cleanup.foreach { action =>
+      try action()
+      catch
+        case error: Throwable => failure match
+            case Some(primary) => suppress(primary, error)
+            case None          => failure = Some(error)
+    }
+    failure.foreach(throw _)
+
+  def run(): Unit = managed(tui.run())(() => cancelSource(), () => tui.stop())
+
+  def stop(): Unit = managed(())(() => cancelSource(), () => tui.stop())
+
+  /** Application-owned wall-clock producer; step mode remains available through run(). */
+  def runLive(intervalMillis: Long = 250L, batchSize: Int = 20): Unit =
+    validateStream(intervalMillis, batchSize)
+    val executor             = new ScheduledThreadPoolExecutor(1)
+    val backgroundFailure    = new AtomicReference[Throwable]()
+    val scheduler            = ExecutorTaskScheduler(
+      executor,
+      error =>
+        backgroundFailure.compareAndSet(null, error)
+        tui.requestExit()
+    )
+    def stopProducer(): Unit =
+      managed(())(
+        () => scheduler.close(),
+        () => { executor.shutdownNow(); () },
+        () => {
+          if !executor.awaitTermination(5L, TimeUnit.SECONDS) then
+            throw new IllegalStateException("log producer did not terminate")
+        }
+      )
+    runScheduled(
+      scheduler,
+      () => stopProducer(),
+      () => Option(backgroundFailure.get()),
+      intervalMillis,
+      batchSize
+    )
+
+  private[demo] def runScheduled(
+      scheduler: TaskScheduler,
+      stopProducer: () => Unit,
+      producerFailure: () => Option[Throwable] = () => None,
+      intervalMillis: Long = 250L,
+      batchSize: Int = 20
+  ): Unit =
+    managed {
+      validateStream(intervalMillis, batchSize)
+      tui.start()
+      tui.rethrowRuntimeFailure()
+      startStreaming(scheduler, intervalMillis, batchSize)
+      tui.rethrowRuntimeFailure()
+      tui.run()
+      producerFailure().foreach(throw _)
+    }(
+      () => cancelSource(),
+      () => tui.stop(),
+      stopProducer,
+      () => tui.stop(),
+      () => producerFailure().foreach(throw _)
+    )
 
 private final class LogExplorerLines(lines: () => Vector[String]) extends Component:
   override def render(width: Int): ComponentRender =
@@ -31,14 +191,16 @@ private final class LogExplorerLines(lines: () => Vector[String]) extends Compon
 
 object LogExplorerDemo:
   def apply(terminal: Terminal, capacity: Int = 200): LogExplorerDemo =
-    val model               = LogExplorerModel(capacity)
+    val model                                          = LogExplorerModel(capacity)
     model.advance(40)
-    var notice              = "Up/Down/PgUp/PgDn browse | Enter filter | Esc/Ctrl+C quit"
-    val input               = Input()
-    val initial             = model.snapshot
-    var publishedGeneration = initial.generated
-    var publishedFilter     = initial.filter
-    val table               = DataTable(
+    var stopSource: () => Unit                         = () => model.cancel()
+    var sourceLabel: () => String                      = () => "ready"
+    var notice                                         = "Up/Down/PgUp/PgDn browse | Enter filter | Esc/Ctrl+C quit"
+    val input                                          = Input()
+    val initial                                        = model.snapshot
+    var publishedGeneration                            = initial.generated
+    var publishedFilter                                = initial.filter
+    val table                                          = DataTable(
       TableData(initial.rows, (event: LogEvent) => event.id.toString),
       Vector(
         TableColumn[LogEvent]("ID", 7, _.id.toString),
@@ -48,37 +210,42 @@ object LogExplorerDemo:
       )
     )
     initial.selected.foreach(event => table.selectId(event.id.toString))
-    val view                = ScrollView(table, followEnd = true, scrollbar = ScrollbarMode.Automatic)
-    val header              = LogExplorerLines(() =>
+    val view                                           = ScrollView(table, followEnd = true, scrollbar = ScrollbarMode.Automatic)
+    val header                                         = LogExplorerLines(() =>
       val state  = model.snapshot
       val source =
-        if state.cancelled then "cancelled" else if state.paused then "paused" else "ready"
+        if state.cancelled then "cancelled"
+        else if sourceLabel() === "overloaded" then "overloaded"
+        else if state.paused then "paused" else sourceLabel()
       Vector(
         s"Logs ${state.retained}/$capacity | evicted ${state.evicted} | $source | filter: ${state.filter}"
       )
     )
-    val detail              = LogExplorerLines(() =>
+    val detail                                         = LogExplorerLines(() =>
       model.snapshot.selected match
         case Some(event) =>
           Vector(s"Selected #${event.id}: ${event.level} / ${event.service}", event.message)
         case None        => Vector("No matching retained events", notice)
     )
-    val footer              = LogExplorerLines(() =>
+    val footer                                         = LogExplorerLines(() =>
       Vector(
         "Ctrl+N step | Ctrl+P pause | Ctrl+G follow | Ctrl+X cancel",
         notice
       )
     )
-    val root                = VStack(Seq(
+    val root                                           = VStack(Seq(
       StackEntry(header, StackEntryOptions(basis = Some(1), minSize = 1, maxSize = Some(1))),
       StackEntry(input, StackEntryOptions(basis = Some(1), minSize = 1, maxSize = Some(1))),
       StackEntry(view, StackEntryOptions(grow = 1, minSize = 1)),
       StackEntry(detail, StackEntryOptions(basis = Some(2), minSize = 1, maxSize = Some(2))),
       StackEntry(footer, StackEntryOptions(basis = Some(2), minSize = 1, maxSize = Some(2)))
     ))
-    val tui                 = TUI.fullscreen(terminal, root)
-    def refresh(): Unit     =
-      val state = model.snapshot
+    val tui                                            = TUI.fullscreen(terminal, root)
+    def refresh(revealSelection: Boolean = true): Unit =
+      val anchor = if !revealSelection && view.offset > 0 then
+        table.data.rows.lift(view.offset - 1).map(_.id)
+      else None
+      val state  = model.snapshot
       if (state.generated !== publishedGeneration) || (state.filter !== publishedFilter) then
         table.setData(TableData(state.rows, (event: LogEvent) => event.id.toString))
         publishedGeneration = state.generated
@@ -86,10 +253,15 @@ object LogExplorerDemo:
       state.selected.foreach(event => table.selectId(event.id.toString))
       view.invalidateSearchDocument()
       if state.following then view.jumpToEnd()
-      else
+      else if revealSelection then
         view.jumpToStart()
         val index = state.rows.indexWhere(event => state.selected.exists(_.id === event.id))
         view.scrollTo(math.max(0, index + 1))
+      else
+        anchor.foreach { id =>
+          val index = state.rows.indexWhere(_.id === id)
+          view.scrollTo(math.max(0, index + 1))
+        }
       tui.requestRender()
 
     input.onSubmit = value =>
@@ -106,7 +278,7 @@ object LogExplorerDemo:
               case TerminalKey.Character("n") => model.advance(20); true
               case TerminalKey.Character("p") => model.togglePause(); true
               case TerminalKey.Character("g") => model.followLatest(); true
-              case TerminalKey.Character("x") => model.cancel(); true
+              case TerminalKey.Character("x") => stopSource(); true
               case _                          => false
           else if modifiers.isEmpty then
             key match
@@ -124,10 +296,24 @@ object LogExplorerDemo:
             (key === TerminalKey.Character("c") && modifiers === KeyModifiers(ctrl = true))
           )
         then
-          model.cancel()
+          stopSource()
           InputResult.Exit
         else InputResult.Ignored
       case _                                                  => InputResult.Ignored
     }
     tui.setFocus(input)
-    new LogExplorerDemo(tui, model, table)
+    val demo = new LogExplorerDemo(
+      tui,
+      model,
+      table,
+      view,
+      count => {
+        if model.snapshot.following && !view.isFollowingEnd then model.move(0)
+        model.advance(count)
+        refresh(revealSelection = false)
+      },
+      () => refresh()
+    )
+    sourceLabel = () => demo.sourceStatus
+    stopSource = () => demo.cancelSource(allowPending = true)
+    demo

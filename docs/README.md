@@ -9,6 +9,8 @@
 
 ## Recipes
 
+- [Live log explorer](live-log-explorer.md): automatic generated batches with scoped producer cleanup.
+
 - [Scope-owned timers](scoped-timers.md): delayed/recurring updates and retryable shutdown (unreleased).
 
 - [Executor scheduling](executor-scheduling.md): bounded one-shot tasks on an explicitly owned executor (unreleased).

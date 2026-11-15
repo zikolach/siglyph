@@ -1,0 +1,12 @@
+## Modes and source
+Keep --log-explorer step-driven. Add --live-log-explorer with a default 250 ms fixed delay and 20 events per batch, bounded by the existing retention model. Validate positive intervals and batch sizes 1..1000. A demo instance accepts at most one streaming setup and is not a restartable source.
+
+The injected startStreaming seam accepts TaskScheduler after the TUI is running, allowing deterministic tests. UI/model/table refresh runs only in scoped serialized callbacks, never directly on a producer thread outside the TUI boundary. Paused callbacks consume no IDs and do not rebuild table data. Scrolling away from the tail disables model follow mode; automatic refresh preserves the top visible retained ID across append/eviction, while explicit keyboard selection still reveals the selected row. Ctrl+X closes source admission immediately and cancels the scope; the retained UI stays inspectable. Cancelling before/during startup prevents late source installation. A pending-publication cutoff can be completed by the owner without treating ordinary early cancellation as a new source.
+
+## Ownership
+Live mode explicitly creates one ScheduledThreadPoolExecutor and borrows it through ExecutorTaskScheduler. The demo owns both; the library creates neither implicitly. The owner closes the scope, attempts terminal restoration, closes the adapter, shuts down/joins the executor and explicitly retries terminal stop if necessary. Independent cleanup failures cannot skip remaining attempts, and the original error stays primary. Unexpected adapter errors wake the run loop and are observed after worker cleanup too.
+
+No provider code is called while holding the source-owner monitor. The monitor protects installation/cancellation only; no executor is shut down by a scope. Existing manual run and stop paths also cancel installed source state. A callback or provider that blocks indefinitely is outside the demo's finite-callback contract; executor shutdown waits use bounded deadlock guards, not accuracy assertions.
+
+## Verification
+Shared JVM/Native tests use ManualTaskScheduler to cover batching, retained bounds, selection/index reuse, filtering, pause/resume, cancellation, early cancellation, setup failure and cleanup-error precedence. Real JVM/Native launcher PTY checks verify automatic growth and terminal restoration, not pixels. File following and richer producer errors are deliberately not claimed.

@@ -53,4 +53,4 @@ mill core.test.testOnly scalatui.core.ScopedTimerSuite
 mill coreNative.test.testOnly scalatui.core.ScopedTimerSuite
 ```
 
-Coverage includes one-shot and fixed-delay ticks, contention without catch-up, queued-delivery cancellation, shared-provider isolation, overload, registration/rearm failures, early fire/late publication, cleanup retry, terminal restoration despite cancellation failure, loader ticking and real executor self-cancellation. Latch deadlines are deadlock guards, not timing guarantees. Automatic/file-backed log-explorer production is a separate integration slice.
+Coverage includes one-shot and fixed-delay ticks, contention without catch-up, queued-delivery cancellation, shared-provider isolation, overload, registration/rearm failures, early fire/late publication, cleanup retry, terminal restoration despite cancellation failure, loader ticking and real executor self-cancellation. Latch deadlines are deadlock guards, not timing guarantees. [Live log generation](live-log-explorer.md) now uses these APIs; file-backed production remains a separate integration slice.
