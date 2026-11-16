@@ -1,0 +1,2303 @@
+{
+  "basis": "Top-level source inventory; declarations and language visibility remain authoritative. Nested members are not exhaustively indexed. Only policy.json selects ABI-preserved members.",
+  "files": [
+    {
+      "path": "core/src/scalatui/ansi/Ansi.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "Ansi",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/autocomplete/Autocomplete.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "AutocompleteItem",
+          "visibility": "public"
+        },
+        {
+          "name": "AutocompleteItemKind",
+          "visibility": "public"
+        },
+        {
+          "name": "AutocompleteFuzzyRanking",
+          "visibility": "public"
+        },
+        {
+          "name": "AutocompleteRequest",
+          "visibility": "public"
+        },
+        {
+          "name": "AutocompleteSuggestions",
+          "visibility": "public"
+        },
+        {
+          "name": "CompletionRequest",
+          "visibility": "public"
+        },
+        {
+          "name": "CompletionResult",
+          "visibility": "public"
+        },
+        {
+          "name": "AutocompleteRequestHandle",
+          "visibility": "public"
+        },
+        {
+          "name": "AutocompleteRequestHandle",
+          "visibility": "public"
+        },
+        {
+          "name": "AutocompleteCallback",
+          "visibility": "public"
+        },
+        {
+          "name": "AutocompleteProvider",
+          "visibility": "public"
+        },
+        {
+          "name": "AutocompleteProvider",
+          "visibility": "public"
+        },
+        {
+          "name": "SlashCommand",
+          "visibility": "public"
+        },
+        {
+          "name": "TriggerCompletionSource",
+          "visibility": "public"
+        },
+        {
+          "name": "TriggerCompletionSource",
+          "visibility": "public"
+        },
+        {
+          "name": "TriggerPrefix",
+          "visibility": "public"
+        },
+        {
+          "name": "TriggerPrefix",
+          "visibility": "public"
+        },
+        {
+          "name": "TriggerPrefixError",
+          "visibility": "public"
+        },
+        {
+          "name": "TriggerCompletionPrefix",
+          "visibility": "public"
+        },
+        {
+          "name": "AutocompleteTokenCharacters",
+          "visibility": "internal"
+        },
+        {
+          "name": "SlashCommandAutocompleteProvider",
+          "visibility": "public"
+        },
+        {
+          "name": "PathCompletionPrefix",
+          "visibility": "public"
+        },
+        {
+          "name": "PathCompletion",
+          "visibility": "public"
+        },
+        {
+          "name": "PathCompletionRequest",
+          "visibility": "public"
+        },
+        {
+          "name": "PathCompletionProvider",
+          "visibility": "public"
+        },
+        {
+          "name": "PathCompletionProvider",
+          "visibility": "public"
+        },
+        {
+          "name": "CompletionPrefixParser",
+          "visibility": "public"
+        },
+        {
+          "name": "CombinedAutocompleteProvider",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/autocomplete/FileSystemPathCompletionProvider.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "FileSystemPathCompletionOptions",
+          "visibility": "public"
+        },
+        {
+          "name": "RecursiveAttachmentCompletionOptions",
+          "visibility": "public"
+        },
+        {
+          "name": "FileSystemPathCompletionProvider",
+          "visibility": "public"
+        },
+        {
+          "name": "RecursiveAttachmentCompletionProvider",
+          "visibility": "public"
+        },
+        {
+          "name": "FileSystemCompletionPolicy",
+          "visibility": "internal"
+        },
+        {
+          "name": "FileSystemCompletionHandle",
+          "visibility": "internal"
+        },
+        {
+          "name": "FileSystemCompletionDispatch",
+          "visibility": "internal"
+        },
+        {
+          "name": "FileSystemCompletionContext",
+          "visibility": "internal"
+        },
+        {
+          "name": "FileSystemCompletionContext",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/autocomplete/package.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": []
+    },
+    {
+      "path": "core/src/scalatui/components/Box.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "Box",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/ComponentEffectCoordinator.scala",
+      "classification": "internal",
+      "declarations": [
+        {
+          "name": "ComponentEffectCoordinator",
+          "visibility": "internal"
+        },
+        {
+          "name": "ComponentEffectCoordinator",
+          "visibility": "internal"
+        },
+        {
+          "name": "ComponentEffectAdmissionException",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/ComponentStateBoundary.scala",
+      "classification": "internal",
+      "declarations": [
+        {
+          "name": "ComponentStateBoundary",
+          "visibility": "internal"
+        },
+        {
+          "name": "ComponentEffects",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/DataTable.scala",
+      "classification": "experimental",
+      "declarations": [
+        {
+          "name": "DataTable",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/Editor.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "Editor",
+          "visibility": "public"
+        },
+        {
+          "name": "Editor",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/EditorAutocompletePlacement.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "EditorAutocompletePlacement",
+          "visibility": "public"
+        },
+        {
+          "name": "EditorAutocompletePlacement",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/EditorAutocompleteTrigger.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "EditorAutocompleteTrigger",
+          "visibility": "public"
+        },
+        {
+          "name": "EditorAutocompleteTrigger",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/EditorEnterBehavior.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "EditorEnterBehavior",
+          "visibility": "public"
+        },
+        {
+          "name": "EditorEnterBehavior",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/EditorLayout.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "EditorVisualLine",
+          "visibility": "public"
+        },
+        {
+          "name": "EditorVisualCursor",
+          "visibility": "public"
+        },
+        {
+          "name": "EditorLayout",
+          "visibility": "public"
+        },
+        {
+          "name": "EditorRenderRow",
+          "visibility": "internal"
+        },
+        {
+          "name": "EditorRenderPlan",
+          "visibility": "internal"
+        },
+        {
+          "name": "EditorLayout",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/EditorOptions.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "EditorAutocompleteDebouncer",
+          "visibility": "public"
+        },
+        {
+          "name": "EditorAutocompleteDebouncer",
+          "visibility": "public"
+        },
+        {
+          "name": "EditorOptions",
+          "visibility": "public"
+        },
+        {
+          "name": "EditorOptions",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/FilterPasteSession.scala",
+      "classification": "internal",
+      "declarations": [
+        {
+          "name": "FilterPasteSession",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/Input.scala",
+      "classification": "selected baseline members; other members evolving",
+      "declarations": [
+        {
+          "name": "Input",
+          "visibility": "public"
+        },
+        {
+          "name": "Input",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/ListPaging.scala",
+      "classification": "internal",
+      "declarations": [
+        {
+          "name": "ListPaging",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/Loader.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "LoaderIndicatorOptions",
+          "visibility": "public"
+        },
+        {
+          "name": "LoaderOptions",
+          "visibility": "public"
+        },
+        {
+          "name": "Loader",
+          "visibility": "public"
+        },
+        {
+          "name": "Loader",
+          "visibility": "public"
+        },
+        {
+          "name": "CancellationToken",
+          "visibility": "public"
+        },
+        {
+          "name": "CancellableLoader",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/MouseRegion.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "MouseRegion",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/ScrollView.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "OverscrollPolicy",
+          "visibility": "public"
+        },
+        {
+          "name": "ScrollbarMode",
+          "visibility": "public"
+        },
+        {
+          "name": "ScrollbarGeometry",
+          "visibility": "public"
+        },
+        {
+          "name": "ScrollAffordanceBounds",
+          "visibility": "public"
+        },
+        {
+          "name": "SelectionGranularity",
+          "visibility": "internal"
+        },
+        {
+          "name": "ScrollView",
+          "visibility": "public"
+        },
+        {
+          "name": "ScrollView",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/SelectList.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "SelectItem",
+          "visibility": "public"
+        },
+        {
+          "name": "SelectList",
+          "visibility": "public"
+        },
+        {
+          "name": "SelectList",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/SelectListFiltering.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "SelectListFiltering",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/SelectListOptions.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "SelectListOptions",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/SelectListTheme.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "SelectListTheme",
+          "visibility": "public"
+        },
+        {
+          "name": "SelectListTheme",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/SettingsList.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "SettingsSubmenuController",
+          "visibility": "public"
+        },
+        {
+          "name": "SettingsSubmenu",
+          "visibility": "public"
+        },
+        {
+          "name": "SettingItem",
+          "visibility": "public"
+        },
+        {
+          "name": "SettingsListTheme",
+          "visibility": "public"
+        },
+        {
+          "name": "SettingsListOptions",
+          "visibility": "public"
+        },
+        {
+          "name": "SettingsList",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/SettingsListFiltering.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "SettingsListFiltering",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/Spacer.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "Spacer",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/Stack.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "StackEntryOptions",
+          "visibility": "public"
+        },
+        {
+          "name": "StackEntry",
+          "visibility": "public"
+        },
+        {
+          "name": "Stack",
+          "visibility": "public"
+        },
+        {
+          "name": "VStack",
+          "visibility": "public"
+        },
+        {
+          "name": "HStack",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/TableData.scala",
+      "classification": "experimental",
+      "declarations": [
+        {
+          "name": "TableData",
+          "visibility": "public"
+        },
+        {
+          "name": "TableData",
+          "visibility": "public"
+        },
+        {
+          "name": "TableColumn",
+          "visibility": "public"
+        },
+        {
+          "name": "TableSelection",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/Text.scala",
+      "classification": "selected baseline members; other members evolving",
+      "declarations": [
+        {
+          "name": "Text",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/TranscriptSearch.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "ViewportSearchState",
+          "visibility": "public"
+        },
+        {
+          "name": "TranscriptSearchMatch",
+          "visibility": "internal"
+        },
+        {
+          "name": "TranscriptSearchIndex",
+          "visibility": "internal"
+        },
+        {
+          "name": "TranscriptSearchIndex",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/TruncatedText.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "TruncatedText",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/ViewportSelectionDocument.scala",
+      "classification": "internal",
+      "declarations": [
+        {
+          "name": "SelectionCellRange",
+          "visibility": "internal"
+        },
+        {
+          "name": "ViewportSelectionDocument",
+          "visibility": "internal"
+        },
+        {
+          "name": "ViewportSelectionDocument",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/WheelScrollPolicy.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "WheelScrollPolicy",
+          "visibility": "public"
+        },
+        {
+          "name": "WheelScrollController",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/WordSelectionPolicy.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "WordSelectionPolicy",
+          "visibility": "public"
+        },
+        {
+          "name": "WordSelectionPolicy",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/components/package.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": []
+    },
+    {
+      "path": "core/src/scalatui/core/AppendOutput.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "AppendResult",
+          "visibility": "public"
+        },
+        {
+          "name": "AppendRejection",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/ApplicationScope.scala",
+      "classification": "experimental",
+      "declarations": [
+        {
+          "name": "ApplicationSubmission",
+          "visibility": "public"
+        },
+        {
+          "name": "ApplicationScope",
+          "visibility": "public"
+        },
+        {
+          "name": "ApplicationScope",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/Clipboard.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "ClipboardTarget",
+          "visibility": "public"
+        },
+        {
+          "name": "ClipboardTargetSupport",
+          "visibility": "public"
+        },
+        {
+          "name": "ClipboardCopyResult",
+          "visibility": "public"
+        },
+        {
+          "name": "ClipboardCopyResult",
+          "visibility": "public"
+        },
+        {
+          "name": "HostClipboard",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/Component.scala",
+      "classification": "selected baseline members; other members evolving",
+      "declarations": [
+        {
+          "name": "Component",
+          "visibility": "public"
+        },
+        {
+          "name": "ViewportCommandHandler",
+          "visibility": "public"
+        },
+        {
+          "name": "MouseInputHandler",
+          "visibility": "public"
+        },
+        {
+          "name": "Focusable",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/ComponentRender.scala",
+      "classification": "selected baseline members; other members evolving",
+      "declarations": [
+        {
+          "name": "TerminalControlPlacement",
+          "visibility": "public"
+        },
+        {
+          "name": "ComponentRenderControlKind",
+          "visibility": "public"
+        },
+        {
+          "name": "ComponentRenderControlDiagnostic",
+          "visibility": "public"
+        },
+        {
+          "name": "ComponentRenderValidationError",
+          "visibility": "public"
+        },
+        {
+          "name": "DocumentPosition",
+          "visibility": "public"
+        },
+        {
+          "name": "DocumentMarker",
+          "visibility": "public"
+        },
+        {
+          "name": "PromptStart",
+          "visibility": "public"
+        },
+        {
+          "name": "DocumentMetadata",
+          "visibility": "public"
+        },
+        {
+          "name": "DocumentMetadata",
+          "visibility": "public"
+        },
+        {
+          "name": "ComponentRender",
+          "visibility": "public"
+        },
+        {
+          "name": "ComponentRender",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/Container.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "Container",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/CursorPlacement.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "CursorPlacement",
+          "visibility": "public"
+        },
+        {
+          "name": "FakeCursorRender",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/InputResult.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "InputResult",
+          "visibility": "public"
+        },
+        {
+          "name": "InputResult",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/KittyImageRetention.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "KittyImageRetentionOptions",
+          "visibility": "public"
+        },
+        {
+          "name": "KittyRetentionFrame",
+          "visibility": "internal"
+        },
+        {
+          "name": "FullscreenKittyRetention",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/Layout.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "LayoutBounds",
+          "visibility": "public"
+        },
+        {
+          "name": "LayoutNode",
+          "visibility": "public"
+        },
+        {
+          "name": "RenderedFrame",
+          "visibility": "public"
+        },
+        {
+          "name": "RenderedFrame",
+          "visibility": "public"
+        },
+        {
+          "name": "ViewportRect",
+          "visibility": "public"
+        },
+        {
+          "name": "ClipRect",
+          "visibility": "public"
+        },
+        {
+          "name": "LayoutViewport",
+          "visibility": "public"
+        },
+        {
+          "name": "StackAxis",
+          "visibility": "public"
+        },
+        {
+          "name": "StackAlignment",
+          "visibility": "public"
+        },
+        {
+          "name": "ViewportStackEntry",
+          "visibility": "public"
+        },
+        {
+          "name": "ViewportLayout",
+          "visibility": "public"
+        },
+        {
+          "name": "ViewportStackLayout",
+          "visibility": "public"
+        },
+        {
+          "name": "ViewportScrollLayout",
+          "visibility": "public"
+        },
+        {
+          "name": "ViewportRangeRenderer",
+          "visibility": "public"
+        },
+        {
+          "name": "ViewportDecoration",
+          "visibility": "public"
+        },
+        {
+          "name": "ViewportDocumentMetadataProvider",
+          "visibility": "public"
+        },
+        {
+          "name": "ViewportSnapshot",
+          "visibility": "public"
+        },
+        {
+          "name": "ViewportScrollProvider",
+          "visibility": "public"
+        },
+        {
+          "name": "ViewportLayoutProvider",
+          "visibility": "public"
+        },
+        {
+          "name": "LayoutBox",
+          "visibility": "public"
+        },
+        {
+          "name": "LayoutFrame",
+          "visibility": "public"
+        },
+        {
+          "name": "ViewportLayoutEngine",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/Mouse.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "MonotonicClock",
+          "visibility": "public"
+        },
+        {
+          "name": "MonotonicClock",
+          "visibility": "public"
+        },
+        {
+          "name": "MouseGestureOptions",
+          "visibility": "public"
+        },
+        {
+          "name": "MouseEventLocation",
+          "visibility": "public"
+        },
+        {
+          "name": "MouseEvent",
+          "visibility": "public"
+        },
+        {
+          "name": "MouseEvent",
+          "visibility": "public"
+        },
+        {
+          "name": "MouseRenderIntent",
+          "visibility": "public"
+        },
+        {
+          "name": "MouseCaptureIntent",
+          "visibility": "public"
+        },
+        {
+          "name": "MouseFocusIntent",
+          "visibility": "public"
+        },
+        {
+          "name": "MouseHandlerResult",
+          "visibility": "public"
+        },
+        {
+          "name": "MouseHandlerResult",
+          "visibility": "public"
+        },
+        {
+          "name": "MouseEventHandler",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/NormalResizeRecovery.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "NormalResizeRecoveryContext",
+          "visibility": "public"
+        },
+        {
+          "name": "NormalResizeRecoveryProvider",
+          "visibility": "public"
+        },
+        {
+          "name": "NormalResizeRecoveryProvider",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/Overlay.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "OverlayAnchor",
+          "visibility": "public"
+        },
+        {
+          "name": "OverlaySize",
+          "visibility": "public"
+        },
+        {
+          "name": "OverlaySize",
+          "visibility": "public"
+        },
+        {
+          "name": "OverlayMargin",
+          "visibility": "public"
+        },
+        {
+          "name": "OverlayMargin",
+          "visibility": "public"
+        },
+        {
+          "name": "OverlayOptions",
+          "visibility": "public"
+        },
+        {
+          "name": "OverlayId",
+          "visibility": "public"
+        },
+        {
+          "name": "ResolvedOverlay",
+          "visibility": "public"
+        },
+        {
+          "name": "OverlayUnfocusOptions",
+          "visibility": "public"
+        },
+        {
+          "name": "OverlayHandle",
+          "visibility": "public"
+        },
+        {
+          "name": "OverlayHost",
+          "visibility": "public"
+        },
+        {
+          "name": "TUIContext",
+          "visibility": "public"
+        },
+        {
+          "name": "ContextualComponent",
+          "visibility": "public"
+        },
+        {
+          "name": "ComponentRenderOrigin",
+          "visibility": "public"
+        },
+        {
+          "name": "RenderOriginAware",
+          "visibility": "public"
+        },
+        {
+          "name": "ComponentFrameBuilder",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/OverlayRenderer.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "OverlayRenderer",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/QueryCoordinator.scala",
+      "classification": "internal",
+      "declarations": [
+        {
+          "name": "QueryCoordinator",
+          "visibility": "internal"
+        },
+        {
+          "name": "QueryCoordinator",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/RenderServices.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "RenderServices",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/RendererCapabilities.scala",
+      "classification": "internal",
+      "declarations": [
+        {
+          "name": "PreparedResizeRecovery",
+          "visibility": "internal"
+        },
+        {
+          "name": "AppendPublisher",
+          "visibility": "internal"
+        },
+        {
+          "name": "ResizeRecoveryRenderer",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/RendererPolicy.scala",
+      "classification": "internal",
+      "declarations": [
+        {
+          "name": "PreparedFrame",
+          "visibility": "internal"
+        },
+        {
+          "name": "FrameOutput",
+          "visibility": "internal"
+        },
+        {
+          "name": "RuntimeTerminalServices",
+          "visibility": "internal"
+        },
+        {
+          "name": "RendererPolicy",
+          "visibility": "internal"
+        },
+        {
+          "name": "NormalScreenPolicy",
+          "visibility": "internal"
+        },
+        {
+          "name": "FullscreenViewportPolicy",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/RuntimeCounters.scala",
+      "classification": "internal",
+      "declarations": [
+        {
+          "name": "RuntimeCounterSnapshot",
+          "visibility": "internal"
+        },
+        {
+          "name": "RuntimeCounters",
+          "visibility": "internal"
+        },
+        {
+          "name": "RuntimeCounterScope",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/ScopedTask.scala",
+      "classification": "experimental",
+      "declarations": [
+        {
+          "name": "ScopedTask",
+          "visibility": "public"
+        },
+        {
+          "name": "ScheduledCleanupPendingException",
+          "visibility": "public"
+        },
+        {
+          "name": "ScopeTimer",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/TUI.scala",
+      "classification": "selected baseline members; other members evolving",
+      "declarations": [
+        {
+          "name": "TUIScreenMode",
+          "visibility": "public"
+        },
+        {
+          "name": "TUIOptions",
+          "visibility": "public"
+        },
+        {
+          "name": "TUIOptions",
+          "visibility": "public"
+        },
+        {
+          "name": "TUI",
+          "visibility": "public"
+        },
+        {
+          "name": "TUI",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/TUIDiagnostics.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "NormalResizeClearPolicy",
+          "visibility": "public"
+        },
+        {
+          "name": "TUIDiagnosticLifecycleState",
+          "visibility": "public"
+        },
+        {
+          "name": "TUIDiagnosticWriteKind",
+          "visibility": "public"
+        },
+        {
+          "name": "TUIDiagnosticRedrawKind",
+          "visibility": "public"
+        },
+        {
+          "name": "TUIDiagnosticClearReason",
+          "visibility": "public"
+        },
+        {
+          "name": "TUIDiagnosticAppendOutcome",
+          "visibility": "public"
+        },
+        {
+          "name": "TUIDiagnosticAppendFailure",
+          "visibility": "public"
+        },
+        {
+          "name": "TUIDiagnosticResizeRecoveryOutcome",
+          "visibility": "public"
+        },
+        {
+          "name": "TUIDiagnosticResizeRecoveryFailure",
+          "visibility": "public"
+        },
+        {
+          "name": "TUIDiagnosticEvent",
+          "visibility": "public"
+        },
+        {
+          "name": "TUIDiagnosticObserver",
+          "visibility": "public"
+        },
+        {
+          "name": "TUIDiagnosticObserver",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/TerminalQueryResult.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "TerminalQueryResult",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/TypedControlClipping.scala",
+      "classification": "internal",
+      "declarations": [
+        {
+          "name": "TypedControlClipping",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/core/ViewportSelection.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "ViewportSelection",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/editing/EditorBuffer.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "EditorCursor",
+          "visibility": "public"
+        },
+        {
+          "name": "EditorBuffer",
+          "visibility": "public"
+        },
+        {
+          "name": "EditorBuffer",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/editing/KillRing.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "KillRing",
+          "visibility": "public"
+        },
+        {
+          "name": "KillRing",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/editing/UndoStack.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "UndoStack",
+          "visibility": "public"
+        },
+        {
+          "name": "UndoStack",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/editing/WordNavigation.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "WordNavigation",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/editing/package.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": []
+    },
+    {
+      "path": "core/src/scalatui/matching/FuzzyMatcher.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "FuzzyMatch",
+          "visibility": "public"
+        },
+        {
+          "name": "FuzzyRanked",
+          "visibility": "public"
+        },
+        {
+          "name": "FuzzyMatcher",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/scheduling/ExecutorTaskScheduler.scala",
+      "classification": "experimental",
+      "declarations": [
+        {
+          "name": "ExecutorTaskScheduler",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/scheduling/ManualTaskScheduler.scala",
+      "classification": "experimental",
+      "declarations": [
+        {
+          "name": "TimeAdvance",
+          "visibility": "public"
+        },
+        {
+          "name": "ManualTaskScheduler",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/scheduling/TaskScheduler.scala",
+      "classification": "experimental",
+      "declarations": [
+        {
+          "name": "ScheduledTask",
+          "visibility": "public"
+        },
+        {
+          "name": "SchedulingRejection",
+          "visibility": "public"
+        },
+        {
+          "name": "SchedulingRejectedException",
+          "visibility": "public"
+        },
+        {
+          "name": "TaskScheduler",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/syntax/Containment.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "Containment",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/syntax/Equality.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "Equality",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/terminal/Base64ImagePayload.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "Base64ImagePayload",
+          "visibility": "public"
+        },
+        {
+          "name": "Base64ImagePayload",
+          "visibility": "public"
+        },
+        {
+          "name": "Base64ImagePayloadError",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/terminal/InputTiming.scala",
+      "classification": "internal",
+      "declarations": [
+        {
+          "name": "InputTiming",
+          "visibility": "internal"
+        },
+        {
+          "name": "InputTiming",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/terminal/InteractiveProtocolSession.scala",
+      "classification": "internal",
+      "declarations": [
+        {
+          "name": "InteractiveProtocolSession",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/terminal/KeybindingManager.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "KeybindingScope",
+          "visibility": "public"
+        },
+        {
+          "name": "KeybindingCommand",
+          "visibility": "public"
+        },
+        {
+          "name": "KeyDescriptor",
+          "visibility": "public"
+        },
+        {
+          "name": "KeybindingDefinition",
+          "visibility": "public"
+        },
+        {
+          "name": "KeybindingConflict",
+          "visibility": "public"
+        },
+        {
+          "name": "KeybindingCommand",
+          "visibility": "public"
+        },
+        {
+          "name": "KeybindingManager",
+          "visibility": "public"
+        },
+        {
+          "name": "KeybindingManager",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/terminal/KittyImageGeometry.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "ImagePixelRect",
+          "visibility": "public"
+        },
+        {
+          "name": "KittyImageGeometry",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/terminal/KittyKeyboardProtocol.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "KittyKeyboardProtocolState",
+          "visibility": "public"
+        },
+        {
+          "name": "KittyKeyboardProtocolState",
+          "visibility": "public"
+        },
+        {
+          "name": "KittyKeyboardProtocolNegotiator",
+          "visibility": "public"
+        },
+        {
+          "name": "KittyKeyboardProtocol",
+          "visibility": "public"
+        },
+        {
+          "name": "KittyKeyboardProtocolTerminal",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/terminal/OrderedInputDelivery.scala",
+      "classification": "internal",
+      "declarations": [
+        {
+          "name": "OrderedInputDelivery",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/terminal/ProgramStatus.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "ProgramStatusState",
+          "visibility": "public"
+        },
+        {
+          "name": "ProgramStatusKind",
+          "visibility": "public"
+        },
+        {
+          "name": "ProgramStatus",
+          "visibility": "public"
+        },
+        {
+          "name": "ProgramStatusProtocol",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalProgramStatusSupport",
+          "visibility": "public"
+        },
+        {
+          "name": "ProgramStatusSession",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/terminal/StreamTerminal.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "StreamTerminal",
+          "visibility": "public"
+        },
+        {
+          "name": "StreamTerminal",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/terminal/Terminal.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "Terminal",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalInputDrainSupport",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalTitleSupport",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalMouseTrackingMode",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalMouseTrackingOptions",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalMouseTrackingOptions",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalMouseProtocolSupport",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalProgressSupport",
+          "visibility": "public"
+        },
+        {
+          "name": "Terminal",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/terminal/TerminalCapabilities.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "TerminalCapabilities",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalCapabilityOverride",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalCapabilityOverrides",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalCapabilitiesSource",
+          "visibility": "public"
+        },
+        {
+          "name": "ImageProtocol",
+          "visibility": "public"
+        },
+        {
+          "name": "ImageProtocol",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalCapabilities",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/terminal/TerminalColorProtocol.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "RgbColor",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalColorScheme",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalColorProtocol",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/terminal/TerminalCursorProtocol.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "TerminalCursorProtocol",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/terminal/TerminalImageProtocol.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "ImageDimensions",
+          "visibility": "public"
+        },
+        {
+          "name": "ImageCellDimensions",
+          "visibility": "public"
+        },
+        {
+          "name": "ImageCellSize",
+          "visibility": "public"
+        },
+        {
+          "name": "ImageCellDimensionsSource",
+          "visibility": "public"
+        },
+        {
+          "name": "ImageRenderOptions",
+          "visibility": "public"
+        },
+        {
+          "name": "ImageRenderResult",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalImageProtocol",
+          "visibility": "public"
+        },
+        {
+          "name": "KittyImageIdAllocator",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/terminal/TerminalInput.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "TerminalInput",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalInput",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalRawKind",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalRawTermination",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalInputChunk",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalInputChunk",
+          "visibility": "public"
+        },
+        {
+          "name": "MouseAction",
+          "visibility": "public"
+        },
+        {
+          "name": "MouseAction",
+          "visibility": "public"
+        },
+        {
+          "name": "MouseButton",
+          "visibility": "public"
+        },
+        {
+          "name": "MouseButton",
+          "visibility": "public"
+        },
+        {
+          "name": "MouseButtonState",
+          "visibility": "public"
+        },
+        {
+          "name": "MouseButtonState",
+          "visibility": "public"
+        },
+        {
+          "name": "MouseWheelDirection",
+          "visibility": "public"
+        },
+        {
+          "name": "MouseInputContext",
+          "visibility": "public"
+        },
+        {
+          "name": "KeyEventType",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalKey",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalKey",
+          "visibility": "public"
+        },
+        {
+          "name": "KeyModifiers",
+          "visibility": "public"
+        },
+        {
+          "name": "KeyModifiers",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/terminal/TerminalInputBuffer.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "TerminalInputBuffer",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalInputBuffer",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/terminal/TerminalInputParser.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "TerminalInputParser",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/terminal/TerminalRenderControl.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "TerminalRenderControlDetails",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalRenderControl",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalRenderControl",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalRenderControlEncoder",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/terminal/TerminalReplyFraming.scala",
+      "classification": "internal",
+      "declarations": [
+        {
+          "name": "TerminalReplyFraming",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/terminal/TerminalUtf8Decoder.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "TerminalUtf8Decoder",
+          "visibility": "public"
+        },
+        {
+          "name": "TerminalUtf8Internals",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/terminal/VirtualTerminal.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "VirtualTerminal",
+          "visibility": "public"
+        },
+        {
+          "name": "VirtualTerminal",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/testing/ScreenSnapshot.scala",
+      "classification": "experimental",
+      "declarations": [
+        {
+          "name": "ScreenSnapshot",
+          "visibility": "public"
+        },
+        {
+          "name": "ScreenSnapshot",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/testing/TUITestDriver.scala",
+      "classification": "experimental",
+      "declarations": [
+        {
+          "name": "TUITestLimits",
+          "visibility": "public"
+        },
+        {
+          "name": "TUITestDriver",
+          "visibility": "public"
+        },
+        {
+          "name": "PendingScheduledTasksException",
+          "visibility": "public"
+        },
+        {
+          "name": "TUITestDriver",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/theme/SemanticTheme.scala",
+      "classification": "experimental",
+      "declarations": [
+        {
+          "name": "SemanticRole",
+          "visibility": "public"
+        },
+        {
+          "name": "ThemeColor",
+          "visibility": "public"
+        },
+        {
+          "name": "SemanticStyle",
+          "visibility": "public"
+        },
+        {
+          "name": "SemanticTheme",
+          "visibility": "public"
+        },
+        {
+          "name": "SemanticTheme",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/unicode/TextCase.scala",
+      "classification": "internal",
+      "declarations": [
+        {
+          "name": "TextCase",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/unicode/Unicode.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "GraphemeBoundaryEngine",
+          "visibility": "internal"
+        },
+        {
+          "name": "GraphemeBoundaryEngine",
+          "visibility": "internal"
+        },
+        {
+          "name": "Unicode",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/unicode/UnicodeNormalizationTables.scala",
+      "classification": "internal",
+      "declarations": [
+        {
+          "name": "UnicodeNormalizationTables",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "core/src/scalatui/unicode/UnicodeTables.scala",
+      "classification": "internal",
+      "declarations": [
+        {
+          "name": "UnicodeTables",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "extras/src/scalatui/extras/Expandable.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "Expandable",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "extras/src/scalatui/extras/ExpandableSection.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "ExpansionHintVisibility",
+          "visibility": "public"
+        },
+        {
+          "name": "ExpandableSectionTheme",
+          "visibility": "public"
+        },
+        {
+          "name": "ExpandableSection",
+          "visibility": "public"
+        },
+        {
+          "name": "SectionContent",
+          "visibility": "internal"
+        },
+        {
+          "name": "ExpandableSection",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "extras/src/scalatui/extras/ExpandableText.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "ExpandableTextTheme",
+          "visibility": "public"
+        },
+        {
+          "name": "ExpandableText",
+          "visibility": "public"
+        },
+        {
+          "name": "ExpandableText",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "extras/src/scalatui/extras/ExpansionController.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "ExpansionController",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "extras/src/scalatui/extras/package.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": []
+    },
+    {
+      "path": "image/src/scalatui/image/Image.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "ImageTheme",
+          "visibility": "public"
+        },
+        {
+          "name": "ImageSource",
+          "visibility": "public"
+        },
+        {
+          "name": "ImageHelperError",
+          "visibility": "public"
+        },
+        {
+          "name": "ImageHelperError",
+          "visibility": "public"
+        },
+        {
+          "name": "ImageSource",
+          "visibility": "public"
+        },
+        {
+          "name": "ImageMetadata",
+          "visibility": "public"
+        },
+        {
+          "name": "ImageDimensionsSniffer",
+          "visibility": "public"
+        },
+        {
+          "name": "ImageSizing",
+          "visibility": "public"
+        },
+        {
+          "name": "Image",
+          "visibility": "public"
+        },
+        {
+          "name": "Image",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "markdown/src/scalatui/markdown/MarkdownRenderer.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "MarkdownRenderer",
+          "visibility": "public"
+        },
+        {
+          "name": "MarkdownCodeHighlighter",
+          "visibility": "public"
+        },
+        {
+          "name": "MarkdownTheme",
+          "visibility": "public"
+        },
+        {
+          "name": "MarkdownRenderOptions",
+          "visibility": "public"
+        },
+        {
+          "name": "MarkdownRenderOptions",
+          "visibility": "public"
+        },
+        {
+          "name": "MarkdownParser",
+          "visibility": "public"
+        },
+        {
+          "name": "MarkdownBlock",
+          "visibility": "public"
+        },
+        {
+          "name": "MarkdownBlock",
+          "visibility": "public"
+        },
+        {
+          "name": "BasicMarkdownParser",
+          "visibility": "public"
+        },
+        {
+          "name": "BasicMarkdownRenderer",
+          "visibility": "public"
+        },
+        {
+          "name": "MarkdownReuseCache",
+          "visibility": "internal"
+        },
+        {
+          "name": "BasicMarkdownRenderer",
+          "visibility": "public"
+        },
+        {
+          "name": "Markdown",
+          "visibility": "public"
+        },
+        {
+          "name": "MarkdownRenderCache",
+          "visibility": "internal"
+        }
+      ]
+    },
+    {
+      "path": "terminalJvm/src/scalatui/terminal/jvm/SttyTerminal.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "SttyTerminal",
+          "visibility": "public"
+        },
+        {
+          "name": "SttyTerminal",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "terminalJvm/src/scalatui/terminal/jvm/interop/SiglyphJvm.scala",
+      "classification": "selected baseline members; other members evolving",
+      "declarations": [
+        {
+          "name": "SiglyphJvm",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "terminalJvm/src/scalatui/terminal/jvm/package.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": []
+    },
+    {
+      "path": "terminalNative/src/scalatui/terminal/native/PosixTerminal.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "PosixTerminal",
+          "visibility": "public"
+        },
+        {
+          "name": "PosixTerminal",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
+      "path": "terminalNative/src/scalatui/terminal/native/package.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": []
+    }
+  ]
+}

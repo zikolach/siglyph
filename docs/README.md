@@ -50,6 +50,8 @@
 
 ## Maintainers
 
+- [API stability and release gates](api-stability.md): scoped ABI checks and published/candidate consumers.
+
 These pages concern building, testing and researching the library, not prerequisites for consuming it.
 
 - [Contributing and validation](../CONTRIBUTING.md)

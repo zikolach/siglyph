@@ -60,6 +60,8 @@ python3 scripts/check-docs.py --compile
 
 The [checker](scripts/check-docs.py) and its [regression tests](scripts/test_check_docs.py) validate local Markdown targets/anchors, primary installation versions and placeholders, and the README's canonical example. Keep the README block synchronized with `examples/scala-cli/hello.scala`; mark additional standalone Scala recipes with `<!-- compile-example -->` before their code fence. Compilation does not verify real-terminal appearance; use the [interactive smoke checklist](docs/interactive-smoke.md) when behavior changes. Historical release records are not forced to the latest version.
 
+For public API changes, run the [compatibility gate](docs/api-stability.md) against a locally staged candidate. `python3 scripts/check-compatibility.py --inventory-only` checks source inventory drift without fetching artifacts.
+
 ## Contribution workflow
 
 1. Open an issue or discussion first for substantial API or behavior changes.
