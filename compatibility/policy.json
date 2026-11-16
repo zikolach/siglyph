@@ -1,0 +1,56 @@
+{
+  "baseline": "0.11.0",
+  "scala": "3.9.0",
+  "native": "0.5.12",
+  "kotlin": "2.4.21",
+  "jvm": "temurin:21",
+  "classes": {
+    "scalatui.terminal.jvm.interop.SiglyphJvm": [
+      "*"
+    ],
+    "scalatui.components.Input": [
+      "<init>",
+      "value",
+      "setValue",
+      "render",
+      "focused",
+      "focused_$eq"
+    ],
+    "scalatui.components.Input$": [
+      "MODULE$",
+      "$lessinit$greater$default$1",
+      "$lessinit$greater$default$2"
+    ],
+    "scalatui.components.Text": [
+      "<init>",
+      "text",
+      "text_$eq",
+      "render"
+    ],
+    "scalatui.core.Component": [
+      "*"
+    ],
+    "scalatui.core.ComponentRender": [
+      "lines",
+      "controls",
+      "cursorPlacements"
+    ],
+    "scalatui.core.TUI": [
+      "start",
+      "stop",
+      "run",
+      "addChild",
+      "setFocus",
+      "requestRender",
+      "requestExit"
+    ],
+    "scalatui.core.TUI$": [
+      "fullscreen",
+      "fullscreen$default$3"
+    ],
+    "scalatui.core.ComponentRender$": [
+      "MODULE$",
+      "text"
+    ]
+  }
+}

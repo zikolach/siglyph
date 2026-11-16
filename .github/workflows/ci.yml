@@ -53,6 +53,11 @@ jobs:
       - name: Run Scalafix
         run: mill scalafixCheck
 
+      - name: Check compatibility policy and negative fixtures
+        run: |
+          python3 scripts/check-compatibility.py --inventory-only
+          python3 -m unittest discover -s scripts -p 'test_check_compatibility.py'
+
       - name: Compile all modules
         run: mill __.compile
 

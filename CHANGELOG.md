@@ -9,6 +9,9 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ### Added
 
+- Added explicit API stability classification, selected JVM ABI gates, negative compatibility tests
+  and artifact-based Scala/Java/Kotlin/Native consumer checks for local candidates and releases.
+
 - Added opt-in semantic themes for input, list and table surfaces, explicit palette/override
   policies, and a keyboard-only themed form with validation and modal focus restoration.
 
