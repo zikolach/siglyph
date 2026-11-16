@@ -5,6 +5,7 @@ import java.util.concurrent.atomic.AtomicReference
 import scalatui.scheduling.{
   ExecutorTaskScheduler, SchedulingRejectedException, SchedulingRejection, TaskScheduler
 }
+import java.nio.file.Path
 import scalatui.ansi.Ansi
 import scalatui.components.{
   DataTable, Input, ScrollView, ScrollbarMode, StackEntry, StackEntryOptions, TableColumn,
@@ -26,17 +27,23 @@ final class LogExplorerDemo private (
     private[demo] val table: DataTable[LogEvent],
     private[demo] val viewport: ScrollView,
     generate: Int => Unit,
-    markLive: () => Unit
+    markLive: () => Unit,
+    refreshFile: () => Unit
 ):
-  private val sourceLock    = new Object
-  private var sourceStopped = false
-  private var sourceStarted = false
-  private var sourceScope   = Option.empty[ApplicationScope]
-  private var sourceTask    = Option.empty[ScopedTask]
+  private val sourceLock                = new Object
+  private var filePump                  = Option.empty[FileLogPump]
+  private var fileMode                  = false
+  private var cancelPolling: () => Unit = () => ()
+  private var sourceStopped             = false
+  private var sourceStarted             = false
+  private var sourceScope               = Option.empty[ApplicationScope]
+  private var sourceTask                = Option.empty[ScopedTask]
 
   private[demo] def sourceStatus: String =
+    val file     = sourceLock.synchronized(filePump)
     val snapshot = sourceLock.synchronized(sourceStarted -> sourceTask)
-    if !snapshot._1 then "ready"
+    if file.nonEmpty then file.get.status
+    else if !snapshot._1 then "ready"
     else
       snapshot._2 match
         case Some(task) if task.failure.nonEmpty                                        => "failed"
@@ -104,14 +111,19 @@ final class LogExplorerDemo private (
 
   private[demo] def cancelSource(allowPending: Boolean = false): Unit =
     model.cancel()
-    val scope = sourceLock.synchronized {
+    val scope  = sourceLock.synchronized {
       sourceStopped = true
       sourceScope
     }
-    scope.foreach { current =>
-      try current.close()
-      catch case _: ScheduledCleanupPendingException if allowPending => ()
-    }
+    val cancel = sourceLock.synchronized(cancelPolling)
+    managed(())(
+      cancel,
+      () =>
+        scope.foreach { current =>
+          try current.close()
+          catch case _: ScheduledCleanupPendingException if allowPending => ()
+        }
+    )
 
   private def suppress(primary: Throwable, secondary: Throwable): Unit =
     if (primary ne secondary) && !primary.getSuppressed.exists(_ eq secondary) then
@@ -162,6 +174,86 @@ final class LogExplorerDemo private (
       batchSize
     )
 
+  private[demo] def isFileMode: Boolean = sourceLock.synchronized(fileMode)
+
+  /** File I/O runs on an application-owned worker, never inside a scoped UI callback. */
+  def runFile(path: Path): Unit =
+    val executor             = new ScheduledThreadPoolExecutor(
+      1,
+      new java.util.concurrent.ThreadFactory:
+        override def newThread(work: Runnable): Thread =
+          val thread = new Thread(work, "siglyph-file-follower")
+          thread.setDaemon(true)
+          thread
+    )
+    val failure              = new AtomicReference[Throwable]()
+    val active               = new java.util.concurrent.atomic.AtomicBoolean(true)
+    var future               = Option.empty[java.util.concurrent.ScheduledFuture[?]]
+    val futureLock           = new Object
+    def cancelWorker(): Unit =
+      active.set(false)
+      val task = futureLock.synchronized(future)
+      task.foreach(_.cancel(false))
+    sourceLock.synchronized {
+      require(!sourceStarted, "source was already started")
+      sourceStarted = true
+      fileMode = true
+      cancelPolling = () => {
+        sourceLock.synchronized(filePump).foreach(_.cancel())
+        cancelWorker()
+      }
+    }
+    managed {
+      tui.start()
+      tui.rethrowRuntimeFailure()
+      val scope   = tui.openApplicationScope()
+      val install = sourceLock.synchronized { sourceScope = Some(scope); !sourceStopped }
+      if install then
+        val pump       = new FileLogPump(
+          new FileLogReader(path),
+          scope,
+          () => { val snapshot = model.snapshot; !snapshot.paused && !snapshot.cancelled },
+          report =>
+            val accepted = report match
+              case Left(_)      => !model.snapshot.paused
+              case Right(batch) =>
+                if model.snapshot.following && !viewport.isFollowingEnd then model.move(0)
+                model.appendFile(batch)
+            if accepted then refreshFile()
+            accepted
+        )
+        sourceLock.synchronized { filePump = Some(pump) }
+        val scheduled  = executor.scheduleWithFixedDelay(
+          new Runnable:
+            override def run(): Unit =
+              if active.get() then
+                try pump.poll()
+                catch
+                  case error: Throwable =>
+                    failure.compareAndSet(null, error)
+                    tui.requestExit()
+          ,
+          0L,
+          250L,
+          TimeUnit.MILLISECONDS
+        )
+        val cancelLate = futureLock.synchronized { future = Some(scheduled); !active.get() }
+        if cancelLate then scheduled.cancel(false)
+      else scope.close()
+      tui.run()
+      Option(failure.get()).foreach(throw _)
+    }(
+      () => cancelSource(),
+      () => tui.stop(),
+      () => { executor.shutdownNow(); () },
+      () => {
+        if !executor.awaitTermination(5L, TimeUnit.SECONDS) then
+          throw new IllegalStateException("file producer did not terminate")
+      },
+      () => tui.stop(),
+      () => Option(failure.get()).foreach(throw _)
+    )
+
   private[demo] def runScheduled(
       scheduler: TaskScheduler,
       stopProducer: () => Unit,
@@ -190,9 +282,10 @@ private final class LogExplorerLines(lines: () => Vector[String]) extends Compon
     ComponentRender.text(lines().map(Ansi.truncateToWidth(_, math.max(0, width), "")))
 
 object LogExplorerDemo:
-  def apply(terminal: Terminal, capacity: Int = 200): LogExplorerDemo =
+  def apply(terminal: Terminal, capacity: Int = 200, initialGenerated: Int = 40): LogExplorerDemo =
     val model                                          = LogExplorerModel(capacity)
-    model.advance(40)
+    model.advance(initialGenerated)
+    var manualStep: () => Unit                         = () => model.advance(20)
     var stopSource: () => Unit                         = () => model.cancel()
     var sourceLabel: () => String                      = () => "ready"
     var notice                                         = "Up/Down/PgUp/PgDn browse | Enter filter | Esc/Ctrl+C quit"
@@ -275,7 +368,7 @@ object LogExplorerDemo:
         val handled =
           if modifiers === KeyModifiers(ctrl = true) then
             key match
-              case TerminalKey.Character("n") => model.advance(20); true
+              case TerminalKey.Character("n") => manualStep(); true
               case TerminalKey.Character("p") => model.togglePause(); true
               case TerminalKey.Character("g") => model.followLatest(); true
               case TerminalKey.Character("x") => stopSource(); true
@@ -312,8 +405,10 @@ object LogExplorerDemo:
         model.advance(count)
         refresh(revealSelection = false)
       },
-      () => refresh()
+      () => refresh(),
+      () => refresh(revealSelection = false)
     )
+    manualStep = () => { if !demo.isFileMode then model.advance(20) }
     sourceLabel = () => demo.sourceStatus
     stopSource = () => demo.cancelSource(allowPending = true)
     demo

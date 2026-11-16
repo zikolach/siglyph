@@ -78,6 +78,27 @@ private[demo] final class LogExplorerModel(val capacity: Int = 200):
       reconcile(matching)
   }
 
+  def appendFile(batch: FileLogBatch): Boolean = synchronized {
+    if paused then false
+    else if cancelled then true
+    else
+      val rows = batch.notice.toVector.map(value => FileLogLine(value, truncated = true)) ++
+        batch.lines
+      require(rows.size <= 1001, "file batch exceeds row limit")
+      require(rows.forall(_.text.length <= 65536), "file line exceeds retained limit")
+      require(generated <= Long.MaxValue - rows.size.toLong, "event identity exhausted")
+      rows.foreach { line =>
+        generated += 1L
+        if events.size >= capacity then
+          events.dequeue()
+          evicted += 1L
+        val text = line.text + (if line.truncated then " [truncated/notice]" else "")
+        events.enqueue(LogEvent(generated, if line.truncated then "WARN" else "LOG", "file", text))
+      }
+      reconcile(matching)
+      true
+  }
+
   /** Reject oversized committed queries; the Input editor's draft/history is separately owned. */
   def setFilter(value: String): Boolean = synchronized {
     val accepted = value.length <= 256
