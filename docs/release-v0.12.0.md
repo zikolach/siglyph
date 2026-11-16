@@ -1,10 +1,9 @@
-# 0.12.0 release preparation (not published)
+# 0.12.0 release candidate (publication authorized)
 
 Prepared on **2026-11-16** from merged main `ac87a370eb4e5fbfec7640da9227fd045db378a1`.
 
-**0.12.0** is the recommended next version: this is a substantial additive feature release after
-0.11.0, not a patch and not a 1.0 stability declaration. No tag, GitHub Release or remote package
-publication is authorized by these preparation files.
+**0.12.0** is the approved next version: this is a substantial additive feature release after
+0.11.0, not a patch and not a 1.0 stability declaration. The maintainer authorized release and the tag push on **2026-11-16**. Publication is pending verification.
 
 ## Release highlights
 
@@ -15,8 +14,7 @@ publication is authorized by these preparation files.
 - Live generated logs and bounded file following with visible I/O recovery.
 - Artifact-based compatibility gates and substantially simpler onboarding.
 
-The [prepared changelog](../CHANGELOG.md#unreleased) contains the detailed release notes. Its entries
-remain under Unreleased until the actual publication date is approved. Feature scope is merged PRs
+The [dated changelog](../CHANGELOG.md#0120---2026-11-16) contains the finalized release notes for **2026-11-16**. Feature scope is merged PRs
 #100–#103 and #105–#112, plus the #92 documentation work. The #99 initial roadmap is implemented and
 merged; a release remains a separate decision.
 

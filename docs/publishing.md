@@ -5,7 +5,9 @@ Central. README and Scala CLI examples use the latest published version, current
 Keep examples on an available published version while a subsequent release is only planned.
 
 **Next release: 0.12.0 (in preparation, not published).** See the [candidate record](release-v0.12.0.md).
-Do not push its tag or dispatch publication as part of preparation.
+The maintainer authorized publication on 2026-11-16. `docs/release-status.json` separately tracks the
+verified published version so a dated candidate changelog cannot prematurely bump installation examples.
+Update that file only after public artifact availability is verified.
 
 Version **0.11.0** retains the **Scala 3.9** compiler/TASTy baseline and supported **JDK 21**
 runtime/build baseline. See the [release record](release-v0.11.0.md) for scope and verification.

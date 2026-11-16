@@ -67,6 +67,7 @@ class DocumentationChecks(unittest.TestCase):
 
     def fixture(self, root, malformed=False):
         (root / "docs").mkdir()
+        (root / "docs/release-status.json").write_text('{"publishedVersion":"0.11.0","preparedVersion":"0.12.0"}')
         examples = root / "examples/scala-cli"
         examples.mkdir(parents=True)
         source = '//> using scala 3.9.0\n//> using dep io.github.zikolach::siglyph-core:0.11.0\nprintln("hello")\n'
@@ -100,6 +101,14 @@ class DocumentationChecks(unittest.TestCase):
             with patch.object(DOCS, "ROOT", root), patch.object(sys, "argv", ["check-docs.py"]), patch.object(DOCS.subprocess, "run") as run, contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(DOCS.main(), 0)
                 run.assert_not_called()
+
+    def test_prepared_changelog_does_not_change_published_installation_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            self.fixture(root)
+            (root / "CHANGELOG.md").write_text('## [Unreleased]\n## [0.12.0] - 2026-11-16\n## [0.11.0]\n')
+            with patch.object(DOCS, "ROOT", root), patch.object(sys, "argv", ["check-docs.py"]), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(DOCS.main(), 0)
 
     def test_malformed_recipe_fails_before_compiling(self):
         with tempfile.TemporaryDirectory() as directory:

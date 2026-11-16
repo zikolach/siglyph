@@ -6,6 +6,7 @@ versions remain valid outside the primary installation path. External URLs
 are deliberately not fetched. Uses only the Python standard library.
 """
 import argparse
+import json
 import re
 import subprocess
 import tempfile
@@ -139,7 +140,11 @@ def main():
     args = parser.parse_args()
     docs = sorted(set(ROOT.glob("*.md")) | set((ROOT / "docs").rglob("*.md")) | {ROOT / "examples/scala-cli/README.md"})
     errors = [error for path in docs for error in check_links(ROOT, path)]
-    version = re.search(r"^## \[(\d+\.\d+\.\d+)\]", (ROOT / "CHANGELOG.md").read_text(), re.M)[1]
+    version = json.loads((ROOT / "docs/release-status.json").read_text())["publishedVersion"]
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        errors.append("invalid publishedVersion in release-status.json")
+    if f"## [{version}]" not in (ROOT / "CHANGELOG.md").read_text():
+        errors.append("published version has no changelog section")
     primary = [ROOT / p for p in ("README.md", "docs/getting-started.md", "examples/scala-cli/README.md")]
     primary += sorted((ROOT / "examples/scala-cli").glob("*.scala"))
     for path in primary:
