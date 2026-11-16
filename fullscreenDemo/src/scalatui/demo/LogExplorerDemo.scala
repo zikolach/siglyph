@@ -7,6 +7,7 @@ import scalatui.scheduling.{
 }
 import java.nio.file.Path
 import scalatui.ansi.Ansi
+import scalatui.theme.SemanticTheme
 import scalatui.components.{
   DataTable, Input, ScrollView, ScrollbarMode, StackEntry, StackEntryOptions, TableColumn,
   TableData, VStack
@@ -289,7 +290,7 @@ object LogExplorerDemo:
     var stopSource: () => Unit                         = () => model.cancel()
     var sourceLabel: () => String                      = () => "ready"
     var notice                                         = "Up/Down/PgUp/PgDn browse | Enter filter | Esc/Ctrl+C quit"
-    val input                                          = Input()
+    val input                                          = Input(theme = SemanticTheme.Monochrome)
     val initial                                        = model.snapshot
     var publishedGeneration                            = initial.generated
     var publishedFilter                                = initial.filter
@@ -300,7 +301,8 @@ object LogExplorerDemo:
         TableColumn[LogEvent]("Level", 5, _.level),
         TableColumn[LogEvent]("Service", 7, _.service),
         TableColumn[LogEvent]("Message", 60, _.message)
-      )
+      ),
+      theme = SemanticTheme.Monochrome
     )
     initial.selected.foreach(event => table.selectId(event.id.toString))
     val view                                           = ScrollView(table, followEnd = true, scrollbar = ScrollbarMode.Automatic)
