@@ -2,7 +2,7 @@
 
 [Documentation index](README.md) · [Virtual time](virtual-time.md) · [Update scopes](application-scopes.md)
 
-**Experimental and unreleased; not in 0.11.0.** `ExecutorTaskScheduler` adapts an application-owned `ScheduledExecutorService`. Unlike the manual clock, it delivers one-shot tasks using a real executor. It creates no executor or thread implicitly.
+**Available since 0.12.0; APIs remain experimental.** `ExecutorTaskScheduler` adapts an application-owned `ScheduledExecutorService`. Unlike the manual clock, it delivers one-shot tasks using a real executor. It creates no executor or thread implicitly.
 
 ## Run the consumer smoke
 

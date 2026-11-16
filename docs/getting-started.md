@@ -4,7 +4,7 @@
 
 ## Install
 
-Version **0.11.0** is published on Maven Central. No GitHub credentials or local publishing are needed. Maintainers can find release details in [Publishing](publishing.md).
+Version **0.12.0** is published on Maven Central. No GitHub credentials or local publishing are needed. Maintainers can find release details in [Publishing](publishing.md).
 
 ### Toolchain compatibility
 
@@ -22,8 +22,8 @@ Add to `build.sbt`:
 scalaVersion := "3.9.0"
 
 libraryDependencies ++= Seq(
-  "io.github.zikolach" %% "siglyph-core" % "0.11.0",
-  "io.github.zikolach" %% "siglyph-terminal-jvm" % "0.11.0"
+  "io.github.zikolach" %% "siglyph-core" % "0.12.0",
+  "io.github.zikolach" %% "siglyph-terminal-jvm" % "0.12.0"
 )
 ```
 
@@ -42,8 +42,8 @@ object app extends ScalaModule {
   def scalaVersion = "3.9.0"
 
   def mvnDeps = Seq(
-    mvn"io.github.zikolach::siglyph-core::0.11.0",
-    mvn"io.github.zikolach::siglyph-terminal-jvm::0.11.0"
+    mvn"io.github.zikolach::siglyph-core::0.12.0",
+    mvn"io.github.zikolach::siglyph-terminal-jvm::0.12.0"
   )
 }
 ```
@@ -52,39 +52,39 @@ object app extends ScalaModule {
 
 Add `siglyph-markdown`, `siglyph-image` or `siglyph-extras` only when needed. For example, extras uses:
 
-- **SBT:** `"io.github.zikolach" %% "siglyph-extras" % "0.11.0"`
-- **Mill:** `mvn"io.github.zikolach::siglyph-extras::0.11.0"`
+- **SBT:** `"io.github.zikolach" %% "siglyph-extras" % "0.12.0"`
+- **Mill:** `mvn"io.github.zikolach::siglyph-extras::0.12.0"`
 
-Optional Native modules are published in **0.11.0**. Add these platform-aware Mill coordinates from a `ScalaNativeModule` in addition to `siglyph-core` and `siglyph-terminal-native`:
+Optional Native modules are published in **0.12.0**. Add these platform-aware Mill coordinates from a `ScalaNativeModule` in addition to `siglyph-core` and `siglyph-terminal-native`:
 
 ```scala
-mvn"io.github.zikolach::siglyph-markdown::0.11.0"
-mvn"io.github.zikolach::siglyph-image::0.11.0"
-mvn"io.github.zikolach::siglyph-extras::0.11.0"
+mvn"io.github.zikolach::siglyph-markdown::0.12.0"
+mvn"io.github.zikolach::siglyph-image::0.12.0"
+mvn"io.github.zikolach::siglyph-extras::0.12.0"
 ```
 
 ### Maven for Java and Kotlin JVM apps
 
-The Java/Kotlin facade is available in **0.11.0**.
+The Java/Kotlin facade is available in **0.12.0**.
 
 ```xml
 <dependencies>
   <dependency>
     <groupId>io.github.zikolach</groupId>
     <artifactId>siglyph-core_3</artifactId>
-    <version>0.11.0</version>
+    <version>0.12.0</version>
   </dependency>
   <dependency>
     <groupId>io.github.zikolach</groupId>
     <artifactId>siglyph-terminal-jvm_3</artifactId>
-    <version>0.11.0</version>
+    <version>0.12.0</version>
   </dependency>
 </dependencies>
 ```
 
 ### Gradle for Java and Kotlin JVM apps
 
-The Java/Kotlin facade is available in **0.11.0**.
+The Java/Kotlin facade is available in **0.12.0**.
 
 In `build.gradle.kts` with your Java/Kotlin plugin configured:
 
@@ -92,12 +92,12 @@ In `build.gradle.kts` with your Java/Kotlin plugin configured:
 repositories { mavenCentral() }
 
 dependencies {
-  implementation("io.github.zikolach:siglyph-core_3:0.11.0")
-  implementation("io.github.zikolach:siglyph-terminal-jvm_3:0.11.0")
+  implementation("io.github.zikolach:siglyph-core_3:0.12.0")
+  implementation("io.github.zikolach:siglyph-terminal-jvm_3:0.12.0")
 }
 ```
 
-Scala JVM applications usually start with `siglyph-core` and `siglyph-terminal-jvm` through Scala build-tool syntax such as `%%` or Mill `::`. Java and Kotlin JVM applications use the concrete JVM artifact IDs `siglyph-core_3` and `siglyph-terminal-jvm_3`, and can use `scalatui.terminal.jvm.interop.SiglyphJvm` for a narrow Java-friendly facade. Scala Native applications use platform-aware coordinates such as `siglyph-core`, `siglyph-terminal-native`, `siglyph-markdown`, `siglyph-image`, and `siglyph-extras`; Mill resolves those to `_native0.5_3` artifacts from `ScalaNativeModule` projects for release **0.11.0**. The Java/Kotlin facade and `keyTester` are JVM-only; Scala Native artifacts remain Scala-focused.
+Scala JVM applications usually start with `siglyph-core` and `siglyph-terminal-jvm` through Scala build-tool syntax such as `%%` or Mill `::`. Java and Kotlin JVM applications use the concrete JVM artifact IDs `siglyph-core_3` and `siglyph-terminal-jvm_3`, and can use `scalatui.terminal.jvm.interop.SiglyphJvm` for a narrow Java-friendly facade. Scala Native applications use platform-aware coordinates such as `siglyph-core`, `siglyph-terminal-native`, `siglyph-markdown`, `siglyph-image`, and `siglyph-extras`; Mill resolves those to `_native0.5_3` artifacts from `ScalaNativeModule` projects for release **0.12.0**. The Java/Kotlin facade and `keyTester` are JVM-only; Scala Native artifacts remain Scala-focused.
 
 
 ## Scala Native

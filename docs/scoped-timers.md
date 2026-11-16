@@ -2,7 +2,7 @@
 
 [Documentation index](README.md) · [Update scopes](application-scopes.md) · [Virtual time](virtual-time.md) · [Executor adapter](executor-scheduling.md)
 
-**Experimental and unreleased; not in 0.11.0.** ApplicationScope now owns delayed and recurring registrations. It still does not own or shut down the scheduler/executor itself.
+**Available since 0.12.0; APIs remain experimental.** ApplicationScope now owns delayed and recurring registrations. It still does not own or shut down the scheduler/executor itself.
 
 ## Run a complete consumer
 

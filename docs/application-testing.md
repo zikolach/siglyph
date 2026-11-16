@@ -2,7 +2,7 @@
 
 [Documentation index](README.md) · [Roadmap #96](https://github.com/zikolach/siglyph/issues/96)
 
-**Experimental and unreleased; not in 0.11.0.** `scalatui.testing.TUITestDriver` is a framework-independent shared-core helper over `VirtualTerminal`. It removes repeated start/flush/input/cleanup code from synchronous application tests on JVM and Scala Native. It is not an emulator or an asynchronous test runtime.
+**Available since 0.12.0; APIs remain experimental.** `scalatui.testing.TUITestDriver` is a framework-independent shared-core helper over `VirtualTerminal`. It removes repeated start/flush/input/cleanup code from synchronous application tests on JVM and Scala Native. It is not an emulator or an asynchronous test runtime.
 
 ## Run a standalone consumer test
 
@@ -18,7 +18,7 @@ With a [Native toolchain](getting-started.md#scala-native):
 scala-cli run examples/scala-cli/testing.scala --native --jvm 21
 ```
 
-The [complete example](../examples/scala-cli/testing.scala) imports local `core/src`, needs no real TTY or test framework, and prints a success message after managed cleanup. Published dependency instructions will follow an actual release of these APIs; do not substitute 0.11.0 artifacts.
+The [complete example](../examples/scala-cli/testing.scala) imports local `core/src`, needs no real TTY or test framework, and prints a success message after managed cleanup. These scripts intentionally exercise local source. Published applications can instead use the 0.12.0 core artifact from Maven Central; 0.11.0 does not contain these APIs.
 
 ## Managed fixtures
 

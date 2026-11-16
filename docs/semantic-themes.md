@@ -2,7 +2,7 @@
 
 [Documentation index](README.md)
 
-Experimental/unreleased. `SemanticTheme` is an immutable value, not a global mutable service. Normal, muted, focused, selected, disabled, warning and error roles share a closed, cell-free SGR vocabulary.
+Available since 0.12.0; APIs remain experimental. `SemanticTheme` is an immutable value, not a global mutable service. Normal, muted, focused, selected, disabled, warning and error roles share a closed, cell-free SGR vocabulary.
 
 ## Try the form
 

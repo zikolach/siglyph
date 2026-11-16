@@ -10,7 +10,7 @@
 
 siglyph provides editable inputs, fullscreen layouts, scrolling, selection and terminal images without a Node.js runtime. It is inspired by [pi-tui](https://github.com/earendil-works/pi/tree/main/packages/tui); public Scala imports use `scalatui`.
 
-**0.11.0 · Scala 3.9.0 (or a compatible newer compiler) · JDK 21 · macOS/Linux · pre-1.0**
+**0.12.0 · Scala 3.9.0 (or a compatible newer compiler) · JDK 21 · macOS/Linux · pre-1.0**
 
 ## Quickstart
 
@@ -19,8 +19,8 @@ Install [Scala CLI](https://scala-cli.virtuslab.org/install/) and use a real mac
 <!-- canonical-example: examples/scala-cli/hello.scala -->
 ```scala
 //> using scala 3.9.0
-//> using dep io.github.zikolach::siglyph-core:0.11.0
-//> using dep io.github.zikolach::siglyph-terminal-jvm:0.11.0
+//> using dep io.github.zikolach::siglyph-core:0.12.0
+//> using dep io.github.zikolach::siglyph-terminal-jvm:0.12.0
 
 import scalatui.components.*
 import scalatui.core.TUI
@@ -65,8 +65,8 @@ For an existing Scala JVM application, start with just core and a terminal backe
 
 ```scala
 libraryDependencies ++= Seq(
-  "io.github.zikolach" %% "siglyph-core" % "0.11.0",
-  "io.github.zikolach" %% "siglyph-terminal-jvm" % "0.11.0"
+  "io.github.zikolach" %% "siglyph-core" % "0.12.0",
+  "io.github.zikolach" %% "siglyph-terminal-jvm" % "0.12.0"
 )
 ```
 

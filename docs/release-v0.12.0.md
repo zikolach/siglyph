@@ -1,82 +1,60 @@
-# 0.12.0 release candidate (publication authorized)
+# 0.12.0 release
 
-Prepared on **2026-11-16** from merged main `ac87a370eb4e5fbfec7640da9227fd045db378a1`.
+**0.12.0** was published on **2026-11-16** from tag commit
+`2bd87e73fba528890ce2254d1e9625ea7cad179a`, following merged preparation #114 and finalization #115.
+The maintainer explicitly authorized publication. No duplicate publication dispatch was used.
 
-**0.12.0** is the approved next version: this is a substantial additive feature release after
-0.11.0, not a patch and not a 1.0 stability declaration. The maintainer authorized release and the tag push on **2026-11-16**. Publication is pending verification.
+[GitHub Release](https://github.com/zikolach/siglyph/releases/tag/v0.12.0) ·
+[Dated changelog](../CHANGELOG.md#0120---2026-11-16)
 
-## Release highlights
+## Highlights
 
-- Typed virtualized tables and stable row selection for data-oriented applications.
-- Bounded application updates, scheduler adapters, virtual time and scope-owned recurring timers.
-- A managed, framework-independent JVM/Native application-test toolkit.
-- Immutable semantic palettes and a keyboard reference form with validation/focus restoration.
+- Typed virtualized tables and stable row selection.
+- Bounded application scopes, cancellable schedulers, owned recurring timers and virtual time.
+- Managed JVM/Native application tests and bounded diagnostics.
+- Immutable semantic themes, keyboard validation and modal focus restoration.
 - Live generated logs and bounded file following with visible I/O recovery.
-- Artifact-based compatibility gates and substantially simpler onboarding.
+- Artifact-based compatibility gates and simpler onboarding.
 
-The [dated changelog](../CHANGELOG.md#0120---2026-11-16) contains the finalized release notes for **2026-11-16**. Feature scope is merged PRs
-#100–#103 and #105–#112, plus the #92 documentation work. The #99 initial roadmap is implemented and
-merged; a release remains a separate decision.
+The new table/theme/scheduling/testing APIs remain experimental. This is a feature release, not a
+1.0 stability declaration. Scala 3.9.0-compatible compiler, JDK 21, Scala Native 0.5.12, Mill 1.3.1 and
+Unicode 17.0.0 remain the baseline. No runtime dependency or terminal platform was added.
 
-## Compatibility and limits
+## Publication verification
 
-The Scala 3.9.0/JDK 21/Scala Native 0.5.12/Mill 1.3.1/Unicode 17.0.0 baselines remain unchanged.
-Artifacts retain the `scalatui` namespace. Existing Input constructor descriptors and plain rendering
-defaults are preserved. No new runtime dependency or platform backend was introduced.
+- Finalization [CI](https://github.com/zikolach/siglyph/actions/runs/43916570485) passed Linux and
+  macOS before the single authorized tag push. The final tag tree matches the finalization PR.
+- [Publish](https://github.com/zikolach/siglyph/actions/runs/43920407459) and
+  [Publish Maven Central](https://github.com/zikolach/siglyph/actions/runs/43920407732) both succeeded.
+- All ten Maven Central coordinates resolved anonymously: forty POM/binary/source/Javadoc payloads
+  passed coordinate/version, SHA-1 and ZIP checks. PGP signature files are present; this is not
+  independent cryptographic signer-trust verification.
+- All ten GitHub Release JARs passed API SHA-256 digest, size and ZIP checks; Native artifacts contain
+  Native IR. GitHub Packages publication succeeded in its workflow; independent authenticated package
+  downloads are not claimed.
+- Central-only compatibility verification passed selected JVM ABI checks and baseline-compiled
+  Scala/Java/Kotlin binaries against 0.12.0. Source consumers passed on Scala JVM, Java, Kotlin and
+  Scala Native; Native consumers were linked and run.
+- Published-coordinate smoke programs for application testing, update scopes, virtual time,
+  executor scheduling and owned timers ran on both JVM and Native.
+- Central initially returned 404s during propagation; verification was retried after availability.
+  No tag was moved and no packages were republished to work around propagation.
 
-The new table, theme, scheduling and testing surfaces remain experimental. The [stability policy](api-stability.md)
-deliberately gates a selected JVM surface, not every member, TASTy/inline behavior or Native binary
-compatibility. Native consumers are rebuilt. Providers/executors remain explicitly owned; callbacks
-must be finite/nonblocking. File polling and emulator reflow limitations remain documented rather
-than claimed away. This release does not include a new normal-screen scrollback/reflow fix.
+## Preparation evidence and boundaries
 
-## Verification evidence
+Runtime baseline `ac87a370eb4e5fbfec7640da9227fd045db378a1` had green Linux/macOS CI. Release
+finalization changed documentation/version tracking only, not runtime code. Fresh local preparation
+also verified ten package coordinates/forty payloads, selected ABI and candidate consumers, quality,
+quickstart/recipe compilation, API inventory and offline tooling tests. Eleven completed changes were
+promoted/archived with unchanged requirements; all 29 canonical specs passed strict validation.
 
-- [Merged-main CI](https://github.com/zikolach/siglyph/actions/runs/43901742022) passed both Linux
-  test/package and macOS terminal conformance at the exact preparation baseline above.
-- Implementation checks included JVM/Native suites, deterministic scheduler/cleanup races and real
-  launcher PTY checks for generated/file logs and the themed form. Those are implementation evidence,
-  not a substitute for checking the final release commit.
-- Fresh local candidate **0.12.0-rcprep-ac87a37** passed selected JVM ABI checks against published
-  0.11.0, old Scala/Java/Kotlin binaries on candidate artifacts, and source consumers on Scala JVM,
-  Java, Kotlin and Scala Native. These checks ran on macOS arm64; Native consumers were linked and run.
-- Local packaging at **0.12.0** produced all ten coordinates and forty POM/binary/source/Javadoc
-  payloads. POM coordinates and internal dependency versions, ZIP integrity, JVM classes and Native IR
-  were checked; SHA-256 evidence was retained locally. This was not remote publication or signing.
-- Formatting/lint, published quickstart/recipe compilation, API inventory validation and sixteen
-  offline documentation/compatibility-tool tests passed. Nonfatal existing Scaladoc/Coursier warnings
-  remain; no toolchain or runtime code change was made to hide them.
-- Eleven completed OpenSpec changes were promoted and archived. All **29 canonical specifications**
-  pass strict validation, with no active changes. Promoted requirement bodies match the archived deltas.
+Published examples now use **0.12.0**. `docs/release-status.json` tracks verified availability separately
+from candidate changelogs; the compatibility baseline remains **0.11.0** to keep testing older binaries.
+The local build fallback stays `0.1.0-SNAPSHOT` and is not a release identifier.
 
-## Version and publication policy
+Scope ownership does not include a borrowed executor. File following remains a bounded polling viewer,
+not audit-grade exactly-once ingestion. No screen-reader, universal emulator-pixel, whole-core ABI or
+Native binary-swap guarantee is implied. No new normal-screen scrollback/reflow fix is claimed.
 
-`build.mill` continues to derive artifact versions from `SIGLYPH_VERSION` or the tag. Its local
-`0.1.0-SNAPSHOT` fallback is not a release number and is not changed. README and Maven-backed examples
-stay on the **published 0.11.0** coordinates until 0.12.0 resolves publicly. The compatibility baseline
-also remains 0.11.0 so candidate checks continue to exercise old binaries.
-
-Use unique **local-only** candidate coordinates for preparation; do not overwrite published artifacts
-or tag a preparation snapshot. Versioned packaging at 0.12.0 is local output only.
-
-## Before tagging
-
-- [ ] Review and merge the release-preparation changes; confirm the final commit and release scope.
-- [ ] Require green protected checks on that commit, or document an explicitly approved exact-commit
-  local macOS fallback if runner budget/availability requires it. Do not bypass protections.
-- [ ] Finalize the actual release date: move the prepared entries into `[0.12.0] - YYYY-MM-DD`, add
-  its comparison link, and retain a fresh Unreleased section. Do not claim an unapproved date.
-- [ ] Reconfirm the [release-readiness gates](api-stability.md#release-readiness-checklist), packaging
-  and applicable terminal smoke evidence for any code changes since this baseline.
-- [ ] Obtain explicit authorization to push **one** `v0.12.0` tag; let the two existing publishing
-  workflows run. Do not also dispatch a duplicate publication.
-
-## After publication
-
-- Verify all ten Maven Central coordinates and ten GitHub Release JARs (versions, payload integrity,
-  Native IR and expected checksums/signatures), and record workflow results.
-- Run `python3 scripts/check-compatibility.py --candidate 0.12.0` without a local candidate repository.
-- Update README/canonical hello, published dependency examples and feature-guide availability notes
-  together, then run documentation/version checks and published consumer smoke again.
-- Update this record from preparation to published evidence. Preparing these files does not perform
-  any of those shared/publication actions.
+Future releases should follow the [readiness checklist](api-stability.md#release-readiness-checklist)
+and [publishing procedure](publishing.md), including fresh candidate and post-publication checks.

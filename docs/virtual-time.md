@@ -2,7 +2,7 @@
 
 [Documentation index](README.md) · [Application testing](application-testing.md) · [Update scopes](application-scopes.md)
 
-**Experimental and unreleased; not in 0.11.0.** This adds the scheduling boundary and a deterministic provider for #94/#96. It does not introduce a production timer, executor or background thread.
+**Available since 0.12.0; APIs remain experimental.** This adds the scheduling boundary and a deterministic provider for #94/#96. It does not introduce a production timer, executor or background thread.
 
 ## Run the source-checkout example
 
