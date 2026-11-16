@@ -7,40 +7,45 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+Planned for **0.12.0**, a feature release. Not yet published; installation examples remain on 0.11.0.
+
 ### Added
 
-- Added explicit API stability classification, selected JVM ABI gates, negative compatibility tests
-  and artifact-based Scala/Java/Kotlin/Native consumer checks for local candidates and releases.
-
-- Added opt-in semantic themes for input, list and table surfaces, explicit palette/override
-  policies, and a keyboard-only themed form with validation and modal focus restoration.
-
-- Added bounded `--follow-file PATH` polling on JVM/Native with UTF-8 partial-line handling,
-  truncation/replacement notices, visible I/O errors and one-batch delivery backpressure.
-
-- Added opt-in `--live-log-explorer` mode on JVM/Native, with scoped automatic batches, pause/resume,
-  immediate source cancellation and explicit worker cleanup; the original step mode is unchanged.
-- Added bounded scope-owned delayed and fixed-delay recurring updates, with automatic timer
-  cancellation, explicit overload outcomes and retryable cleanup independent of terminal restoration.
-- Added an experimental borrowed-executor scheduler with bounded admission, cancellation-race
-  handling, explicit asynchronous failure reporting and retryable cancellation obligations.
-- Added experimental scheduling contracts, a bounded manual clock and managed virtual-time
-  advancement with pending-task leak diagnostics in application tests.
-- Added experimental session-owned `ApplicationScope` update delivery with explicit admission,
-  bounded pending work, cooperative closure and stale-result rejection across TUI restart.
-- Added an experimental framework-independent `TUITestDriver` for managed synchronous application
-  tests, bounded typed scripts, fragmented paste and screen assertions on JVM/Native.
-- Added experimental `TableData`, `TableColumn` and `DataTable` components with stable row identity,
-  visible-range formatting, keyboard selection and shared JVM/Native coverage. The log explorer now
-  uses the table, and `--table` launches a standalone 100,000-row example.
-- Added an opt-in, step-driven log explorer discovery prototype to the shared JVM/Native fullscreen
-  demos, with bounded event retention, filtering, selection, pause/cancellation and deterministic tests.
+- **Data-oriented terminal UIs:** experimental `TableData`, `TableColumn` and `DataTable` with stable
+  row identity, visible-range formatting, keyboard selection and a 100,000-row example. #100
+- **Lifecycle-safe application updates:** bounded `ApplicationScope` admission, serialized delivery,
+  cooperative cancellation and rejection of stale results across session restart. #105
+- **Owned scheduling:** cancellable scheduler contracts, deterministic virtual time, a borrowed-executor
+  adapter, and scope-owned one-shot/fixed-delay recurring work. Includes publication-race handling,
+  explicit overload outcomes and retryable cleanup without skipping terminal restoration. #106–#108
+- **Application testing:** framework-independent `TUITestDriver`, immutable screen assertions,
+  grapheme input/fragmented paste, bounded diagnostics and pending-task leak checks. Source consumers
+  and reference-app tests run on JVM and Scala Native. #102–#103, #106
+- **Semantic styling:** opt-in immutable palettes and local overrides for input/list/table/overlay
+  surfaces, plus a keyboard form with textual validation, color-independent focus cues and modal
+  focus restoration. Plain library defaults and prior constructor descriptors are retained. #111
+- **Reference applications:** bounded step-driven and live generated log explorers; `--follow-file PATH`
+  adds bounded UTF-8 polling, partial-line handling, observed replacement/truncation notices, visible
+  I/O recovery and one-batch delivery backpressure. Includes pause/cancel and owned worker cleanup. #101, #109–#110
+- **Compatibility tooling:** public API inventory/policy, selected JVM ABI checks, baseline-compiled
+  Scala/Java/Kotlin consumers against candidate artifacts, Native consumer rebuilds and negative
+  compatibility fixtures. These are scoped checks, not a blanket ABI or 1.0 stability promise. #112
 
 ### Changed
 
-- Reorganized documentation around a runnable quickstart, installation guide and audience-based
-  index, preserving detailed rendering/input reference material and historical release records.
-  Added a published Scala Native hello example and local documentation validation.
+- Reorganized onboarding around a runnable published quickstart, minimal dependencies, an audience-based
+  documentation index and extracted technical guides; removed obsolete provider promotion. #92
+- Added Native hello and source-checkout consumer examples, local documentation checks and lightweight
+  compatibility-policy/negative-fixture checks in the existing Linux CI job. #92, #112
+
+### Compatibility notes
+
+- Scala 3.9.0 (or a compatible newer compiler), JDK 21, Scala Native 0.5.12, Mill 1.3.1 and Unicode
+  17.0.0 remain the baseline. No new runtime dependency or supported terminal platform was added.
+- New table/theme/scheduling/testing APIs remain experimental. Read the ownership, backpressure and
+  cleanup contracts before adopting them; a scope does not own a borrowed executor.
+- File following is a bounded polling viewer, not audit-grade exactly-once ingestion. Themes do not
+  claim screen-reader compliance, and virtual/PTY checks do not prove emulator pixel appearance.
 
 ## [0.11.0] - 2026-11-15
 
