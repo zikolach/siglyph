@@ -2,7 +2,7 @@
 
 [Documentation index](README.md) · [Step mode](log-explorer.md) · [Scope-owned timers](scoped-timers.md)
 
-**Unreleased; run from a source checkout.** Live mode automatically generates the same deterministic records as the discovery prototype. It is not file or network ingestion.
+**Unreleased; run from a source checkout.** Live mode automatically generates the same deterministic records as the discovery prototype. It is not file or network ingestion. For actual files, use [file-follow mode](file-log-following.md).
 
 ## Run
 

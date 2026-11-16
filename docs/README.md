@@ -9,6 +9,8 @@
 
 ## Recipes
 
+- [Follow a log file](file-log-following.md): bounded UTF-8 input, rotation/truncation notices and visible I/O recovery.
+
 - [Live log explorer](live-log-explorer.md): automatic generated batches with scoped producer cleanup.
 
 - [Scope-owned timers](scoped-timers.md): delayed/recurring updates and retryable shutdown (unreleased).

@@ -9,6 +9,9 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ### Added
 
+- Added bounded `--follow-file PATH` polling on JVM/Native with UTF-8 partial-line handling,
+  truncation/replacement notices, visible I/O errors and one-batch delivery backpressure.
+
 - Added opt-in `--live-log-explorer` mode on JVM/Native, with scoped automatic batches, pause/resume,
   immediate source cancellation and explicit worker cleanup; the original step mode is unchanged.
 - Added bounded scope-owned delayed and fixed-delay recurring updates, with automatic timer
