@@ -12,9 +12,12 @@ import scalatui.terminal.jvm.SttyTerminal
     case List("--log-explorer")      => LogExplorerDemo(SttyTerminal()).run()
     case List("--live-log-explorer") => LogExplorerDemo(SttyTerminal()).runLive()
     case List("--table")             => DataTableDemo(SttyTerminal()).run()
+    case List("--form", palette)     =>
+      val theme = scalatui.theme.SemanticTheme.named(palette)
+      ThemeFormDemo(SttyTerminal(), theme).tui.run()
     case List("--follow-file", path) =>
       val file = java.nio.file.Paths.get(path)
       LogExplorerDemo(SttyTerminal(), initialGenerated = 0).runFile(file)
     case _                           => throw IllegalArgumentException(
-        "Usage: fullscreenJvmDemo [--log-explorer|--live-log-explorer|--table|--follow-file PATH]"
+        "Usage: fullscreenJvmDemo [--log-explorer|--live-log-explorer|--table|--follow-file PATH|--form PALETTE]"
       )

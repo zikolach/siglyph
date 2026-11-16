@@ -22,8 +22,17 @@ final class DataTable[A](
     initialData: TableData[A],
     val columns: Vector[TableColumn[A]],
     onSelectionChange: Option[TableSelection[A]] => Unit = (_: Option[TableSelection[A]]) => (),
-    val pageSize: Int = 10
+    val pageSize: Int = 10,
+    val theme: scalatui.theme.SemanticTheme = scalatui.theme.SemanticTheme.Plain
 ) extends Component, Focusable, ContextualComponent, ViewportRangeRenderer:
+  def this(
+      data: TableData[A],
+      columns: Vector[TableColumn[A]],
+      onSelectionChange: Option[TableSelection[A]] => Unit,
+      pageSize: Int
+  ) =
+    this(data, columns, onSelectionChange, pageSize, scalatui.theme.SemanticTheme.Plain)
+
   require(columns.nonEmpty && columns.size <= 64, "table requires between 1 and 64 columns")
   require(pageSize > 0, "table page size must be positive")
   private val stateBoundary   = ComponentStateBoundary()
@@ -148,6 +157,8 @@ final class DataTable[A](
             remaining -= cells
           columnIndex += 1
         builder.append(" " * remaining)
-        builder.result()
+        val role        = if row <= 0 then scalatui.theme.SemanticRole.Muted
+        else theme.role(focused = snapshot.focused && selected, selected = selected)
+        theme.paint(role, builder.result())
       }.toVector
       ComponentRender.text(rows)

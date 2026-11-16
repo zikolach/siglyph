@@ -9,6 +9,8 @@
 
 ## Recipes
 
+- [Semantic themes and keyboard form](semantic-themes.md): immutable palettes, local overrides and modal focus restoration.
+
 - [Follow a log file](file-log-following.md): bounded UTF-8 input, rotation/truncation notices and visible I/O recovery.
 
 - [Live log explorer](live-log-explorer.md): automatic generated batches with scoped producer cleanup.

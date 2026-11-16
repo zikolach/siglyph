@@ -12,9 +12,12 @@ import scalatui.terminal.native.PosixTerminal
     case List("--log-explorer")      => LogExplorerDemo(PosixTerminal()).run()
     case List("--live-log-explorer") => LogExplorerDemo(PosixTerminal()).runLive()
     case List("--table")             => DataTableDemo(PosixTerminal()).run()
+    case List("--form", palette)     =>
+      val theme = scalatui.theme.SemanticTheme.named(palette)
+      ThemeFormDemo(PosixTerminal(), theme).tui.run()
     case List("--follow-file", path) =>
       val file = java.nio.file.Paths.get(path)
       LogExplorerDemo(PosixTerminal(), initialGenerated = 0).runFile(file)
     case _                           => throw IllegalArgumentException(
-        "Usage: fullscreenNativeDemo [--log-explorer|--live-log-explorer|--table|--follow-file PATH]"
+        "Usage: fullscreenNativeDemo [--log-explorer|--live-log-explorer|--table|--follow-file PATH|--form PALETTE]"
       )

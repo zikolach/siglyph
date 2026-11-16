@@ -33,8 +33,12 @@ import scalatui.unicode.Unicode
  */
 final class Input(
     initialValue: String = "",
-    keybindings: KeybindingManager = KeybindingManager()
+    keybindings: KeybindingManager = KeybindingManager(),
+    theme: scalatui.theme.SemanticTheme = scalatui.theme.SemanticTheme.Plain
 ) extends Component, Focusable, ContextualComponent:
+  def this(initialValue: String, keybindings: KeybindingManager) =
+    this(initialValue, keybindings, scalatui.theme.SemanticTheme.Plain)
+
   private val stateBoundary  = ComponentStateBoundary()
   private var context        = Option.empty[TUIContext]
   private var submitCallback = (_: String) => ()
@@ -152,11 +156,15 @@ final class Input(
     if focusedSnapshot then
       val rendered = FakeCursorRender.render(before, at, after, width)
       ComponentRender(
-        Vector(rendered.line),
+        Vector(theme.paint(scalatui.theme.SemanticRole.Focused, rendered.line)),
         Vector.empty,
         rendered.cursorColumn.map(column => CursorPlacement(0, column)).toVector
       )
-    else ComponentRender.text(Ansi.truncateToWidth(Ansi.sanitize(before + at + after), width, ""))
+    else
+      ComponentRender.text(theme.paint(
+        scalatui.theme.SemanticRole.Normal,
+        Ansi.truncateToWidth(Ansi.sanitize(before + at + after), width, "")
+      ))
 
   private def startPaste(): Unit =
     val cs     = clusters

@@ -9,6 +9,9 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ### Added
 
+- Added opt-in semantic themes for input, list and table surfaces, explicit palette/override
+  policies, and a keyboard-only themed form with validation and modal focus restoration.
+
 - Added bounded `--follow-file PATH` polling on JVM/Native with UTF-8 partial-line handling,
   truncation/replacement notices, visible I/O errors and one-batch delivery backpressure.
 
