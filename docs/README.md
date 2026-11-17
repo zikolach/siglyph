@@ -5,6 +5,8 @@
 - [First application](../README.md#quickstart): a complete Scala CLI app using published artifacts.
 - [Installation](getting-started.md): Scala JVM, Scala Native, Maven and Gradle.
 - [Java and Kotlin](jvm-language-examples.md): the JVM interop facade.
+- [Unreleased language-native examples](../examples/language-dx/README.md): typed Scala composition, Java builders and optional Kotlin source DSL.
+- [Language DX roadmap](language-dx-roadmap.md): approved scope and acceptance contract.
 - [Runnable Scala CLI examples](../examples/scala-cli/README.md) and [recording gallery](asciinema-demos.md).
 
 ## Recipes

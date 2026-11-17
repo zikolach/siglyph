@@ -667,9 +667,21 @@ final class TUI(
    * fails, throw the original failure with cleanup failures attached. Call [[stop]] explicitly to
    * retry incomplete restoration; this method never retries a failed attempt automatically.
    */
-  def run(): Unit =
+  def run(): Unit = runWithSetup(_ => ())
+
+  /**
+   * Unreleased JVM/Native startup hook for installing session-owned application work. Starts only
+   * once, then invokes setup outside runtime locks and waits using the normal run cleanup path.
+   * Setup is skipped when startup has already stopped/failed or requested exit. Once admitted it
+   * may race an external stop, so keep it finite and handle closed scope admission normally.
+   */
+  def runWithSetup(setup: TUI => Unit): Unit =
     try
       start()
+      val configure = lifecycleLock.synchronized {
+        lifecycleState === TUI.LifecycleState.Running && !exitRequested
+      }
+      if configure then setup(this)
       lifecycleLock.synchronized {
         while lifecycleState === TUI.LifecycleState.Running && !exitRequested do
           lifecycleLock.wait()
