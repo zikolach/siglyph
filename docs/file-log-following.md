@@ -2,7 +2,7 @@
 
 [Documentation index](README.md) · [Generated live mode](live-log-explorer.md)
 
-Unreleased; run from a checkout in a real macOS/Linux terminal:
+Available in the 0.12.0 source tree; run from a checkout in a real macOS/Linux terminal:
 
 ```bash
 mill fullscreenJvmDemo.run --follow-file /path/to/application.log

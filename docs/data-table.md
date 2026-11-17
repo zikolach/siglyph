@@ -2,7 +2,7 @@
 
 [Documentation index](README.md) · [Roadmap issue #95](https://github.com/zikolach/siglyph/issues/95)
 
-**Unreleased; not included in published 0.11.0.** `DataTable` is an experimental shared-core component for JVM and Scala Native. It combines typed column formatting, stable row selection and the existing viewport-range contract. Use a source checkout for these examples.
+**Available since 0.12.0; APIs remain experimental.** `DataTable` is an experimental shared-core component for JVM and Scala Native. It combines typed column formatting, stable row selection and the existing viewport-range contract. Use a source checkout for these examples.
 
 ## Run the generic example
 

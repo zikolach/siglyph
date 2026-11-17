@@ -7,7 +7,7 @@ GitHub Markdown does not provide native code tabs. This page uses language links
 
 Java and Kotlin support applies to JVM artifacts only through `scalatui.terminal.jvm.interop.SiglyphJvm`. Scala Native artifacts remain Scala-focused.
 
-Use **JDK 21** and the **0.11.0** [Maven or Gradle dependencies](getting-started.md#maven-for-java-and-kotlin-jvm-apps). Run interactive applications in a real macOS/Linux terminal; Ctrl+C exits.
+Use **JDK 21** and the **0.12.0** [Maven or Gradle dependencies](getting-started.md#maven-for-java-and-kotlin-jvm-apps). Run interactive applications in a real macOS/Linux terminal; Ctrl+C exits.
 
 ## Basic TUI
 

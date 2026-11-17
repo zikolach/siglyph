@@ -1,16 +1,11 @@
 # Publishing
 
 siglyph publishes release jars to GitHub Releases and artifacts to GitHub Packages and Maven
-Central. README and Scala CLI examples use the latest published version, currently **0.11.0**.
-Keep examples on an available published version while a subsequent release is only planned.
+Central. The latest verified published version is **0.12.0**; installation examples use that version.
 
-**Next release: 0.12.0 (in preparation, not published).** See the [candidate record](release-v0.12.0.md).
-The maintainer authorized publication on 2026-11-16. `docs/release-status.json` separately tracks the
-verified published version so a dated candidate changelog cannot prematurely bump installation examples.
-Update that file only after public artifact availability is verified.
-
-Version **0.11.0** retains the **Scala 3.9** compiler/TASTy baseline and supported **JDK 21**
-runtime/build baseline. See the [release record](release-v0.11.0.md) for scope and verification.
+Scala 3.9.0/JDK 21/Scala Native 0.5.12 remain the baseline. See the [release record](release-v0.12.0.md)
+for verification. `docs/release-status.json` tracks published availability independently of a dated
+candidate changelog; update it only after public artifacts are verified.
 
 ## Version source
 

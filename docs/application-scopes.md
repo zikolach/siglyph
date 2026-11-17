@@ -2,7 +2,7 @@
 
 [Documentation index](README.md) · [Roadmap #94](https://github.com/zikolach/siglyph/issues/94)
 
-**Experimental and unreleased; not in 0.11.0.** This is the bounded update-delivery part of #94. It is not yet a scheduling/task-execution framework: no timer, executor, producer or file source is created.
+**Available since 0.12.0; APIs remain experimental.** This is the bounded update-delivery part of #94. It is not yet a scheduling/task-execution framework: no timer, executor, producer or file source is created.
 
 ## Try the contract
 

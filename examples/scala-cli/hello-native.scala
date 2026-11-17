@@ -2,8 +2,8 @@
 //> using scala 3.9.0
 //> using platform native
 //> using nativeVersion 0.5.12
-//> using dep io.github.zikolach::siglyph-core::0.11.0
-//> using dep io.github.zikolach::siglyph-terminal-native::0.11.0
+//> using dep io.github.zikolach::siglyph-core::0.12.0
+//> using dep io.github.zikolach::siglyph-terminal-native::0.12.0
 
 import scalatui.components.*
 import scalatui.core.TUI

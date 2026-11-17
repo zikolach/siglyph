@@ -1,7 +1,7 @@
 #!/usr/bin/env -S scala-cli shebang
 //> using scala 3.9.0
-//> using dep io.github.zikolach::siglyph-core:0.11.0
-//> using dep io.github.zikolach::siglyph-terminal-jvm:0.11.0
+//> using dep io.github.zikolach::siglyph-core:0.12.0
+//> using dep io.github.zikolach::siglyph-terminal-jvm:0.12.0
 
 import scalatui.ansi.Ansi
 import scalatui.components.*

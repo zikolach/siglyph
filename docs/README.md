@@ -15,17 +15,17 @@
 
 - [Live log explorer](live-log-explorer.md): automatic generated batches with scoped producer cleanup.
 
-- [Scope-owned timers](scoped-timers.md): delayed/recurring updates and retryable shutdown (unreleased).
+- [Scope-owned timers](scoped-timers.md): delayed/recurring updates and retryable shutdown (since 0.12.0).
 
-- [Executor scheduling](executor-scheduling.md): bounded one-shot tasks on an explicitly owned executor (unreleased).
+- [Executor scheduling](executor-scheduling.md): bounded one-shot tasks on an explicitly owned executor (since 0.12.0).
 
-- [Virtual-time scheduling](virtual-time.md): cancellable deadlines and bounded test advancement (unreleased).
+- [Virtual-time scheduling](virtual-time.md): cancellable deadlines and bounded test advancement (since 0.12.0).
 
-- [Application update scopes](application-scopes.md): bounded, session-owned update delivery (unreleased).
+- [Application update scopes](application-scopes.md): bounded, session-owned update delivery (since 0.12.0).
 
-- [Application testing](application-testing.md): managed typed scripts and screen assertions (unreleased).
+- [Application testing](application-testing.md): managed typed scripts and screen assertions (since 0.12.0).
 
-- [Experimental data table](data-table.md): typed rows, stable selection and visible-range rendering (unreleased).
+- [Experimental data table](data-table.md): typed rows, stable selection and visible-range rendering (since 0.12.0).
 
 - [Log explorer discovery prototype](log-explorer.md): bounded generated events, filtering and selection.
 
@@ -50,7 +50,7 @@
 
 ## Maintainers
 
-- [0.12.0 release preparation](release-v0.12.0.md) (not yet published).
+- [0.12.0 release record](release-v0.12.0.md).
 
 - [API stability and release gates](api-stability.md): scoped ABI checks and published/candidate consumers.
 
