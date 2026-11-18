@@ -1521,7 +1521,6 @@ class TUIConcurrencySuite extends munit.FunSuite:
       active += 1
       if active > 1 then overlap = true
       callbacks :+= "detached"
-      detachedEntered.release()
       tui.queryTerminalColorScheme { _ =>
         active += 1
         if active > 1 then overlap = true
@@ -1530,6 +1529,8 @@ class TUIConcurrencySuite extends munit.FunSuite:
         allowReentrant.await()
         active -= 1
       }
+      // Publish readiness only after the reentrant completion is queued ahead of late work.
+      detachedEntered.release()
       allowDetached.await()
       active -= 1
     }
