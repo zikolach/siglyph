@@ -7,6 +7,14 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Added
+
+- Experimental shared Scala `App` composition and single-start `TUI.runWithSetup` on JVM/Native.
+- JVM `JvmUi` builders for applications, typed tables and semantic themes; copied Java collections,
+  JDK callbacks, borrowed scheduler ownership and managed virtual testing adapters.
+- Optional Kotlin receiver-lambda source DSL, equivalent Scala/Java/Kotlin table/filter/async examples,
+  Maven/Gradle projects and candidate-artifact consumer checks. These additions are not in 0.12.0.
+
 ## [0.12.0] - 2026-11-16
 
 ### Added

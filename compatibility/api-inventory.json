@@ -2,6 +2,31 @@
   "basis": "Top-level source inventory; declarations and language visibility remain authoritative. Nested members are not exhaustively indexed. Only policy.json selects ABI-preserved members.",
   "files": [
     {
+      "path": "core/src/scalatui/dsl/App.scala",
+      "classification": "experimental (unreleased)",
+      "declarations": [{"name": "App", "visibility": "public"}]
+    },
+    {
+      "path": "terminalJvm/src/scalatui/terminal/jvm/interop/JvmUi.scala",
+      "classification": "experimental (unreleased)",
+      "declarations": [
+        {"name": "JvmUi", "visibility": "public"},
+        {"name": "AppBuilder", "visibility": "public"},
+        {"name": "TableBuilder", "visibility": "public"},
+        {"name": "ThemeBuilder", "visibility": "public"}
+      ]
+    },
+    {
+      "path": "terminalJvm/src/scalatui/terminal/jvm/interop/JvmTestSession.scala",
+      "classification": "experimental (unreleased)",
+      "declarations": [{"name": "JvmTestSession", "visibility": "public"}]
+    },
+    {
+      "path": "terminalJvm/src/scalatui/terminal/jvm/interop/JvmScheduler.scala",
+      "classification": "experimental (unreleased)",
+      "declarations": [{"name": "JvmScheduler", "visibility": "public"}]
+    },
+    {
       "path": "core/src/scalatui/ansi/Ansi.scala",
       "classification": "evolving (not baseline-gated)",
       "declarations": [
