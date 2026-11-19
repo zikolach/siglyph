@@ -20,6 +20,7 @@ private def printUsage(): Unit =
   println(
     "Usage: interactiveNativeDemo [--hardware-cursor|--hardware-cursor-positioning|--no-hardware-cursor]"
   )
+  println("  --composer                Run the shared local-echo conversational composer")
   println("  --hardware-cursor         Enable hardware cursor positioning")
   println("  --no-hardware-cursor      Keep fake-cursor-only behavior")
   println("  Environment: SCALATUI_HARDWARE_CURSOR_POSITIONING=true|false")
@@ -34,5 +35,6 @@ private def printUsage(): Unit =
         .getOrElse(false)
     val tui           = TUI(PosixTerminal(), TUIOptions(hardwareCursorPositioning = optionEnabled))
     if optionEnabled then println("Demo: hardware cursor positioning enabled")
-    InteractiveDemo.install(tui)
+    if args.exists(_ === "--composer") then ConversationalComposerDemo.install(tui)
+    else InteractiveDemo.install(tui)
     tui.run()

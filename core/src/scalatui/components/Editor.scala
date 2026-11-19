@@ -25,11 +25,17 @@ import scalatui.unicode.Unicode
  * metadata when focused, and can integrate with autocomplete providers by showing selectable
  * suggestions through a TUI overlay host. Editing behavior includes `pi-tui`-aligned undo-only,
  * kill-ring/yank/yank-pop commands, word movement/deletion, and large-paste marker expansion.
- * Logical cursor and streamed-paste counts use Unicode 17.0.0 UAX #29 default extended grapheme
- * clusters on JVM and Scala Native. Bounded segmentation state does not limit retained editor
- * content, and terminal display width remains a separate project-specific policy. Layout measures
- * sanitized final printable geometry. Rejected controls may expand to several wrapped display units
- * that retain one source range; supported bounded SGR and OSC 8 remain atomic and executable.
+ * Up/Down follow reachable visual rows at the last rendered width (one cell before first render),
+ * preserving a preferred display column until resize or a nonvertical editing action. Up at the
+ * first visual row's display-column zero can enter history without losing the current draft; Down
+ * past newest restores its exact text, logical cursor and private paste metadata. Recalled entries
+ * start at logical (0,0). Cursor movement preserves browsing; edits, explicit placement, submit and
+ * actual history additions abandon it. This is not a public full-editor snapshot contract. Logical
+ * cursor and streamed-paste counts use Unicode 17.0.0 UAX #29 default extended grapheme clusters on
+ * JVM and Scala Native. Bounded segmentation state does not limit retained editor content, and
+ * terminal display width remains a separate project-specific policy. Layout measures sanitized
+ * final printable geometry. Rejected controls may expand to several wrapped display units that
+ * retain one source range; supported bounded SGR and OSC 8 remain atomic and executable.
  * Autocomplete ownership suppresses Editor cursor metadata. Non-positive widths suppress printable
  * output and cursor metadata. At a positive impossible width, rendering omits the over-wide cursor
  * unit but retains its logical ownership and application content, places the cursor at visual
@@ -83,6 +89,8 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
   private var yankBaseSnapshot                                      = Option.empty[EditorBuffer.Snapshot]
   private var history                                               = Vector.empty[String]
   private var historyIndex                                          = -1
+  private var historyDraft                                          = Option.empty[EditorBuffer.Snapshot]
+  private var preferredColumn                                       = Option.empty[Int]
   private val maxHistorySize                                        = 100
   private var jumpMode                                              = Option.empty[Editor.JumpDirection]
   private var pasteSession                                          = Option.empty[Editor.PasteSession]
@@ -137,7 +145,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     cancelAutocompleteLocked(effects)
     buffer = EditorBuffer(value)
     resetEditingAction()
-    historyIndex = -1
+    abandonHistory()
   }
 
   /**
@@ -160,16 +168,16 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     cancelAutocompleteLocked(effects)
     buffer.setCursor(cursor)
     resetEditingAction()
-    historyIndex = -1
+    abandonHistory()
   }
 
   /** Add a value to history browsing. */
   def addToHistory(value: String): Unit = stateBoundary {
     val text = value.trim
-    if text.isEmpty then ()
-    else if history.headOption.forall(_ !== text) then
+    if text.nonEmpty && history.headOption.forall(_ !== text) then
+      abandonHistory()
+      preferredColumn = None
       history = text +: history.take(maxHistorySize - 1)
-    if history.length > maxHistorySize then history = history.take(maxHistorySize)
   }
 
   /** Undo the most recent editor mutation, returning whether state changed. */
@@ -185,7 +193,10 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
   def expandPasteMarkers(): Unit = transition { effects =>
     val before = buffer.text
     buffer.expandPasteMarkersInBuffer()
-    if buffer.text !== before then deferChange(effects, buffer.text)
+    if buffer.text !== before then
+      resetEditingAction()
+      abandonHistory()
+      deferChange(effects, buffer.text)
   }
 
   override def tuiContext_=(value: Option[TUIContext]): Unit =
@@ -235,6 +246,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     }
     val placementEffect  = stateBoundary {
       lastRenderedVisualHeight = plan.layout.lines.length
+      if lastRenderedWidth !== width then preferredColumn = None
       lastRenderedWidth = width
       autocompleteOverlayPlacementEffect(requestRender = false)
     }
@@ -366,13 +378,9 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
         case TerminalInput.Key(TerminalKey.Enter, modifiers)                                    =>
           handleEnter(modifiers, effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorCursorUp)                  =>
-          val layout = layoutPlan(buffer.snapshot, math.max(1, lastRenderedWidth)).layout
-          if shouldUseHistoryUp(layout) then navigateHistory(-1, effects)
-          else move(_.moveUp(), effects)
+          verticalMove(-1, effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorCursorDown)                =>
-          val layout = layoutPlan(buffer.snapshot, math.max(1, lastRenderedWidth)).layout
-          if shouldUseHistoryDown(layout) then navigateHistory(1, effects)
-          else move(_.moveDown(), effects)
+          verticalMove(1, effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorPageUp)                    =>
           pageScroll(-1, effects)
         case _ if keybindings.matches(input, KeybindingCommand.EditorPageDown)                  =>
@@ -462,9 +470,9 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
         case TerminalInput.Key(TerminalKey.Right, _)                                            =>
           move(_.moveRight(), effects)
         case TerminalInput.Key(TerminalKey.Up, _)                                               =>
-          move(_.moveUp(), effects)
+          verticalMove(-1, effects)
         case TerminalInput.Key(TerminalKey.Down, _)                                             =>
-          move(_.moveDown(), effects)
+          verticalMove(1, effects)
         case _                                                                                  => InputResult.Ignored
       }
 
@@ -485,7 +493,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
           else buffer.insertPasteChunks(session.chunks)
           pushUndoSnapshot(session.baseSnapshot)
           resetEditingAction()
-          historyIndex = -1
+          abandonHistory()
           deferChange(effects, buffer.text)
           deferRefreshAutocompleteIfActive(effects)
           InputResult.Render
@@ -517,15 +525,18 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     val callback  = submitCallback
     effects.add(() => callback(submitted))
     undoStack.clear()
+    abandonHistory()
     resetEditingAction()
     InputResult.Render
 
   private def move(operation: EditorBuffer => Unit, effects: Editor.Effects): InputResult =
-    val before = buffer.cursor
+    preferredColumn = None
+    val before     = buffer.cursor
+    val beforeText = buffer.text
     operation(buffer)
+    if buffer.text !== beforeText then abandonHistory()
     if buffer.cursor === before then InputResult.NoRender
     else
-      historyIndex = -1
       resetEditingAction()
       deferRefreshAutocompleteIfActive(effects)
       InputResult.Render
@@ -544,7 +555,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     if textChanged then
       pushUndoSnapshot(snapshot)
       resetEditingAction()
-      historyIndex = -1
+      abandonHistory()
       deferChange(effects, buffer.text)
     if changed then
       if refreshAutocomplete then deferRefreshAutocompleteIfActive(effects)
@@ -557,7 +568,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
         val before = buffer.text
         buffer.restore(snapshot)
         resetEditingAction()
-        historyIndex = -1
+        abandonHistory()
         if buffer.text !== before then deferChange(effects, buffer.text)
         true
       case None           => false
@@ -585,43 +596,67 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
           killRing.rotate()
           val text = killRing.peek.getOrElse("")
           buffer.insert(text)
-          historyIndex = -1
+          abandonHistory()
           resetEditingAction()
           deferChange(effects, buffer.text)
           deferRefreshAutocompleteIfActive(effects)
           true
 
   private def shouldUseHistoryUp(layout: EditorLayout): Boolean =
-    buffer.text.isEmpty || (historyIndex >= 0 && layout.cursor.row === 0)
+    history.nonEmpty &&
+      (buffer.text.isEmpty ||
+        (layout.cursor.row === 0 && (historyIndex >= 0 || layout.cursor.column === 0)))
 
   private def shouldUseHistoryDown(layout: EditorLayout): Boolean =
-    historyIndex >= 0 &&
-      (buffer.lines.length === 1 || layout.cursor.row === layout.lines.length - 1)
+    historyIndex >= 0 && layout.cursor.row === layout.lines.length - 1
+
+  private def abandonHistory(): Unit =
+    historyIndex = -1
+    historyDraft = None
 
   private def navigateHistory(direction: Int, effects: Editor.Effects): InputResult =
-    if history.isEmpty then InputResult.NoRender
+    preferredColumn = None
+    val newIndex = historyIndex - direction
+    if history.isEmpty || newIndex < -1 || newIndex >= history.length then InputResult.NoRender
     else
-      val newIndex = historyIndex - direction
-      if newIndex < -1 || newIndex >= history.length then InputResult.NoRender
-      else
-        if historyIndex === -1 && newIndex >= 0 then pushUndoSnapshot()
-        historyIndex = newIndex
-        if historyIndex === -1 then setTextInternal("", effects)
-        else setTextInternal(history(historyIndex), effects, cursorAtLineStart = true)
-
-  private def setTextInternal(
-      text: String,
-      effects: Editor.Effects,
-      cursorAtLineStart: Boolean = false
-  ): InputResult =
-    val before = buffer.text
-    buffer = EditorBuffer(text)
-    if cursorAtLineStart then buffer.setCursor(EditorCursor(0, 0))
-    if before === buffer.text then InputResult.NoRender
-    else
+      cancelAutocompleteLocked(effects)
+      val before = buffer.snapshot
+      if historyIndex === -1 then
+        historyDraft = Some(before)
+        pushUndoSnapshot(before)
+      historyIndex = newIndex
+      if newIndex === -1 then
+        historyDraft.foreach(buffer.restore)
+        historyDraft = None
+      else buffer = EditorBuffer.fromText(history(newIndex))
       resetEditingAction()
-      deferChange(effects, buffer.text)
-      InputResult.Render
+      if before.lines !== buffer.lines then deferChange(effects, buffer.text)
+      if (before.lines !== buffer.lines) || (before.cursor !== buffer.cursor) then
+        InputResult.Render
+      else InputResult.NoRender
+
+  private def verticalMove(direction: Int, effects: Editor.Effects): InputResult =
+    val plan = layoutPlan(buffer.snapshot, math.max(1, lastRenderedWidth))
+    if direction < 0 && shouldUseHistoryUp(plan.layout) then navigateHistory(direction, effects)
+    else if direction > 0 && shouldUseHistoryDown(plan.layout) then
+      navigateHistory(direction, effects)
+    else
+      val column = preferredColumn.getOrElse(plan.layout.cursor.column)
+      preferredColumn = Some(column)
+      var row    = plan.layout.cursor.row + direction
+      var target = Option.empty[EditorCursor]
+      while row >= 0 && row < plan.rows.length && target.isEmpty do
+        target = plan.reachableSourceColumnAt(row, column)
+          .map(source => EditorCursor(plan.layout.lines(row).logicalLine, source))
+        row += direction
+      target match
+        case None         => InputResult.NoRender
+        case Some(cursor) =>
+          buffer.setCursor(cursor)
+          resetEditingAction()
+          preferredColumn = Some(column)
+          deferRefreshAutocompleteIfActive(effects)
+          InputResult.Render
 
   private def killDeleteWordBackwards(effects: Editor.Effects): InputResult =
     val cs      = buffer.clustersForLine(buffer.cursor.line)
@@ -668,6 +703,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
     undoStack.push(snapshot)
 
   private def resetEditingAction(): Unit =
+    preferredColumn = None
     lastAction = None
     yankBaseSnapshot = None
 
@@ -735,6 +771,7 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
       else false
 
   private def pageScroll(direction: Int, effects: Editor.Effects): InputResult =
+    preferredColumn = None
     val plan       = layoutPlan(buffer.snapshot, math.max(1, lastRenderedWidth))
     val pageSize   = 5
     val targetRow  = plan.layout.cursor.row + direction * pageSize
@@ -747,18 +784,16 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
       targetRow: Int,
       effects: Editor.Effects
   ): InputResult =
-    val targetLine   = plan.layout.lines(targetRow)
-    val targetCursor = EditorCursor(
-      targetLine.logicalLine,
-      plan.sourceColumnAt(targetRow, plan.layout.cursor.column)
-    )
-    val before       = buffer.cursor
-    buffer.setCursor(targetCursor)
-    if before === targetCursor then InputResult.NoRender
-    else
-      resetEditingAction()
-      deferRefreshAutocompleteIfActive(effects)
-      InputResult.Render
+    plan.reachableSourceColumnAt(targetRow, plan.layout.cursor.column) match
+      case None         => InputResult.NoRender
+      case Some(column) =>
+        val before = buffer.cursor
+        buffer.setCursor(EditorCursor(plan.layout.lines(targetRow).logicalLine, column))
+        if before === buffer.cursor then InputResult.NoRender
+        else
+          resetEditingAction()
+          deferRefreshAutocompleteIfActive(effects)
+          InputResult.Render
 
   private def maybeTriggerAutocompleteAfterText(inserted: String, effects: Editor.Effects): Unit =
     if provider.nonEmpty && currentAutocompleteTrigger.triggerSlash && (inserted === "/") &&
@@ -1002,11 +1037,10 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
       if isCurrentAutocompleteRequest(token, snapshot) then
         val beforeText = buffer.text
         buffer = EditorBuffer.fromLines(result.lines, result.cursor)
+        resetEditingAction()
+        abandonHistory()
         autocompleteRequestToken += 1
-        if buffer.text !== beforeText then
-          resetEditingAction()
-          historyIndex = -1
-          deferChange(effects, buffer.text)
+        if buffer.text !== beforeText then deferChange(effects, buffer.text)
         if submitAfter then effects.add(() => transition(submit))
         else deferRenderRequest(effects)
     }

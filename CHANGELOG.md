@@ -7,6 +7,13 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Changed
+
+- Editor Up/Down now follow visual rows and preserve preferred display columns across short rows.
+  Deliberate history entry from a nonempty draft's first-row start restores exact draft text,
+  cursor and paste metadata on return. See [editor interactions](docs/editor-interactions.md)
+  for reset rules and the runnable core-only composer; no public snapshot API was added.
+
 ### Added
 
 - Experimental shared Scala `App` composition and single-start `TUI.runWithSetup` on JVM/Native.

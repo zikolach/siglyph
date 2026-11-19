@@ -111,6 +111,25 @@ private[components] final case class EditorRenderPlan(
 ):
   def sourceColumnAt(row: Int, visualColumn: Int): Int = rows(row).sourceColumnAt(visualColumn)
 
+  /** A source boundary owned by this row, flooring inside wide units and wrapped row ends. */
+  def reachableSourceColumnAt(row: Int, visualColumn: Int): Option[Int] =
+    val target                      = rows(row)
+    val nearest                     = sourceColumnAt(row, visualColumn)
+    def owned(column: Int): Boolean =
+      val (position, _) =
+        EditorLayout.cursorFor(EditorCursor(target.line.logicalLine, column), rows)
+      position.row === row
+    if owned(nearest) then Some(nearest)
+    else
+      // Usually only the end of a full wrapped row needs correction. Walk backward lazily;
+      // shared sanitized ownership may make an entire display row unreachable.
+      target.projection.units.iterator.slice(target.unitStart, target.unitEnd).toVector
+        .reverseIterator.flatMap(unit =>
+          Iterator(unit.printableSource.end, unit.printableSource.start)
+        )
+        .filter(_ <= nearest).find(owned)
+        .orElse(Option.when(owned(target.line.startColumn))(target.line.startColumn))
+
   def withCursor(cursor: EditorCursor): EditorRenderPlan =
     val (position, boundary) = EditorLayout.cursorFor(cursor, rows)
     copy(layout = layout.copy(cursor = position), cursorBoundary = boundary)

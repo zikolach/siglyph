@@ -33,6 +33,7 @@
 
 - [Normal-screen, fullscreen and scrollback output](screen-modes.md)
 - [Input, editors, autocomplete, optional widgets and terminal helpers](input-and-terminal.md)
+- [Editor visual navigation, history drafts and conversational composer](editor-interactions.md)
 - [Scroll, wheel and selection policies](scroll-input-policies.md)
 - [Terminal images and vertical cropping](kitty-vertical-cropping.md)
 - [Optional terminal program status](terminal-program-status.md)
