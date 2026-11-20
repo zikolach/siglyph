@@ -458,6 +458,7 @@ class EditorSuite extends munit.FunSuite:
 
   test("moves cursor with arrows home and end"):
     val editor = Editor("ab\ncd")
+    editor.render(20)
 
     editor.handleInputResult(TerminalInput.Key(TerminalKey.Home))
     assertEquals(editor.cursor, EditorCursor(1, 0))
@@ -598,6 +599,29 @@ class EditorSuite extends munit.FunSuite:
     assertEquals(editor.handleInputResult(TerminalInput.Key(TerminalKey.Up)), InputResult.Render)
     assertEquals(editor.text, "")
 
+  test("history round trip rejects pending autocomplete for the otherwise identical draft"):
+    var events   = Vector.empty[AutocompleteProbeEvent]
+    val provider = recordingAutocompleteProvider(event => events :+= event)
+    val editor   = Editor(
+      "/",
+      EditorOptions(
+        autocompleteProvider = Some(provider),
+        autocompleteTrigger = EditorAutocompleteTrigger.ExplicitTabOnly
+      )
+    )
+    editor.render(20)
+    editor.addToHistory("old")
+    editor.setCursor(EditorCursor(0, 0))
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Tab))
+    val pending  = requested(events).head
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Up))
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Down))
+    pending.callback.complete(Some(autocomplete("/stale", "/")))
+    editor.handleInputResult(TerminalInput.Key(TerminalKey.Enter))
+    assertEquals(editor.text, "/")
+    assertEquals(editor.cursor, EditorCursor(0, 0))
+    assertEquals(cancelled(events), Vector(0))
+
   test("supports command history browsing and restoration"):
     val editor = Editor()
     editor.addToHistory("second")
@@ -612,6 +636,7 @@ class EditorSuite extends munit.FunSuite:
     assertEquals(editor.text, "xfirst")
 
     val clean = Editor()
+    clean.render(20)
     clean.addToHistory("second")
     clean.addToHistory("first")
     assertEquals(clean.handleInputResult(TerminalInput.Key(TerminalKey.Up)), InputResult.Render)

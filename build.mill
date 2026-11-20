@@ -237,6 +237,7 @@ object extrasNative extends SiglyphNativePublishModule {
 
 object demo extends SiglyphModule {
   def moduleDeps = Seq(core)
+  def mainClass  = Some("scalatui.demo.mvpDemo")
 }
 
 object asciinemaDemo extends SiglyphModule {

@@ -9,6 +9,7 @@ Scenarios:
   agent-prompt     Agent prompt composer with slash, attachment, and tag completion
   command-palette  Command palette, loader/progress state, and settings changes
   unicode-input    Unicode-safe editing and typed terminal input proof
+  editor-history   Wrapped visual navigation and exact draft restoration
   all              Record all scenarios
 USAGE
 }
@@ -45,6 +46,10 @@ record_one() {
       title="siglyph unicode and typed input"
       output="$artifact_dir/siglyph-unicode-input.cast"
       ;;
+    editor-history)
+      title="siglyph editor navigation and draft restoration"
+      output="$artifact_dir/siglyph-editor-history.cast"
+      ;;
     *)
       echo "Unknown scenario: $scenario" >&2
       usage >&2
@@ -74,8 +79,9 @@ case "$1" in
     record_one agent-prompt
     record_one command-palette
     record_one unicode-input
+    record_one editor-history
     ;;
-  agent-prompt | command-palette | unicode-input)
+  agent-prompt | command-palette | unicode-input | editor-history)
     record_one "$1"
     ;;
   *)
