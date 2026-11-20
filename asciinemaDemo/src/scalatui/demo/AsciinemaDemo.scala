@@ -40,11 +40,13 @@ private object AsciinemaScenarios:
       case "agent-prompt"    => play(agentPromptFrames())
       case "command-palette" => play(commandPaletteFrames())
       case "unicode-input"   => play(unicodeInputFrames())
+      case "editor-history"  => play(editorHistoryFrames())
       case "all"             =>
-        play(agentPromptFrames() ++ commandPaletteFrames() ++ unicodeInputFrames())
+        play(agentPromptFrames() ++ commandPaletteFrames() ++ unicodeInputFrames() ++
+          editorHistoryFrames())
       case other             =>
         System.err.println(
-          s"Unknown scenario '$other'. Expected agent-prompt, command-palette, unicode-input, or all."
+          s"Unknown scenario '$other'. Expected agent-prompt, command-palette, unicode-input, editor-history, or all."
         )
         sys.exit(2)
 
@@ -58,6 +60,12 @@ private object AsciinemaScenarios:
     }
     print(Reset)
     Console.out.flush()
+
+  private def editorHistoryFrames(): Vector[TimedFrame] =
+    val frames = EditorInteractionDemo.frames()
+    frames.zipWithIndex.map { (component, index) =>
+      TimedFrame(component, if index === frames.size - 1 then 1.8 else 0.7)
+    }
 
   private def agentPromptFrames(): Vector[TimedFrame] =
     val scenes =

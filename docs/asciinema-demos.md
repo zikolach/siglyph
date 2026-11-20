@@ -43,6 +43,18 @@ Shows CJK text, emoji graphemes, combining marks, visible-width metadata, paste 
 
 Source reference: `unicodeInputFrames()` in `asciinemaDemo/src/scalatui/demo/AsciinemaDemo.scala`.
 
+### Editor navigation and draft restoration
+
+[![siglyph editor navigation and draft restoration](https://asciinema.org/a/jpLfkEaymTJJq0IA.svg)](https://asciinema.org/a/jpLfkEaymTJJq0IA)
+
+The new `editor-history` scenario demonstrates **unreleased** editor behavior from the source checkout, not published 0.12.0. It uses a real `Editor`, typed navigation/history keys, Unicode text, and controlled editor-width changes from 52 to 34 columns and back. This is component reflow, not a recording of a physical terminal resize.
+
+The clip shows wrapped-row Up/Down navigation, retained display column, history recall, and exact draft text/cursor restoration. State assertions run before playback; each recorded frame snapshots real rendered output rather than a reconstructed mock editor.
+
+Record with `scripts/asciinema/record-demo.sh editor-history`, then replay `artifacts/asciinema/siglyph-editor-history.cast`. The published recording previews unreleased behavior; uploading the clip does not publish a library release.
+
+Source: `EditorInteractionDemo.frames()` in `asciinemaDemo/src/scalatui/demo/EditorInteractionDemo.scala`.
+
 ## Scenarios
 
 | Scenario | Story | Direct command | Cast path | Published clip |
@@ -50,6 +62,7 @@ Source reference: `unicodeInputFrames()` in `asciinemaDemo/src/scalatui/demo/Asc
 | `agent-prompt` | Agent prompt composer with visible typing, slash completion, attachment completion, tag completion, and submitted prompt summary. | `mill asciinemaDemo.run agent-prompt` | `artifacts/asciinema/siglyph-agent-prompt.cast` | `https://asciinema.org/a/UznjMGz4rWVWwLXm` |
 | `command-palette` | Command palette, fuzzy filtering, selected action, loader/progress state, settings filtering, and settings value changes. | `mill asciinemaDemo.run command-palette` | `artifacts/asciinema/siglyph-command-palette.cast` | `https://asciinema.org/a/xiB1i6UAo1SgKx4l` |
 | `unicode-input` | Unicode-safe editing with CJK, emoji, combining marks, paste summary, Insert, arrow keys, and Ctrl-key display. | `mill asciinemaDemo.run unicode-input` | `artifacts/asciinema/siglyph-unicode-input.cast` | `https://asciinema.org/a/BSzrw6FMVLIgpUSb` |
+| `editor-history` | Wrapped visual navigation, Unicode draft, controlled width reflow, history recall and exact restoration (unreleased). | `mill asciinemaDemo.run editor-history` | `artifacts/asciinema/siglyph-editor-history.cast` | `https://asciinema.org/a/jpLfkEaymTJJq0IA` |
 
 ## Referenced code fragments
 
@@ -92,6 +105,7 @@ Run a scenario directly when you only want to preview terminal output:
 SIGLYPH_ASCIINEMA_PAUSE_MS=0 mill asciinemaDemo.run agent-prompt
 mill asciinemaDemo.run command-palette
 mill asciinemaDemo.run unicode-input
+mill asciinemaDemo.run editor-history
 ```
 
 `SIGLYPH_ASCIINEMA_PAUSE_MS=0` removes frame pauses for quick local checks. Omit it for recording so the cast uses deliberate README-demo pacing.
@@ -104,6 +118,7 @@ Record one scenario:
 scripts/asciinema/record-demo.sh agent-prompt
 scripts/asciinema/record-demo.sh command-palette
 scripts/asciinema/record-demo.sh unicode-input
+scripts/asciinema/record-demo.sh editor-history
 ```
 
 Record all scenarios:
@@ -118,6 +133,8 @@ The script writes generated casts and hidden build-tool logs under `artifacts/as
 artifacts/asciinema/siglyph-agent-prompt.cast
 artifacts/asciinema/siglyph-command-palette.cast
 artifacts/asciinema/siglyph-unicode-input.cast
+artifacts/asciinema/siglyph-editor-history.cast
+artifacts/asciinema/editor-history.stderr.log
 artifacts/asciinema/agent-prompt.stderr.log
 artifacts/asciinema/command-palette.stderr.log
 artifacts/asciinema/unicode-input.stderr.log
@@ -131,6 +148,7 @@ The script redirects Mill progress, compiler progress, and resolver output to th
 asciinema play artifacts/asciinema/siglyph-agent-prompt.cast
 asciinema play artifacts/asciinema/siglyph-command-palette.cast
 asciinema play artifacts/asciinema/siglyph-unicode-input.cast
+asciinema play artifacts/asciinema/siglyph-editor-history.cast
 ```
 
 Useful playback options:
@@ -149,6 +167,7 @@ The current published cast IDs are:
 | `agent-prompt` | `UznjMGz4rWVWwLXm` |
 | `command-palette` | `xiB1i6UAo1SgKx4l` |
 | `unicode-input` | `BSzrw6FMVLIgpUSb` |
+| `editor-history` | `jpLfkEaymTJJq0IA` |
 
 Upload each cast to asciinema.org again when the recordings are regenerated for a public refresh. GitHub README pages do not run the asciinema JavaScript player inline, so use a clickable SVG preview link:
 
