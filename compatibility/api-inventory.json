@@ -2277,6 +2277,15 @@
       ]
     },
     {
+      "path": "markdown/src/scalatui/markdown/StreamingMarkdown.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        { "name": "StreamingMarkdownStats", "visibility": "public" },
+        { "name": "StreamingMarkdown", "visibility": "public" },
+        { "name": "StreamingMarkdownParser", "visibility": "internal" }
+      ]
+    },
+    {
       "path": "terminalJvm/src/scalatui/terminal/jvm/SttyTerminal.scala",
       "classification": "evolving (not baseline-gated)",
       "declarations": [
