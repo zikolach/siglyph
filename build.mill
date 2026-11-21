@@ -18,7 +18,7 @@ private def siglyphVersion(env: Map[String, String]): String =
     .getOrElse("0.1.0-SNAPSHOT")
 
 trait SiglyphModule extends ScalaModule {
-  def scalaVersion = "3.9.0"
+  def scalaVersion = "3.10.1"
 }
 
 private def siglyphPomSettings: PomSettings = PomSettings(
@@ -61,7 +61,7 @@ trait SiglyphNativeToolchain extends ScalaNativeModule {
 }
 
 trait SiglyphNativePublishModule extends SiglyphNativeToolchain with PublishModule {
-  def scalaVersion       = "3.9.0"
+  def scalaVersion       = "3.10.1"
   def scalaNativeVersion = "0.5.12"
   def publishVersion     = Task.Input { siglyphVersion(Task.env) }
   def pomSettings        = siglyphPomSettings
@@ -90,7 +90,7 @@ private def runScalafmt(check: Boolean): Unit =
 private def runScalafix(): Unit =
   runShell("""
     sources="core/src core/test terminalJvm/src terminalJvm/test terminalNative/src terminalNative/test markdown/src markdown/test image/src image/test extras/src extras/test demo/src asciinemaDemo/src keyTester/src interactiveDemo/src interactiveDemo/test interactiveJvmDemo/src interactiveNativeDemo/src fullscreenDemo/src fullscreenDemo/test fullscreenJvmDemo/src fullscreenNativeDemo/src benchmarks/shared/src benchmarks/jvm/src benchmarks/native/src scripts"
-    set -- --syntactic --check --scala-version 3.9.0
+    set -- --syntactic --check --scala-version 3.10.1
     for source in $sources; do
       set -- "$@" --files "$source"
     done
@@ -258,7 +258,7 @@ object interactiveDemo extends SiglyphModule {
 }
 
 object interactiveDemoNative extends SiglyphNativeToolchain {
-  def scalaVersion       = "3.9.0"
+  def scalaVersion       = "3.10.1"
   def scalaNativeVersion = "0.5.12"
   def moduleDeps         = Seq(coreNative)
   def sources            = Task.Sources(workspaceRoot / "interactiveDemo" / "src")
@@ -275,7 +275,7 @@ object interactiveJvmDemo extends SiglyphModule {
 }
 
 object interactiveNativeDemo extends SiglyphNativeToolchain {
-  def scalaVersion       = "3.9.0"
+  def scalaVersion       = "3.10.1"
   def scalaNativeVersion = "0.5.12"
   def moduleDeps         = Seq(terminalNative, interactiveDemoNative)
 }
@@ -290,7 +290,7 @@ object fullscreenDemo extends SiglyphModule {
 }
 
 object fullscreenDemoNative extends SiglyphNativeToolchain {
-  def scalaVersion       = "3.9.0"
+  def scalaVersion       = "3.10.1"
   def scalaNativeVersion = "0.5.12"
   def moduleDeps         = Seq(coreNative, markdownNative)
   def sources            = Task.Sources(workspaceRoot / "fullscreenDemo" / "src")
@@ -307,7 +307,7 @@ object fullscreenJvmDemo extends SiglyphModule {
 }
 
 object fullscreenNativeDemo extends SiglyphNativeToolchain {
-  def scalaVersion       = "3.9.0"
+  def scalaVersion       = "3.10.1"
   def scalaNativeVersion = "0.5.12"
   def moduleDeps         = Seq(terminalNative, fullscreenDemoNative)
 }
@@ -321,7 +321,7 @@ object benchmarkJvm extends SiglyphModule {
 }
 
 object benchmarkNative extends SiglyphNativeToolchain {
-  def scalaVersion       = "3.9.0"
+  def scalaVersion       = "3.10.1"
   def scalaNativeVersion = "0.5.12"
   def moduleDeps         = Seq(coreNative)
   def sources            = Task.Sources(
