@@ -21,7 +21,7 @@ jobs:
         uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: '25'
+          java-version: '21'
 
       - name: Set up Coursier
         uses: coursier/setup-action@v3
@@ -85,7 +85,7 @@ jobs:
         uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: '25'
+          java-version: '21'
 
       - name: Set up Coursier
         uses: coursier/setup-action@v3
