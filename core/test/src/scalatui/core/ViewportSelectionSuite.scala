@@ -62,6 +62,131 @@ class ViewportSelectionSuite extends munit.FunSuite:
     sendMouse(terminal, MouseAction.Release(MouseButton.Left), row, col)
     clock.now += 1000000L
 
+  for (label, row, col) <- Vector(("text", 0, 2), ("trailing space", 0, 10), ("blank row", 1, 2)) do
+    test(s"plain primary click on $label clears a completed drag selection"):
+      val clock    = TestClock()
+      val view     = ScrollView(Lines(Vector("alpha beta")), primary = true)
+      val terminal = VirtualTerminal(16, 3)
+      val tui      = TUI.fullscreen(terminal, view, mouseOptions(clock))
+      tui.start()
+      try
+        sendMouse(terminal, MouseAction.Press(MouseButton.Left), 0, 0)
+        sendMouse(terminal, MouseAction.Move(MouseButtonState.Pressed(MouseButton.Left)), 0, 4)
+        sendMouse(terminal, MouseAction.Release(MouseButton.Left), 0, 4)
+        assertEquals(view.selection.map(_.text), Some("alpha"))
+        click(terminal, clock, row, col)
+        assertEquals(view.selection, None)
+        assertEquals(tui.viewportSelection, None)
+        // A subsequent drag must start a new range, not extend the old one.
+        sendMouse(terminal, MouseAction.Press(MouseButton.Left), 0, 6)
+        sendMouse(terminal, MouseAction.Move(MouseButtonState.Pressed(MouseButton.Left)), 0, 9)
+        sendMouse(terminal, MouseAction.Release(MouseButton.Left), 0, 9)
+        assertEquals(view.selection.map(_.text), Some("beta"))
+      finally tui.stop()
+
+  for changedPrefix <- Vector(false, true) do
+    test(s"scheduled appends preserve only a stable active drag prefix: $changedPrefix"):
+      val scheduler = scalatui.scheduling.ManualTaskScheduler()
+      val content   = Lines(Vector.tabulate(20)(index => s"row$index alpha beta gamma"))
+      val view      = ScrollView(content, primary = true, followEnd = true)
+      val terminal  = VirtualTerminal(30, 5)
+      val tui       = TUI.fullscreen(terminal, view, mouseOptions())
+      tui.start()
+      try
+        view.scrollBy(-10)
+        tui.flushRender()
+        val offset  = view.offset
+        assert(offset > 0)
+        sendMouse(terminal, MouseAction.Press(MouseButton.Left), 2, 6)
+        sendMouse(terminal, MouseAction.Move(MouseButtonState.Pressed(MouseButton.Left)), 2, 8)
+        val initial = view.selection.get
+        scheduler.schedule(1L) {
+          content.values = content.values :+ "streaming tail one"
+          view.invalidateSearchDocument(invalidateChild = false)
+          if changedPrefix then content.values = content.values.updated(0, "changed prefix")
+          content.values = content.values :+ "streaming tail two"
+          view.invalidateSearchDocument(invalidateChild = false)
+        }
+        scheduler.advanceBy(1L)
+        // No render flush: motion must validate the refreshed mapping itself.
+        sendMouse(terminal, MouseAction.Move(MouseButtonState.Pressed(MouseButton.Left)), 2, 12)
+        if changedPrefix then assertEquals(view.selection, None)
+        else
+          val extended = view.selection.get
+          assertEquals(extended.startOffset, initial.startOffset)
+          assert(extended.endOffset > initial.endOffset)
+          sendMouse(terminal, MouseAction.Move(MouseButtonState.Pressed(MouseButton.Left)), 2, 3)
+          val reversed = view.selection.get
+          assert(reversed.startOffset < initial.startOffset)
+          assertEquals(reversed.endOffset, initial.startOffset + 1)
+        sendMouse(terminal, MouseAction.Release(MouseButton.Left), 2, 3)
+        tui.flushRender()
+        assertEquals(view.offset, offset)
+        if changedPrefix then assertEquals(view.selection, None)
+        else assert(view.selection.nonEmpty)
+      finally
+        tui.stop()
+        scheduler.close()
+
+  for reset <- Vector("invalidate", "search invalidation", "resize", "replacement") do
+    test(s"$reset cancels an active drag origin"):
+      val content  = Lines(Vector("alpha beta gamma"))
+      val view     = ScrollView(content, primary = true)
+      val terminal = VirtualTerminal(24, 4)
+      val tui      = TUI.fullscreen(terminal, view, mouseOptions())
+      tui.start()
+      try
+        sendMouse(terminal, MouseAction.Press(MouseButton.Left), 0, 0)
+        sendMouse(terminal, MouseAction.Move(MouseButtonState.Pressed(MouseButton.Left)), 0, 4)
+        assertEquals(view.selection.map(_.text), Some("alpha"))
+        reset match
+          case "invalidate"          => view.invalidate()
+          case "search invalidation" => view.invalidateSearchDocument()
+          case "resize"              => terminal.resize(28, 4)
+          case _                     => view.replaceContent(Lines(Vector("new document")))
+        tui.flushRender()
+        sendMouse(terminal, MouseAction.Move(MouseButtonState.Pressed(MouseButton.Left)), 0, 9)
+        assertEquals(view.selection.map(_.text), Option.when(reset !== "replacement")("alpha"))
+        sendMouse(terminal, MouseAction.Release(MouseButton.Left), 0, 9)
+      finally tui.stop()
+
+  test("click clearing stays local to a nested primary view without scrolling"):
+    val clock    = TestClock()
+    val inner    = ScrollView(Lines(Vector("alpha beta")), primary = true)
+    val outer    = ScrollView(inner)
+    val terminal = VirtualTerminal(16, 3)
+    val tui      = TUI.fullscreen(terminal, outer, mouseOptions(clock))
+    tui.start()
+    try
+      sendMouse(terminal, MouseAction.Press(MouseButton.Left), 0, 0)
+      sendMouse(terminal, MouseAction.Move(MouseButtonState.Pressed(MouseButton.Left)), 0, 4)
+      sendMouse(terminal, MouseAction.Release(MouseButton.Left), 0, 4)
+      assertEquals(inner.selection.map(_.text), Some("alpha"))
+      click(terminal, clock, 0, 2)
+      assertEquals(inner.selection, None)
+      assertEquals(outer.selection, None)
+      assertEquals(inner.offset, 0)
+      assertEquals(outer.offset, 0)
+    finally tui.stop()
+
+  test("a covering overlay click preserves an existing underlying selection"):
+    val clock    = TestClock()
+    val view     = ScrollView(Lines(Vector("alpha beta")), primary = true)
+    val terminal = VirtualTerminal(16, 3)
+    val tui      = TUI.fullscreen(terminal, view, mouseOptions(clock))
+    tui.start()
+    try
+      sendMouse(terminal, MouseAction.Press(MouseButton.Left), 0, 0)
+      sendMouse(terminal, MouseAction.Move(MouseButtonState.Pressed(MouseButton.Left)), 0, 4)
+      sendMouse(terminal, MouseAction.Release(MouseButton.Left), 0, 4)
+      val selected = view.selection
+      assert(selected.nonEmpty)
+      tui.showOverlay(Lines(Vector("overlay")), OverlayOptions(anchor = OverlayAnchor.TopLeft))
+      tui.flushRender()
+      click(terminal, clock, 0, 2)
+      assertEquals(view.selection, selected)
+    finally tui.stop()
+
   test("cell mapping selects complete Unicode graphemes without ANSI or typed controls"):
     val clock    = TestClock()
     val control  = TerminalImageProtocol.encodeITerm2(
@@ -276,7 +401,8 @@ class ViewportSelectionSuite extends munit.FunSuite:
 
     tui.start()
     sendMouse(terminal, MouseAction.Press(MouseButton.Left), 0, 0)
-    sendMouse(terminal, MouseAction.Release(MouseButton.Left), 0, 0)
+    sendMouse(terminal, MouseAction.Move(MouseButtonState.Pressed(MouseButton.Left)), 0, 3)
+    sendMouse(terminal, MouseAction.Release(MouseButton.Left), 0, 3)
     val handle = tui.showOverlay(overlay, OverlayOptions(focusCapturing = true))
     terminal.sendInput(TerminalInput.Key(TerminalKey.Character("y"), KeyModifiers(ctrl = true)))
     assertEquals(copies, 0)

@@ -109,6 +109,12 @@ The alternate-screen viewport SHALL support terminal-cell text selection across 
 - **WHEN** a primary-button drag crosses selectable viewport cells
 - **THEN** the viewport records the corresponding text range without including ANSI metadata as copied text
 
+#### Scenario: Plain click clears text selection
+- **WHEN** an unmodified primary-button click without a drag is routed to the primary scroll view's text area, trailing space, or blank viewport row
+- **THEN** the existing text selection is cleared and its highlight is repainted
+- **AND** subsequent drags start a new selection while double and triple clicks still select words and lines
+- **AND** scrollbar controls, jump-to-end indicators, child-handled clicks, and covering overlays retain their existing routing and focus behavior
+
 #### Scenario: Selection crosses scroll boundary
 - **WHEN** drag selection reaches a scroll-view edge and content remains beyond that edge
 - **THEN** bounded edge scrolling extends selection through newly visible content

@@ -7,8 +7,18 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- Active text-selection drags survive streaming updates when the preceding text and cell mapping
+  remain unchanged, including multiple updates before repaint and reversing the drag direction.
+- Plain primary clicks now clear app-owned fullscreen text selection, including clicks on trailing
+  space and blank viewport rows, while retaining drag, multi-click and control routing behavior.
+
 ### Changed
 
+- Streaming Markdown scrolling uses cached visible-row ranges instead of validating the whole document
+  per frame. Appends retain reusable rendering caches; selection highlighting is viewport-bounded,
+  with corrected multirow selection-prefix guards.
 - Editor Up/Down now follow visual rows and preserve preferred display columns across short rows.
   Deliberate history entry from a nonempty draft's first-row start restores exact draft text,
   cursor and paste metadata on return. See [editor interactions](docs/editor-interactions.md)
@@ -16,6 +26,10 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ### Added
 
+- Experimental `StreamingMarkdown` for bounded JVM/Native responses, conservative parsed-prefix reuse,
+  provisional inline display, explicit completion/reset and deterministic work counters. Includes a
+  local streaming-response viewer with follow-end and guarded selection retention. Ambiguous suffixes
+  still reparse; see [streaming Markdown](docs/streaming-markdown.md) for costs and limitations.
 - Experimental shared Scala `App` composition and single-start `TUI.runWithSetup` on JVM/Native.
 - JVM `JvmUi` builders for applications, typed tables and semantic themes; copied Java collections,
   JDK callbacks, borrowed scheduler ownership and managed virtual testing adapters.
