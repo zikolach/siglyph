@@ -281,7 +281,7 @@ object interactiveNativeDemo extends SiglyphNativeToolchain {
 }
 
 object fullscreenDemo extends SiglyphModule {
-  def moduleDeps = Seq(core)
+  def moduleDeps = Seq(core, markdown)
 
   object test extends ScalaTests {
     def mvnDeps       = Seq(mvn"org.scalameta::munit::1.3.6")
@@ -292,7 +292,7 @@ object fullscreenDemo extends SiglyphModule {
 object fullscreenDemoNative extends SiglyphNativeToolchain {
   def scalaVersion       = "3.10.1"
   def scalaNativeVersion = "0.5.12"
-  def moduleDeps         = Seq(coreNative)
+  def moduleDeps         = Seq(coreNative, markdownNative)
   def sources            = Task.Sources(workspaceRoot / "fullscreenDemo" / "src")
 
   object test extends ScalaNativeTests with SiglyphNativeToolchain {

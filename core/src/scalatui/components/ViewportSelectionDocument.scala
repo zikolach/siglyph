@@ -17,6 +17,23 @@ private[components] final class ViewportSelectionDocument private (
 
   def sameText(other: ViewportSelectionDocument): Boolean = graphemes === other.graphemes
 
+  def samePrefix(other: ViewportSelectionDocument, until: Int): Boolean =
+    until <= length && until <= other.length &&
+      graphemes.take(until) === other.graphemes.take(until) &&
+      rows.iterator.takeWhile(_.startOffset < until).map { row =>
+        (
+          row.startOffset,
+          math.min(row.endOffset, until),
+          row.columns.take(until - row.startOffset + 1)
+        )
+      }.sameElements(other.rows.iterator.takeWhile(_.startOffset < until).map { row =>
+        (
+          row.startOffset,
+          math.min(row.endOffset, until),
+          row.columns.take(until - row.startOffset + 1)
+        )
+      })
+
   def cellRange(row: Int, column: Int): Option[SelectionCellRange] =
     rows.lift(row).flatMap(_.cellRange(column))
 
@@ -37,32 +54,47 @@ private[components] final class ViewportSelectionDocument private (
     val start = math.max(0, math.min(length, math.min(anchor, focus)))
     val end   = math.max(start, math.min(length, math.max(anchor, focus)))
     Option.when(end > start) {
-      val selectedRows = rows.flatMap { row =>
-        val rowStart = math.max(start, row.startOffset)
-        val rowEnd   = math.min(end, row.endOffset)
-        Option.when(rowEnd > rowStart) {
-          row.graphemes.slice(rowStart - row.startOffset, rowEnd - row.startOffset).mkString
-            .reverse.dropWhile(_.isWhitespace).reverse
+      val selectedRows = rows.drop(firstRowEndingAfter(start)).iterator
+        .takeWhile(_.startOffset < end).flatMap { row =>
+          val rowStart = math.max(start, row.startOffset)
+          val rowEnd   = math.min(end, row.endOffset)
+          Option.when(rowEnd > rowStart) {
+            row.graphemes.slice(rowStart - row.startOffset, rowEnd - row.startOffset).mkString
+              .reverse.dropWhile(_.isWhitespace).reverse
+          }
         }
-      }
       ViewportSelection(start, end, selectedRows.mkString("\n"))
     }.filter(_.text.nonEmpty)
 
-  def decorations(anchor: Int, focus: Int, viewportOffset: Int): Vector[ViewportDecoration] =
+  private def firstRowEndingAfter(offset: Int): Int =
+    var low  = 0
+    var high = rows.length
+    while low < high do
+      val middle = low + (high - low) / 2
+      if rows(middle).endOffset <= offset then low = middle + 1
+      else high = middle
+    low
+
+  def decorations(
+      anchor: Int,
+      focus: Int,
+      viewportOffset: Int,
+      viewportHeight: Int
+  ): Vector[ViewportDecoration] =
     val start = math.max(0, math.min(length, math.min(anchor, focus)))
     val end   = math.max(start, math.min(length, math.max(anchor, focus)))
-    rows.zipWithIndex.flatMap { case (row, documentRow) =>
-      val rowStart = math.max(start, row.startOffset)
-      val rowEnd   = math.min(end, row.endOffset)
-      val localRow = documentRow - viewportOffset
-      Option.when(rowEnd > rowStart && localRow >= 0) {
-        val from     = rowStart - row.startOffset
-        val until    = rowEnd - row.startOffset
-        val text     = row.graphemes.slice(from, until).mkString
-        val startCol = row.columns(from)
-        val width    = row.columns(until) - startCol
-        ViewportDecoration(localRow, startCol, "\u001b[7m" + text + Ansi.Reset, width)
-      }
+    rows.drop(viewportOffset).take(math.max(0, viewportHeight)).zipWithIndex.flatMap {
+      case (row, localRow) =>
+        val rowStart = math.max(start, row.startOffset)
+        val rowEnd   = math.min(end, row.endOffset)
+        Option.when(rowEnd > rowStart && localRow >= 0) {
+          val from     = rowStart - row.startOffset
+          val until    = rowEnd - row.startOffset
+          val text     = row.graphemes.slice(from, until).mkString
+          val startCol = row.columns(from)
+          val width    = row.columns(until) - startCol
+          ViewportDecoration(localRow, startCol, "\u001b[7m" + text + Ansi.Reset, width)
+        }
     }
 
 private[components] object ViewportSelectionDocument:

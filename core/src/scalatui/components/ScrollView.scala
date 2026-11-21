@@ -29,6 +29,7 @@ import scalatui.core.{
 import scalatui.syntax.Equality.*
 import scalatui.unicode.Unicode
 import scalatui.terminal.{
+  KeyModifiers,
   MouseAction,
   MouseButton,
   MouseInputContext,
@@ -166,6 +167,7 @@ final class ScrollView(
   private var searchMatches         = Vector.empty[TranscriptSearchMatch]
   private var currentSearchMatch    = Option.empty[Int]
   private var selectionDocument     = Option.empty[ViewportSelectionDocument]
+  private var selectionPrevious     = Option.empty[ViewportSelectionDocument]
   private var selectionComplete     = false
   private var selectionScanCount    = 0
   private var selectionAnchor       = Option.empty[Int]
@@ -206,18 +208,33 @@ final class ScrollView(
    *
    * The current query and match ordinal remain selected when they still exist after re-rendering.
    */
-  def invalidateSearchDocument(): Unit = stateBoundary.transition { effects =>
-    val target = currentChild
-    contentRevision += 1
-    searchMatches = Vector.empty
-    selectionDocument = None
-    selectionComplete = false
-    selectionInitial = None
-    selectionGranularity = SelectionGranularity.Character
-    effects.add(() => target.invalidate())
-    effects.add(() => searchIndex.clear())
-    context.foreach(value => effects.add(() => value.requestRender()))
-  }
+  def invalidateSearchDocument(): Unit = invalidateSearchDocument(invalidateChild = true)
+
+  /**
+   * Refresh search and selection after a child mutation. Pass false only when the child has already
+   * invalidated its own output; this preserves reusable renderer blocks across streaming appends.
+   * In that case selection (including an active drag's origin and granularity) survives only if the
+   * refreshed text and cell mapping through the retained range are unchanged. Multiple mutations
+   * before a render are checked against the last complete mapping. Invalidating the child resets
+   * the active gesture instead.
+   */
+  def invalidateSearchDocument(invalidateChild: Boolean): Unit =
+    stateBoundary.transition { effects =>
+      val target = currentChild
+      contentRevision += 1
+      searchMatches = Vector.empty
+      if invalidateChild then
+        selectionPrevious = None
+        selectionInitial = None
+        selectionGranularity = SelectionGranularity.Character
+      else if selectionPrevious.isEmpty && selectionAnchor.nonEmpty then
+        selectionPrevious = selectionDocument
+      selectionDocument = None
+      selectionComplete = false
+      if invalidateChild then effects.add(() => target.invalidate())
+      effects.add(() => searchIndex.clear())
+      context.foreach(value => effects.add(() => value.requestRender()))
+    }
 
   /** Current selection as bounded normalized document offsets and plain text. */
   def selection: Option[ViewportSelection] = stateBoundary {
@@ -326,6 +343,12 @@ final class ScrollView(
   ): Int = stateBoundary {
     currentContent = math.max(0, contentExtent)
     currentViewport = math.max(0, viewportExtent)
+    if currentWidth !== math.max(0, viewportWidth) then
+      selectionPrevious = None
+      selectionInitial = None
+      selectionGranularity = SelectionGranularity.Character
+      selectionDocument = None
+      selectionComplete = false
     currentWidth = math.max(0, viewportWidth)
     geometryCommitted = true
     currentLayoutViewport = layoutViewport
@@ -425,7 +448,7 @@ final class ScrollView(
           document <- selectionDocument
           anchor   <- selectionAnchor
           focus    <- selectionFocus
-        yield document.decorations(anchor, focus, currentOffset)
+        yield document.decorations(anchor, focus, currentOffset, currentViewport)
       )
     }
     val (
@@ -565,6 +588,19 @@ final class ScrollView(
     case click: MouseEvent.Click
         if primary && click.button === MouseButton.Left && click.clickCount >= 2 =>
       selectClickGranularity(click.location.localRow, click.location.localCol, click.clickCount)
+    case click: MouseEvent.Click
+        if primary && click.button === MouseButton.Left && click.clickCount === 1 &&
+          click.modifiers === KeyModifiers.empty &&
+          !onScrollbar(click.location.localRow, click.location.localCol) =>
+      val changed = stateBoundary {
+        val active = selectionAnchor.nonEmpty
+        clearSelectionLocked(clearDocument = false)
+        active
+      }
+      MouseHandlerResult(
+        handled = true,
+        renderIntent = if changed then MouseRenderIntent.Render else MouseRenderIntent.Preserve
+      )
     case _                                                                                => MouseHandlerResult.Ignored
 
   override def tuiContext_=(value: Option[TUIContext]): Unit =
@@ -576,7 +612,16 @@ final class ScrollView(
           case _                               => ()
     }
 
-  override def invalidate(): Unit = child.invalidate()
+  override def invalidate(): Unit = stateBoundary.transition { effects =>
+    val target = currentChild
+    contentRevision += 1
+    selectionPrevious = None
+    selectionInitial = None
+    selectionGranularity = SelectionGranularity.Character
+    selectionDocument = None
+    selectionComplete = false
+    effects.add(() => target.invalidate())
+  }
 
   private[scalatui] def openSearch(): Unit = stateBoundary { searchActive = true }
 
@@ -752,6 +797,7 @@ final class ScrollView(
     }
 
   private def extendSelection(localRow: Int, localCol: Int): MouseHandlerResult =
+    ensureCompleteSelectionDocument()
     val direction = stateBoundary {
       if localRow <= 0 && currentOffset > 0 then -1
       else if localRow >= currentViewport - 1 && currentOffset < maximumOffset then 1
@@ -864,7 +910,18 @@ final class ScrollView(
   ): Unit = stateBoundary {
     if (currentChild eq child) && contentRevision === revision then
       scanned.foreach(selectionScanCount = _)
-      val changed = selectionDocument.exists(previous => !previous.sameText(document))
+      val retainedEnd   = Vector(
+        selectionAnchor.getOrElse(0),
+        selectionFocus.getOrElse(0),
+        selectionInitial.fold(0)(_.end)
+      ).max
+      val prefixChanged = selectionPrevious.exists(previous =>
+        !previous.samePrefix(document, retainedEnd)
+      )
+      val changed       = selectionPrevious.isEmpty &&
+        selectionDocument.exists(previous => !previous.sameText(document))
+      selectionPrevious = None
+      if prefixChanged then clearSelectionLocked(clearDocument = false)
       selectionDocument = Some(document)
       selectionComplete = complete
       if document.length === 0 then clearSelectionLocked(clearDocument = false)
@@ -877,6 +934,7 @@ final class ScrollView(
   }
 
   private def clearSelectionLocked(clearDocument: Boolean): Unit =
+    selectionPrevious = None
     selectionAnchor = None
     selectionFocus = None
     selectionInitial = None
