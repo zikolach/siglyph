@@ -1,5 +1,5 @@
 #!/usr/bin/env -S scala-cli shebang
-//> using scala 3.9.0
+//> using scala 3.10.1
 //> using platform native
 //> using nativeVersion 0.5.12
 //> using dep io.github.zikolach::siglyph-core::0.12.0
