@@ -10,8 +10,9 @@ Oversized entries bypass retention. No WeakRef or runtime dependencies are used.
 
 Stable blocks skip styling/wrapping during append. Resize still renders/wraps blocks
 but reuses highlighted code, including plain fallback when a highlighter declines.
-The parser still reparses the entire document on a full-render-cache miss. There is
-no incremental parsing or universal speedup claim. The existing one-entry component
+Ordinary `Markdown` still reparses the entire document on a full-render-cache miss. These
+render caches alone provide no incremental parsing or universal speedup claim. The separate
+opt-in [StreamingMarkdown](streaming-markdown.md) component adds conservative parse-prefix reuse. The existing one-entry component
 cache is unchanged in shape and is not covered by the new reuse budgets.
 
 The baseline grammar renders blocks independently and appends their separator before
