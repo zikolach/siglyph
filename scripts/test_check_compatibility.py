@@ -33,6 +33,45 @@ class CompatibilityGateTests(unittest.TestCase):
         self.assertEqual(command[:2], ['env', 'COURSIER_REPOSITORIES=https://repo.maven.apache.org/maven2'])
         self.assertNotIn('file:', command[1])
 
+    def test_baseline_and_candidate_compilers_remain_distinct(self):
+        repositories = ['https://repo.maven.apache.org/maven2']
+        for native in (False, True):
+            for action in ('run', 'package'):
+                baseline = COMPAT.scala_command(action, Path('Consumer.scala'), COMPAT.POLICY['baseline'],
+                                                repositories, native=native,
+                                                scala_version=COMPAT.POLICY['baselineScala'])
+                candidate = COMPAT.scala_command(action, Path('Consumer.scala'), '0.13.0-candidate',
+                                                 repositories, native=native)
+                self.assertEqual(baseline[baseline.index('--scala') + 1], '3.9.0')
+                self.assertEqual(candidate[candidate.index('--scala') + 1], '3.10.1')
+                self.assertEqual(baseline[baseline.index('--jvm') + 1], '21')
+                self.assertEqual(candidate[candidate.index('--jvm') + 1], '21')
+
+    def test_gate_uses_old_compiler_for_baseline_binaries_and_native(self):
+        from unittest.mock import patch
+        commands = []
+
+        def record(args, capture=False):
+            commands.append([str(arg) for arg in args])
+            return '/jdk' if args[:2] == ['cs', 'java-home'] else ''
+
+        with patch('sys.argv', ['check-compatibility.py', '--candidate', '0.13.0-candidate']), \
+                patch.object(COMPAT, 'inventory_errors', return_value=[]), \
+                patch.object(COMPAT, 'fetch', return_value='candidate-classpath'), \
+                patch.object(COMPAT, 'surface', return_value=('public class Fixture {', {})), \
+                patch.object(COMPAT, 'compare', return_value=[]), \
+                patch.object(COMPAT, 'run', side_effect=record):
+            COMPAT.main()
+        scala_commands = [command for command in commands if 'scala-cli' in command]
+        self.assertEqual(len(scala_commands), 5)
+        for command in scala_commands:
+            baseline = any(arg.endswith(':' + COMPAT.POLICY['baseline']) for arg in command)
+            self.assertEqual(command[command.index('--scala') + 1], '3.9.0' if baseline else '3.10.1')
+        self.assertTrue(any('package' in command and '3.9.0' in command for command in scala_commands))
+        self.assertTrue(any('java' in command[0] and 'baseline-scala.jar' in command[2]
+                            and 'candidate-classpath' in command[2] for command in commands
+                            if len(command) > 2))
+
     def test_inventory_reports_new_and_removed_source_files(self):
         import json
         with tempfile.TemporaryDirectory() as directory:

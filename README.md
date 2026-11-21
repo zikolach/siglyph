@@ -18,7 +18,7 @@ Install [Scala CLI](https://scala-cli.virtuslab.org/install/) and use a real mac
 
 <!-- canonical-example: examples/scala-cli/hello.scala -->
 ```scala
-//> using scala 3.9.0
+//> using scala 3.10.1
 //> using dep io.github.zikolach::siglyph-core:0.12.0
 //> using dep io.github.zikolach::siglyph-terminal-jvm:0.12.0
 
