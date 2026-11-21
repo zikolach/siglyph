@@ -20,7 +20,7 @@ New source files must be classified in the inventory. Explicit themes and auxili
 
 ## Compatibility means different things
 
-- **Source:** existing consumer source compiles with the supported Scala 3.9.0-compatible compiler/JDK 21 toolchain. Recompilation alone is not binary proof.
+- **Source:** baseline consumers compile with Scala 3.9.0; unreleased candidate consumers use Scala 3.10.1. Both retain JDK 21. Published 0.12.0 keeps its Scala 3.9.0 baseline; new candidate TASTy requires a Scala 3.10.1-compatible compiler. Recompilation alone is not binary proof.
 - **JVM binary:** selected published public/protected descriptors/class shape remain, and already compiled Scala/Java/Kotlin consumer binaries run against candidate jars. The gate is conservative and intentionally limited: it does not prove every inheritance, inline/TASTy, generic, serialization or behavioral compatibility case.
 - **Behavior:** representative construction, input values, rendering and lifecycle fixtures pass, supplemented by the library regression/PTY suites. Descriptor equality cannot prove behavior.
 - **Native:** rebuild consumers using Scala Native 0.5.12 and the supported native toolchain. Statically linked binaries are not validated by swapping jars, so no JVM-style Native ABI promise is made.

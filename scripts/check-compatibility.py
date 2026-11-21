@@ -76,11 +76,11 @@ def jvm_coordinates(version):
             f'io.github.zikolach:siglyph-terminal-jvm_3:{version}']
 
 
-def scala_command(action, source, version, repositories, native=False):
+def scala_command(action, source, version, repositories, native=False, scala_version=None):
     command = ['env', 'COURSIER_REPOSITORIES=' + '|'.join(repositories), 'scala-cli']
     if action == 'package':
         command += ['--power']
-    command += [action, str(source), '--scala', POLICY['scala'], '--jvm', '21']
+    command += [action, str(source), '--scala', scala_version or POLICY['scala'], '--jvm', '21']
     for repository in repositories:
         command += ['--repository', repository]
     if native:
@@ -139,6 +139,7 @@ def main():
         work = Path(temporary)
         for version, cp, label in ((baseline, old_cp, 'baseline'), (args.candidate, candidate_cp, 'candidate')):
             selected_repositories = central if label == 'baseline' else repositories
+            scala_version = POLICY['baselineScala'] if label == 'baseline' else POLICY['scala']
             java_classes = work / ('java-' + label)
             java_classes.mkdir()
             run([jdk / 'javac', '--release', '21', '-classpath', cp, '-d', java_classes, fixtures / 'JavaConsumer.java'])
@@ -153,13 +154,15 @@ def main():
             run([jdk / 'java', '-cp', str(kotlin_classes) + os.pathsep + cp + os.pathsep + kotlin_runtime, 'KotlinConsumerKt'])
             if label == 'baseline':
                 run([jdk / 'java', '-cp', str(kotlin_classes) + os.pathsep + candidate_cp + os.pathsep + kotlin_runtime, 'KotlinConsumerKt'])
-            run(scala_command('run', fixtures / 'ScalaConsumer.scala', version, selected_repositories))
+            run(scala_command('run', fixtures / 'ScalaConsumer.scala', version, selected_repositories, scala_version=scala_version))
             if not args.skip_native:
-                run(scala_command('run', fixtures / 'NativeConsumer.scala', version, selected_repositories, native=True))
+                run(scala_command('run', fixtures / 'NativeConsumer.scala', version, selected_repositories, native=True, scala_version=scala_version))
         binary = work / 'baseline-scala.jar'
-        run(scala_command('package', fixtures / 'ScalaConsumer.scala', baseline, central) + ['--library', '-o', str(binary)])
+        run(scala_command('package', fixtures / 'ScalaConsumer.scala', baseline, central,
+                          scala_version=POLICY['baselineScala']) + ['--library', '-o', str(binary)])
         run([jdk / 'java', '-cp', str(binary) + os.pathsep + candidate_cp, 'ScalaConsumer'])
     print(json.dumps({'baseline': baseline, 'candidate': args.candidate,
+                      'baselineScala': POLICY['baselineScala'], 'candidateScala': POLICY['scala'],
                       'selectedJvmAbi': 'passed', 'baselineBinariesOnCandidate': ['Scala', 'Java', 'Kotlin'],
                       'sourceConsumers': ['Scala JVM', 'Java', 'Kotlin'] + ([] if args.skip_native else ['Scala Native']),
                       'nativeSkipped': args.skip_native, 'repositories': repositories}))

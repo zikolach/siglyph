@@ -8,7 +8,7 @@ Version **0.12.0** is published on Maven Central. No GitHub credentials or local
 
 ### Toolchain compatibility
 
-Scala consumers need **Scala 3.9.0 or a compatible newer compiler**; JVM applications use **JDK 21**. Scala Native uses **0.5.12**. Java/Kotlin applications use the JVM facade and do not need to install a Scala compiler.
+Published **0.12.0** artifacts need **Scala 3.9.0 or a compatible newer compiler**; the examples below use **Scala 3.10.1**. Unreleased builds from this checkout use Scala 3.10.1 and require a compatible compiler to read their TASTy. JVM applications and repository builds retain **JDK 21**. Scala Native uses **0.5.12**. Java/Kotlin applications use the JVM facade and do not need to install a Scala compiler.
 
 Mill is needed only if you choose Mill as your build tool or build this repository. Contributor toolchain pins live in [CONTRIBUTING](../CONTRIBUTING.md#development-setup).
 
@@ -19,7 +19,7 @@ Scala 3.7.x consumers must upgrade to read the published artifacts' TASTy. See [
 Add to `build.sbt`:
 
 ```scala
-scalaVersion := "3.9.0"
+scalaVersion := "3.10.1"
 
 libraryDependencies ++= Seq(
   "io.github.zikolach" %% "siglyph-core" % "0.12.0",
@@ -39,7 +39,7 @@ import mill.*
 import mill.scalalib.*
 
 object app extends ScalaModule {
-  def scalaVersion = "3.9.0"
+  def scalaVersion = "3.10.1"
 
   def mvnDeps = Seq(
     mvn"io.github.zikolach::siglyph-core::0.12.0",

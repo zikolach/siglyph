@@ -3,8 +3,10 @@
 siglyph publishes release jars to GitHub Releases and artifacts to GitHub Packages and Maven
 Central. The latest verified published version is **0.12.0**; installation examples use that version.
 
-Scala 3.9.0/JDK 21/Scala Native 0.5.12 remain the baseline. See the [release record](release-v0.12.0.md)
-for verification. `docs/release-status.json` tracks published availability independently of a dated
+Published 0.12.0 artifacts retain the Scala 3.9.0/JDK 21/Scala Native 0.5.12 baseline.
+Unreleased builds use Scala 3.10.1 with JDK 21 and Scala Native 0.5.12 unchanged; consumers
+of those builds need a Scala 3.10.1-compatible compiler. See the [release record](release-v0.12.0.md)
+for published verification. `docs/release-status.json` tracks published availability independently of a dated
 candidate changelog; update it only after public artifacts are verified.
 
 ## Version source
