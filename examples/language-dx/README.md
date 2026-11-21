@@ -43,8 +43,8 @@ mvn -f examples/language-dx/java/pom.xml -Dsiglyph.version=0.13.0-dx-SNAPSHOT co
 mvn -f examples/language-dx/java/pom.xml -Dsiglyph.version=0.13.0-dx-SNAPSHOT compile exec:java -Dexec.args=--interactive
 gradle -p examples/language-dx/kotlin -PsiglyphVersion=0.13.0-dx-SNAPSHOT run
 gradle -p examples/language-dx/kotlin -PsiglyphVersion=0.13.0-dx-SNAPSHOT run --args=--interactive
-scala-cli run examples/language-dx/scala/DxApp.scala --scala 3.9.0 --jvm 21 --repository "file://$HOME/.m2/repository" --dependency io.github.zikolach::siglyph-terminal-jvm:0.13.0-dx-SNAPSHOT
-scala-cli run examples/language-dx/scala/DxInteractive.scala --scala 3.9.0 --jvm 21 --repository "file://$HOME/.m2/repository" --dependency io.github.zikolach::siglyph-terminal-jvm:0.13.0-dx-SNAPSHOT
+scala-cli run examples/language-dx/scala/DxApp.scala --scala 3.10.1 --jvm 21 --repository "file://$HOME/.m2/repository" --dependency io.github.zikolach::siglyph-terminal-jvm:0.13.0-dx-SNAPSHOT
+scala-cli run examples/language-dx/scala/DxInteractive.scala --scala 3.10.1 --jvm 21 --repository "file://$HOME/.m2/repository" --dependency io.github.zikolach::siglyph-terminal-jvm:0.13.0-dx-SNAPSHOT
 ```
 
 Maven uses JDK 21; Gradle requires a Kotlin-2.4.21-compatible installation and JDK toolchain resolution.

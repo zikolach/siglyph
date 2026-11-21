@@ -10,7 +10,7 @@ Requirements:
 
 - JDK 21
 - Mill 1.3.1 (pinned in the build header)
-- Scala 3.9.0 LTS (resolved by Mill)
+- Scala 3.10.1 (resolved by Mill; published 0.12.0 artifacts retain the Scala 3.9.0 baseline)
 - [Native toolchain and system libraries](docs/getting-started.md#scala-native) for all-module compile/test commands
 - `openspec` for spec/change validation when working on user-visible behavior
 

@@ -7,6 +7,12 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Toolchain
+
+- Unreleased builds use Scala 3.10.1; consumers of new artifacts need a compatible compiler
+  for their TASTy. JDK 21 and Scala Native 0.5.12 remain unchanged. Published 0.12.0 artifacts
+  retain their Scala 3.9.0 baseline; this change does not publish a new release.
+
 ### Fixed
 
 - Active text-selection drags survive streaming updates when the preceding text and cell mapping
