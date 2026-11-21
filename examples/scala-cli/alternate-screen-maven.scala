@@ -3,7 +3,7 @@
 //> using dep io.github.zikolach::siglyph-core:0.12.0
 //> using dep io.github.zikolach::siglyph-terminal-jvm:0.12.0
 //> using dep com.github.plokhotnyuk.jsoniter-scala::jsoniter-scala-core:2.42.1
-//> using dep com.github.plokhotnyuk.jsoniter-scala::jsoniter-scala-macros:2.42.1
+//> using dep com.github.plokhotnyuk.jsoniter-scala::jsoniter-scala-macros:2.43.0
 
 import java.net.URI
 import java.net.URLEncoder
