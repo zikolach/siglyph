@@ -54,7 +54,8 @@
 
 ## Maintainers
 
-- [0.13.0 release record](release-v0.13.0.md).
+- [0.14.0 preparation](release-v0.14.0.md): authorized MINOR feature release, pending artifact verification.
+- [0.13.0 release record](release-v0.13.0.md): latest verified publication.
 
 - [API stability and release gates](api-stability.md): scoped ABI checks and published/candidate consumers.
 

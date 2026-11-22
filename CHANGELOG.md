@@ -7,6 +7,30 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-22
+
+MINOR feature release prepared locally; publication authorized, pending artifact verification.
+See the [release record](docs/release-v0.14.0.md). Installation examples remain at verified 0.13.0.
+
+### Added
+
+- Experimental nonmutating, committed-only `Editor.submittedText` and opaque reusable
+  `EditorDraftSnapshot` via `snapshotDraft()`/`restoreDraft(...)` on JVM and Native, preserving
+  committed compact-paste payloads and cursor without a full editor checkpoint. Half-open paste,
+  undo/history stacks and asynchronous state are not captured.
+
+### Fixed
+
+- Compact-paste expansion preserves dollar signs, backslashes and marker-looking payload text in one
+  nonrecursive pass. New IDs avoid existing literal references; out-of-range literal IDs do not crash.
+
+### Compatibility notes
+
+- Literal text spelling an already-active compact-paste marker can still alias its payload under the
+  legacy marker representation; arbitrary marker provenance is not tracked. Copying displayed text
+  alone is not a lossless draft snapshot.
+- Scala 3.10.1, JDK 21 and Scala Native 0.5.12 remain unchanged; no new runtime dependency.
+
 ## [0.13.0] - 2026-11-22
 
 Published and verified. See the [release record](docs/release-v0.13.0.md).
@@ -486,7 +510,8 @@ Published and verified. See the [release record](docs/release-v0.13.0.md).
 - GitHub Actions CI, jar packaging, GitHub Packages publishing, and GitHub
   release artifacts.
 
-[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/zikolach/siglyph/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/zikolach/siglyph/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/zikolach/siglyph/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/zikolach/siglyph/compare/v0.10.0...v0.11.0

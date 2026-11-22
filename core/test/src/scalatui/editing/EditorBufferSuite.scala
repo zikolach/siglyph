@@ -130,6 +130,63 @@ class EditorBufferSuite extends munit.FunSuite:
     assertEquals(buffer.text, "ae\u0301\n👨‍👩‍👧‍👦\n🇦🇹b")
     assertEquals(buffer.cursor, EditorCursor(2, 1))
 
+  test("submission expands registered markers once and preserves replacement metacharacters"):
+    val buffer = EditorBuffer.empty
+    val first  = "$1\\path [paste #2]"
+    buffer.restore(EditorBuffer.Snapshot(
+      Vector("[paste #1] / [paste #2]"),
+      EditorCursor(0, 3),
+      Map(1 -> first, 2 -> "second"),
+      2
+    ))
+    assertEquals(buffer.submitText, first + " / second")
+
+  test(
+    "new paste identities avoid literal references in display and retained payloads after restore"
+  ):
+    val literal = "[paste #1 1001 chars] "
+    val first   = "x" * 1001 + " [paste #2] [paste #4]"
+    val buffer  = EditorBuffer(literal)
+    buffer.insertPaste(first)
+    assertEquals(buffer.pasteMarkers.keySet, Set(3))
+    assertEquals(buffer.submitText, literal + first)
+    val saved   = buffer.snapshot
+    buffer.insertPaste("z" * 1001)
+    buffer.restore(saved)
+    buffer.insertPaste("y" * 1001)
+    assertEquals(buffer.pasteMarkers.keySet, Set(3, 5))
+    assertEquals(buffer.submitText, literal + first + "y" * 1001)
+
+  test("out-of-range literal marker IDs remain ordinary text with registered pastes"):
+    val literal = "[paste #999999999999999999999999 1001 chars] "
+    val buffer  = EditorBuffer(literal)
+    buffer.insertPaste("x" * 1001)
+    assertEquals(buffer.submitText, literal + "x" * 1001)
+    buffer.setCursor(EditorCursor(0, 1))
+    assertEquals(buffer.cursor, EditorCursor(0, 1))
+
+  test("noncanonical marker IDs do not alias a registered paste"):
+    val buffer = EditorBuffer.empty
+    buffer.restore(EditorBuffer.Snapshot(
+      Vector("[paste #01] [paste #1]"),
+      EditorCursor(0, 0),
+      Map(1 -> "payload"),
+      1
+    ))
+    assertEquals(buffer.submitText, "[paste #01] payload")
+
+  test("exhausted paste IDs reject without modifying buffer state"):
+    val buffer = EditorBuffer.empty
+    buffer.restore(EditorBuffer.Snapshot(
+      Vector("draft"),
+      EditorCursor(0, 5),
+      Map.empty,
+      Int.MaxValue
+    ))
+    val before = buffer.snapshot
+    intercept[IllegalStateException](buffer.insertPaste("x" * 1001))
+    assertEquals(buffer.snapshot, before)
+
   test("large paste inserts compact marker and submit expands logical text"):
     val pasted = (1 to 11).map(i => s"line$i").mkString("\n")
     val buffer = EditorBuffer.fromText("ab", EditorCursor(0, 1))

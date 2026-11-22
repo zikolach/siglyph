@@ -7,6 +7,11 @@ Scala consumers need a **Scala 3.10.1-compatible compiler** for 0.13.0 artifacts
 Scala Native 0.5.12 remain unchanged. The [release record](release-v0.13.0.md) documents verification
 and limitations; earlier 0.12.0 artifacts retain their Scala 3.9.0 baseline.
 
+The **0.14.0 MINOR feature release is prepared locally**; publication is authorized, pending artifact
+verification. See the [0.14.0 preparation record](release-v0.14.0.md) for candidate evidence and outstanding
+gates. Scala 3.10.1, JDK 21 and Scala Native 0.5.12 remain unchanged. Keep installation examples at 0.13.0
+until remote verification completes; a local candidate is not a published release.
+
 `docs/release-status.json` tracks verified publication independently of dated candidate changelogs.
 Set `preparedVersion` during preparation; update `publishedVersion` and clear `preparedVersion` only
 after remote artifacts and post-publication consumers are verified.

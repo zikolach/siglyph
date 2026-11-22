@@ -95,8 +95,59 @@ final class Editor(initialText: String = "", options: EditorOptions = EditorOpti
   private var jumpMode                                              = Option.empty[Editor.JumpDirection]
   private var pasteSession                                          = Option.empty[Editor.PasteSession]
 
-  /** Current editor text joined with `\n` separators. */
+  /**
+   * Displayed buffer text, including compact paste markers. Use [[submittedText]] for logical
+   * content.
+   */
   def text: String = stateBoundary(buffer.text)
+
+  /**
+   * Logical text for submission or validation, resolving committed compact paste payloads.
+   *
+   * This JVM/Native read is serialized with editor state and has no side effects: it does not
+   * submit, move the cursor, expand displayed markers, change undo/history, or invoke
+   * callbacks/autocomplete. In-flight streamed paste bytes are excluded until committed by PasteEnd
+   * (or ordinary input). Validate this value before performing application mutations such as
+   * clearing a queued draft.
+   */
+  def submittedText: String = stateBoundary(buffer.submitText)
+
+  /**
+   * Capture an opaque detached committed draft, reusable even after subsequent edits or in another
+   * editor on JVM/Native. Pending streamed paste bytes are excluded and left untouched. This is not
+   * a full editor checkpoint; see [[restoreDraft]] for restoration invalidation semantics.
+   */
+  def snapshotDraft(): EditorDraftSnapshot = stateBoundary {
+    EditorDraftSnapshots.capture(buffer)
+  }
+
+  /**
+   * Restore displayed text, compact paste identities/payloads and exact logical cursor on
+   * JVM/Native.
+   *
+   * Discards pending paste and undo, cancels autocomplete without refreshing, abandons history
+   * browsing, and resets yank continuation, jump mode and preferred column. History entries, kill
+   * ring, focus, callbacks, configuration and TUI context remain. Requests render and invokes
+   * onChange once if displayed or submitted text differs, never onSubmit. External effects run
+   * after releasing the state boundary. Snapshots remain reusable; undo cannot resurrect a prior
+   * draft. Null or unsupported handles are rejected before any state change.
+   */
+  def restoreDraft(snapshot: EditorDraftSnapshot): Unit = transition { effects =>
+    EditorDraftSnapshots.validate(snapshot)
+    val beforeText          = buffer.text
+    val beforeSubmittedText = buffer.submitText
+    cancelAutocompleteLocked(effects)
+    pasteSession = None
+    undoStack.clear()
+    resetEditingAction()
+    abandonHistory()
+    jumpMode = None
+    EditorDraftSnapshots.restore(snapshot, buffer)
+    layoutCache = None
+    if (buffer.text !== beforeText) || (buffer.submitText !== beforeSubmittedText) then
+      deferChange(effects, buffer.text)
+    deferRenderRequest(effects)
+  }
 
   /** Current logical buffer lines. */
   def lines: Vector[String] = stateBoundary(buffer.lines)

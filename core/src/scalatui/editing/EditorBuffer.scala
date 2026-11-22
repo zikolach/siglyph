@@ -275,10 +275,19 @@ final class EditorBuffer private (
       lineCount: Long,
       graphemeCount: Long
   ): Unit =
-    pasteCounter += 1
-    val id     = pasteCounter
+    // Reserve marker-looking IDs in literal text and payloads before introducing a new identity.
+    val reserved = (currentLines.iterator ++ currentPastes.valuesIterator ++ Iterator(value))
+      .flatMap(text =>
+        EditorBuffer.PasteMarker.findAllMatchIn(text).flatMap(_.group(1).toIntOption)
+      )
+      .toSet ++ currentPastes.keySet
+    var next     = pasteCounter.toLong + 1L
+    while next <= Int.MaxValue && reserved.contains(next.toInt) do next += 1L
+    if next > Int.MaxValue then throw IllegalStateException("paste identity space exhausted")
+    pasteCounter = next.toInt
+    val id       = pasteCounter
     currentPastes = currentPastes.updated(id, value)
-    val marker =
+    val marker   =
       if lineCount > EditorBuffer.LargePasteLineThreshold then
         s"[paste #$id +$lineCount lines]"
       else s"[paste #$id $graphemeCount chars]"
@@ -302,9 +311,17 @@ final class EditorBuffer private (
       )
 
   private def expandPasteMarkers(value: String): String =
-    currentPastes.foldLeft(value) { case (result, (id, paste)) =>
-      EditorBuffer.PasteMarkerForId(id).replaceAllIn(result, _ => paste)
-    }
+    if currentPastes.isEmpty then value
+    else
+      val out    = StringBuilder()
+      var offset = 0
+      for matched <- EditorBuffer.PasteMarker.findAllMatchIn(value) do
+        out.append(value.substring(offset, matched.start))
+        // Append payloads literally and once: their marker-looking text is not another reference.
+        val payload = pasteMarkerId(matched.matched).flatMap(currentPastes.get)
+        out.append(payload.getOrElse(matched.matched))
+        offset = matched.end
+      out.append(value.substring(offset)).result()
 
   private def lineClusters(value: String): Vector[String] =
     if currentPastes.isEmpty || !value.contains("[paste #") then Unicode.graphemeClusters(value)
@@ -312,8 +329,8 @@ final class EditorBuffer private (
       val out  = Vector.newBuilder[String]
       var last = 0
       for matchResult <- EditorBuffer.PasteMarker.findAllMatchIn(value) do
-        val id = matchResult.group(1).toInt
-        if currentPastes.contains(id) then
+        val id = pasteMarkerId(matchResult.matched)
+        if id.exists(currentPastes.contains) then
           out ++= Unicode.graphemeClusters(value.substring(last, matchResult.start))
           out += matchResult.matched
           last = matchResult.end
@@ -321,7 +338,7 @@ final class EditorBuffer private (
       out.result()
 
   private def pasteMarkerId(value: String): Option[Int] = value match
-    case EditorBuffer.PasteMarker(id, _*) => Some(id.toInt)
+    case EditorBuffer.PasteMarker(id, _*) => id.toIntOption.filter(_.toString === id)
     case _                                => None
 
 object EditorBuffer:
@@ -335,8 +352,6 @@ object EditorBuffer:
   val LargePasteLineThreshold: Int      = 10
   val LargePasteCharacterThreshold: Int = 1000
   private val PasteMarker               = "\\[paste #(\\d+)( (\\+\\d+ lines|\\d+ chars))?\\]".r
-  private def PasteMarkerForId(id: Int) =
-    ("\\[paste #" + id + "( (\\+\\d+ lines|\\d+ chars))?\\]").r
 
   /** Empty buffer with the cursor at the beginning. */
   def empty: EditorBuffer = fromText("", EditorCursor(0, 0))
