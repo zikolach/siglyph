@@ -268,6 +268,16 @@
       ]
     },
     {
+      "path": "core/src/scalatui/components/EditorDraftSnapshot.scala",
+      "classification": "evolving (not baseline-gated)",
+      "declarations": [
+        {
+          "name": "EditorDraftSnapshot",
+          "visibility": "public"
+        }
+      ]
+    },
+    {
       "path": "core/src/scalatui/components/EditorAutocompletePlacement.scala",
       "classification": "evolving (not baseline-gated)",
       "declarations": [

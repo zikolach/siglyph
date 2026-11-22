@@ -41,4 +41,4 @@ Enter sends and clears the composer; Shift+Enter adds a newline; Escape/Ctrl+C e
 
 ## Deferred snapshots
 
-This milestone adds no public editor snapshot API. Internal history restoration reuses `EditorBuffer.Snapshot`, including paste registry and counter. A future full-editor snapshot contract must define undo-stack and kill-ring ownership, paste registry lifetimes and identifier collision safety, pending paste transactions, history and preferred-column state, autocomplete cancellation, and callback/render ordering. Saving only `text` and `cursor` is not a full undo/paste-registry snapshot.
+Released 0.13.0 adds no public editor snapshot API. The unreleased draft-handoff work adds `Editor.submittedText`, `snapshotDraft()` and `restoreDraft(...)`; see [draft handoff](input-and-terminal.md#draft-handoff-unreleased). This bounded snapshot preserves committed text, compact-paste metadata and cursor, not undo/history stacks or pending asynchronous state. A future full-editor checkpoint remains separate. Saving only displayed `text` and `cursor` is not a lossless compact-paste snapshot.
