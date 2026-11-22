@@ -3,7 +3,7 @@
 This follow-up to the completed application-building roadmap (#99) targets idiomatic Scala,
 Java and Kotlin application development. The user approved this direction after 0.12.0.
 It is an implementation roadmap, not a release announcement or a 1.0 stability commitment.
-New APIs must be described as unreleased until their published artifacts are verified.
+The implemented APIs are experimental and available since **0.13.0**; published artifacts and Central-only consumers have now been verified.
 
 ## Outcome
 
@@ -48,18 +48,18 @@ scheduling, selection or cleanup semantics.
   Tests exercise filtering, selection, updates, cancellation, teardown and useful assertion failures.
 - Shared Scala conveniences run on JVM and Native. Java/Kotlin support is JVM-only; a Kotlin DSL
   does not imply Kotlin/Native support.
-- Candidate consumer tests resolve staged artifacts rather than source roots. Published tests must
-  not claim success for an unreleased version; retain 0.12.0 installation instructions until release.
+- Candidate consumer tests resolve staged artifacts rather than source roots. Published tests resolve
+  Maven Central only; current installation instructions use verified 0.13.0 artifacts.
 - New runtime dependencies, hosting/CI expansion and toolchain changes are separate decisions.
 
 ## Completion evidence
 
 Implementation checklists and verification evidence belong to the
 [archived language-DX implementation](../openspec/changes/archive/2026-11-22-add-language-dx/tasks.md).
-The still-deferred publication check is tracked in the [0.13.0 preparation record](release-v0.13.0.md#remaining-release-gates).
-A milestone is complete only after its code, examples, tests and documentation pass their checks;
-a roadmap document alone does not establish delivery. Full publication verification happens only
-after an independently authorized release.
+The publication check passed after the independently authorized 0.13.0 release: Central-only
+Scala JVM/Native, Java and Kotlin consumers and old baseline binaries passed. See the
+[0.13.0 release record](release-v0.13.0.md) for publication and integrity evidence.
+A roadmap document alone does not establish delivery or graduate experimental APIs to stable.
 
 ## Deferred
 

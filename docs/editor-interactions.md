@@ -1,6 +1,6 @@
 # Editor navigation and conversational composers
 
-**Unreleased; source checkout only.** The behavior and examples described here are not included in published version 0.12.0.
+**Available since 0.13.0; APIs remain experimental.** The editor behavior is included in published artifacts; the demo commands below require a source checkout.
 
 The shared `Editor` uses rendered visual rows for Up/Down, including soft wraps. The first arrow captures a preferred **display-cell** column, not a UTF-16 or grapheme index. Short rows clamp without losing that preference. Wide glyphs floor to their leading boundary; combining clusters remain whole. A full wrapped row's end belongs to the next row, so movement clamps before it. Sanitized control expansions can share a source boundary across rows: rows without an independent logical cursor position are skipped. Source text is never rewritten by navigation.
 

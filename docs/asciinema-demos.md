@@ -47,11 +47,11 @@ Source reference: `unicodeInputFrames()` in `asciinemaDemo/src/scalatui/demo/Asc
 
 [![siglyph editor navigation and draft restoration](https://asciinema.org/a/jpLfkEaymTJJq0IA.svg)](https://asciinema.org/a/jpLfkEaymTJJq0IA)
 
-The new `editor-history` scenario demonstrates **unreleased** editor behavior from the source checkout, not published 0.12.0. It uses a real `Editor`, typed navigation/history keys, Unicode text, and controlled editor-width changes from 52 to 34 columns and back. This is component reflow, not a recording of a physical terminal resize.
+The existing `editor-history` recording demonstrates editor behavior **available since 0.13.0** (APIs remain experimental). It was recorded before release; no new recording was made for this publication. It uses a real `Editor`, typed navigation/history keys, Unicode text, and controlled editor-width changes from 52 to 34 columns and back. This is component reflow, not a recording of a physical terminal resize.
 
 The clip shows wrapped-row Up/Down navigation, retained display column, history recall, and exact draft text/cursor restoration. State assertions run before playback; each recorded frame snapshots real rendered output rather than a reconstructed mock editor.
 
-Record with `scripts/asciinema/record-demo.sh editor-history`, then replay `artifacts/asciinema/siglyph-editor-history.cast`. The published recording previews unreleased behavior; uploading the clip does not publish a library release.
+Record with `scripts/asciinema/record-demo.sh editor-history`, then replay `artifacts/asciinema/siglyph-editor-history.cast`. The existing clip now illustrates released behavior; uploading a clip is separate from publishing a library release.
 
 Source: `EditorInteractionDemo.frames()` in `asciinemaDemo/src/scalatui/demo/EditorInteractionDemo.scala`.
 
@@ -62,7 +62,7 @@ Source: `EditorInteractionDemo.frames()` in `asciinemaDemo/src/scalatui/demo/Edi
 | `agent-prompt` | Agent prompt composer with visible typing, slash completion, attachment completion, tag completion, and submitted prompt summary. | `mill asciinemaDemo.run agent-prompt` | `artifacts/asciinema/siglyph-agent-prompt.cast` | `https://asciinema.org/a/UznjMGz4rWVWwLXm` |
 | `command-palette` | Command palette, fuzzy filtering, selected action, loader/progress state, settings filtering, and settings value changes. | `mill asciinemaDemo.run command-palette` | `artifacts/asciinema/siglyph-command-palette.cast` | `https://asciinema.org/a/xiB1i6UAo1SgKx4l` |
 | `unicode-input` | Unicode-safe editing with CJK, emoji, combining marks, paste summary, Insert, arrow keys, and Ctrl-key display. | `mill asciinemaDemo.run unicode-input` | `artifacts/asciinema/siglyph-unicode-input.cast` | `https://asciinema.org/a/BSzrw6FMVLIgpUSb` |
-| `editor-history` | Wrapped visual navigation, Unicode draft, controlled width reflow, history recall and exact restoration (unreleased). | `mill asciinemaDemo.run editor-history` | `artifacts/asciinema/siglyph-editor-history.cast` | `https://asciinema.org/a/jpLfkEaymTJJq0IA` |
+| `editor-history` | Wrapped visual navigation, Unicode draft, controlled width reflow, history recall and exact restoration (since 0.13.0). | `mill asciinemaDemo.run editor-history` | `artifacts/asciinema/siglyph-editor-history.cast` | `https://asciinema.org/a/jpLfkEaymTJJq0IA` |
 
 ## Referenced code fragments
 

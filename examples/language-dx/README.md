@@ -1,9 +1,29 @@
-# Language-native application examples (unreleased)
+# Language-native application examples
 
-These APIs are **not in 0.12.0**. Use a locally staged candidate, not the published installation
-examples. Scala composition runs on JVM and Native; Java/Kotlin and interactive launchers are JVM-only.
+These APIs are **experimental, available since 0.13.0** on Maven Central. No local publishing or
+GitHub credentials are needed. Scala consumers require Scala 3.10.1 or a compatible newer compiler;
+JDK 21 is unchanged. Scala composition runs on JVM and Native; Java/Kotlin and interactive launchers are JVM-only.
 The optional [Kotlin DSL](kotlin/SiglyphDsl.kt) is source you include in your application, not a published
 Kotlin artifact. It adds receiver lambdas and nullable selection; no coroutines or new library runtime dependencies.
+
+## Run published 0.13.0 examples
+
+From the repository root (the checkout supplies example sources, not library classes):
+
+```bash
+mvn -f examples/language-dx/java/pom.xml -Dsiglyph.version=0.13.0 compile exec:java
+mvn -f examples/language-dx/java/pom.xml -Dsiglyph.version=0.13.0 compile exec:java -Dexec.args=--interactive
+gradle -p examples/language-dx/kotlin -PsiglyphVersion=0.13.0 run
+gradle -p examples/language-dx/kotlin -PsiglyphVersion=0.13.0 run --args=--interactive
+scala-cli run examples/language-dx/scala/DxApp.scala --scala 3.10.1 --jvm 21 --dependency io.github.zikolach::siglyph-terminal-jvm:0.13.0
+scala-cli run examples/language-dx/scala/DxInteractive.scala --scala 3.10.1 --jvm 21 --dependency io.github.zikolach::siglyph-terminal-jvm:0.13.0
+```
+
+Maven uses JDK 21; Gradle requires a Kotlin-2.4.21-compatible installation and JDK toolchain resolution.
+Neither build tool is downloaded by library tests. The artifact checker directly compiles/runs the exact
+same Java/Kotlin sources, including the optional DSL, with the pinned compiler versions.
+The build projects retain local-repository support for candidate development; use the published checker
+below when verifying Central-only resolution.
 
 ## Same application
 
@@ -23,7 +43,7 @@ large tables should use the existing [ScrollView layout](../../docs/data-table.m
 ## Stage and test candidate artifacts
 
 Requires Mill, Coursier, Scala CLI and JDK 21 (plus Native toolchain for `--native`).
-`0.13.0-dx-SNAPSHOT` is an arbitrary local test label, not a selected next release. Local staging is not a release:
+`0.13.0-dx-SNAPSHOT` is an arbitrary local test label, not the published 0.13.0 release. Local staging is not a release:
 
 ```bash
 SIGLYPH_VERSION=0.13.0-dx-SNAPSHOT mill '{core,terminalJvm,coreNative,terminalNative}.publishM2Local'
@@ -34,7 +54,7 @@ python3 scripts/check-compatibility.py --candidate 0.13.0-dx-SNAPSHOT --reposito
 The first checker resolves jars/NIR artifacts, never workspace source roots or Mill class directories.
 The existing compatibility gate separately checks published baseline descriptors and old binaries.
 
-## Standalone build tools
+## Optional local-candidate build commands
 
 After staging locally, from repository root:
 
@@ -47,9 +67,7 @@ scala-cli run examples/language-dx/scala/DxApp.scala --scala 3.10.1 --jvm 21 --r
 scala-cli run examples/language-dx/scala/DxInteractive.scala --scala 3.10.1 --jvm 21 --repository "file://$HOME/.m2/repository" --dependency io.github.zikolach::siglyph-terminal-jvm:0.13.0-dx-SNAPSHOT
 ```
 
-Maven uses JDK 21; Gradle requires a Kotlin-2.4.21-compatible installation and JDK toolchain resolution.
-Neither build tool is downloaded by library tests. The artifact checker directly compiles/runs the exact
-same Java/Kotlin sources, including the optional DSL, with the pinned compiler versions.
+These local-candidate commands are separate from the published commands above.
 
 ## Contracts and limitations
 
@@ -66,14 +84,15 @@ same Java/Kotlin sources, including the optional DSL, with the pinned compiler v
   outside runtime locks, and may race an external stop after admission.
 - `JvmScheduler` borrows its executor, never shuts it down, and propagates close failures.
   `navigation` is a convenience for exactly two controls (Tab/Escape), not a general focus manager.
-- New APIs are experimental/unreleased. Existing `SiglyphJvm` descriptors and published examples are unchanged.
+- New APIs remain experimental since 0.13.0. Existing `SiglyphJvm` descriptors are preserved.
 
-## After a separately authorized release
-
-Set `SIGLYPH_RELEASE` to the actual version containing these APIs, then run:
+## Published artifact verification
 
 ```bash
-python3 scripts/check-language-dx.py --version "$SIGLYPH_RELEASE" --published --native
+python3 scripts/check-language-dx.py --version 0.13.0 --published --native
 ```
 
-This resolves only Maven Central. No published-success claim is made before that command passes.
+This resolves only Maven Central and passed for the authorized 0.13.0 release published at
+2026-11-22T14:26:27Z, including Scala JVM/Native and Java/Kotlin consumers. The separate compatibility
+gate passed old Scala 3.9.0/Java/Kotlin binaries against 0.13.0. See the
+[release record](../../docs/release-v0.13.0.md) for evidence and limits.

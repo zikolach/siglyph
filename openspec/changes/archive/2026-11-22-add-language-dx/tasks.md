@@ -13,14 +13,14 @@
 - [x] 2.3 Verify staged candidate artifacts and existing published baseline consumers.
 - [x] 2.4 Run quality, docs, inventory and strict OpenSpec checks; document gaps.
 
-## 3. Deferred release follow-up
+## 3. Release follow-up
 
-- [ ] 3.1 Verify new APIs against a future published version (blocked until separately authorized publication).
+- [x] 3.1 Verify new APIs against published 0.13.0: after separately authorized publication at 2026-11-22T14:26:27Z, Central-only language-DX Scala JVM/Native and Java/Kotlin consumers passed; the compatibility gate also passed old Scala 3.9.0/Java/Kotlin binaries.
 
-Deferred release gate transferred to `docs/release-v0.13.0.md` during 0.13.0 preparation.
-Implementation is complete and may be archived; this unchecked publication task is not completed by archiving.
+The release gate was transferred to `docs/release-v0.13.0.md` during preparation and is now complete
+with post-publication evidence, not merely by archiving. See that release record for integrity and consumer verification.
 
-## Evidence and limits
+## Pre-publication implementation evidence and limits
 
 - Full JVM `core.test` passes. Shared `AppSuite` (6 tests on JVM and Native) exercises typed configuration, filtering/selection, bounded Accepted/Full/Closed delivery, cancellation and restart. Startup regressions count terminal starts and preserve fast worker/setup failures. `TUISuite` also passes on both JVM and Native (92 tests each).
 - `LanguageDxSuite` actually compiles and runs Java/Kotlin consumers; checks copied collections, nulls, duplicate IDs, immutable themes, borrowed executors, screen diagnostics and suppressed cleanup failures. Existing `SiglyphJvmInteropCompileSuite` remains unchanged and passes.

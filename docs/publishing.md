@@ -1,15 +1,15 @@
 # Publishing
 
 siglyph publishes release jars to GitHub Releases and artifacts to GitHub Packages and Maven
-Central. The latest verified published version is **0.12.0**; installation examples use that version.
+Central. The latest verified published version is **0.13.0**; installation examples use that version.
 
-Published 0.12.0 artifacts retain the Scala 3.9.0/JDK 21/Scala Native 0.5.12 baseline.
-Unreleased builds use Scala 3.10.1 with JDK 21 and Scala Native 0.5.12 unchanged; consumers
-of those builds need a Scala 3.10.1-compatible compiler. See the [release record](release-v0.12.0.md)
-for published verification. `docs/release-status.json` tracks published availability independently of a dated
-candidate changelog. Set `preparedVersion` during preparation; change `publishedVersion` only after
-public artifacts are verified. **0.13.0 is prepared, not published**; see its
-[candidate record](release-v0.13.0.md) for local evidence and outstanding release gates.
+Scala consumers need a **Scala 3.10.1-compatible compiler** for 0.13.0 artifacts. JDK 21 and
+Scala Native 0.5.12 remain unchanged. The [release record](release-v0.13.0.md) documents verification
+and limitations; earlier 0.12.0 artifacts retain their Scala 3.9.0 baseline.
+
+`docs/release-status.json` tracks verified publication independently of dated candidate changelogs.
+Set `preparedVersion` during preparation; update `publishedVersion` and clear `preparedVersion` only
+after remote artifacts and post-publication consumers are verified.
 
 ## Version source
 

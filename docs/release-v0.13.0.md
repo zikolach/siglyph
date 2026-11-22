@@ -1,11 +1,37 @@
-# 0.13.0 release preparation
+# 0.13.0 release
 
-**Prepared, not published**, on 2026-11-22. Latest verified publication remains **0.12.0**.
-The maintainer explicitly authorized commit, PR merge and publication on 2026-11-22.
-Publication and post-publication verification are pending; no duplicate workflow dispatch is planned.
-Runtime source: `0f1534807b052dbf62e9dce881932a11a8eb8930` (main); preparation branch:
-`release/prepare-0.13.0`. Baseline [CI](https://github.com/zikolach/siglyph/actions/runs/44943029245)
-passed before documentation/spec/validation-only preparation. [Changelog](../CHANGELOG.md#0130---2026-11-22).
+**Published on 2026-11-22**, following authorized preparation and merged [PR #124](https://github.com/zikolach/siglyph/pull/124).
+Tag `v0.13.0` points to `6c97a195175d829ab4dbe323cd01c6326745ea10`; its tree exactly matches the
+[CI-green preparation head](https://github.com/zikolach/siglyph/actions/runs/45031397051).
+One tag push triggered publication; no duplicate manual dispatch or tag replacement was used.
+
+[GitHub Release](https://github.com/zikolach/siglyph/releases/tag/v0.13.0) ·
+[Changelog](../CHANGELOG.md#0130---2026-11-22)
+
+## Publication verification
+
+- [Publish](https://github.com/zikolach/siglyph/actions/runs/45032200879) and
+  [Publish Maven Central](https://github.com/zikolach/siglyph/actions/runs/45032200804) both succeeded.
+  [Merged-main CI](https://github.com/zikolach/siglyph/actions/runs/45032171073) also passed.
+- All ten Maven Central coordinates resolved anonymously: forty POM/binary/source/Javadoc payloads
+  passed coordinate/dependency-version, SHA-1, ZIP/class-version and Native IR checks. PGP armor
+  presence was checked, not independent cryptographic signer trust.
+- All ten GitHub Release JARs passed API SHA-256 digest, size, ZIP/class-version and Native IR checks.
+  GitHub Packages publication succeeded in its workflow; independent authenticated package downloads
+  are not claimed.
+- Central-only compatibility checks passed selected JVM ABI and baseline Scala 3.9.0/Java/Kotlin
+  binaries against 0.13.0; candidate Scala 3.10.1 JVM/Native, Java and Kotlin source consumers passed.
+  Native consumers were linked and run.
+- `check-language-dx.py --version 0.13.0 --published --native` passed all language consumers; the
+  editor/history/streaming-Markdown feature smoke also compiled and ran on JVM and Native using
+  published Markdown/core artifacts, not workspace sources.
+- Local Python certificate-store validation initially failed before downloads. Verification was rerun
+  with curl using normal TLS verification and HTTPS-only redirects; no certificate checks were disabled.
+- Updated published installation examples and Scala CLI recipes compiled successfully against 0.13.0;
+  documentation checks and all 30 canonical OpenSpec specs passed.
+- Local receipts: `.empryo/release-0.13.0/central-verifier/verification.json`,
+  `github-verifier/verification.json`, corresponding `SHA256SUMS.txt` files and `tag-evidence.json`.
+  Runtime baseline before documentation/validation preparation was `0f1534807b052dbf62e9dce881932a11a8eb8930`.
 
 ## Scope and migration
 
@@ -24,9 +50,9 @@ passed before documentation/spec/validation-only preparation. [Changelog](../CHA
   GitHub Actions checkout **v7**, setup-java **v6**, cache **v6** (#120).
   No new library runtime dependency or supported platform.
 
-**Consumer compiler requirement:** new candidate TASTy requires a **Scala 3.10.1-compatible compiler**;
-Scala 3.9.0 source compilation against new artifacts is not promised. Published 0.12.0 installation
-examples and its Scala 3.9.0 baseline remain unchanged. JDK **21**, Scala Native **0.5.12**, Mill **1.3.1**
+**Consumer compiler requirement:** 0.13.0 TASTy requires a **Scala 3.10.1-compatible compiler**;
+Scala 3.9.0 source compilation against new artifacts is not promised. Published 0.12.0 retains
+its earlier Scala 3.9.0 baseline; installation examples now target 0.13.0. JDK **21**, Scala Native **0.5.12**, Mill **1.3.1**
 and Unicode **17.0.0** are unchanged. Already compiled selected Scala 3.9.0/Java/Kotlin JVM consumers
 are tested separately; this is not whole-core binary compatibility. Native consumers must be rebuilt.
 The `scalatui` namespace and Scalafix configuration remain unchanged.
@@ -43,7 +69,7 @@ binary-swap guarantee is made. Transport/providers/retries remain application-ow
 See [streaming limits](streaming-markdown.md) and the pinned [pi-tui matrix](pi-tui-compatibility.md);
 this release preparation makes no new completeness/parity claim.
 
-## Local candidate evidence
+## Pre-publication candidate evidence
 
 Candidate: `0.13.0-prep-0f15348-20261122135937`, unique to this HEAD and preparation run.
 Repository: `file://$HOME/.m2/repository`; never substitutes for published baseline resolution.
@@ -116,20 +142,20 @@ must not be described as proof of those properties.
 ## OpenSpec disposition
 
 Completed `add-language-dx` implementation is promoted/archived without changing its requirements.
-Its unchecked future-publication task 3.1 is retained as deferred and transferred to the gate below;
-archiving implementation does not assert that unavailable published 0.13.0 consumers passed.
+Its future-publication task 3.1 was deferred at preparation and is now completed by Central-only
+0.13.0 consumer verification. The requirements themselves were not changed by archiving.
 
-## Remaining release gates
+## Release completion
 
 - [x] Finalize local artifact/consumer/documentation evidence above.
 - [x] Record independently performed real-backend PTY editor and streaming smoke and its limits (above).
 - [x] Record coverage limits: release validation uses green CI, deterministic JVM/Native tests and real-backend
   PTY smoke. Manual emulator visual/pixel/selection-geometry validation remains unverified and is not claimed.
-- [ ] Review and merge preparation changes; require green CI for the final release tree before tagging.
+- [x] Preparation merged in #124 with green Linux/macOS checks; its exact tree was tagged.
 - [x] Explicit publication authorization received on 2026-11-22; use the CI-green merged release tree.
-- [ ] After authorized publication, verify all ten remote coordinates/forty POM/binary/source/Javadoc
+- [x] After authorized publication, verify all ten remote coordinates/forty POM/binary/source/Javadoc
   payloads, release asset integrity and signatures with accurate trust boundaries.
-- [ ] Deferred language-DX task 3.1: run `python3 scripts/check-language-dx.py --version 0.13.0 --published --native`
+- [x] Deferred language-DX task 3.1: run `python3 scripts/check-language-dx.py --version 0.13.0 --published --native`
   against Maven Central only, plus `python3 scripts/check-compatibility.py --candidate 0.13.0` without a local repository.
-- [ ] Only after verified publication, update `publishedVersion`, installation examples and publication record;
+- [x] After verified publication, update `publishedVersion`, installation examples and publication record;
   clear `preparedVersion`. Never overwrite historical release evidence or claim local artifacts are published.
