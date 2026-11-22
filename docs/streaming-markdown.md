@@ -1,4 +1,6 @@
-# Streaming Markdown (unreleased)
+# Streaming Markdown
+
+**Experimental; available since 0.13.0** in `siglyph-markdown` on Maven Central.
 
 `StreamingMarkdown` is an opt-in JVM/Scala Native component for one bounded live response.
 Existing `Markdown`, `MarkdownParser` plugins and complete-document output are unchanged.

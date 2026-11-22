@@ -5,7 +5,7 @@
 - [First application](../README.md#quickstart): a complete Scala CLI app using published artifacts.
 - [Installation](getting-started.md): Scala JVM, Scala Native, Maven and Gradle.
 - [Java and Kotlin](jvm-language-examples.md): the JVM interop facade.
-- [Unreleased language-native examples](../examples/language-dx/README.md): typed Scala composition, Java builders and optional Kotlin source DSL.
+- [Language-native examples (experimental, since 0.13.0)](../examples/language-dx/README.md): typed Scala composition, Java builders and optional Kotlin source DSL.
 - [Language DX roadmap](language-dx-roadmap.md): approved scope and acceptance contract.
 - [Runnable Scala CLI examples](../examples/scala-cli/README.md) and [recording gallery](asciinema-demos.md).
 
@@ -34,7 +34,7 @@
 - [Normal-screen, fullscreen and scrollback output](screen-modes.md)
 - [Input, editors, autocomplete, optional widgets and terminal helpers](input-and-terminal.md)
 - [Editor visual navigation, history drafts and conversational composer](editor-interactions.md)
-- [Streaming Markdown and live response viewer](streaming-markdown.md): bounded source, conservative parse reuse and provisional rendering (unreleased).
+- [Streaming Markdown and live response viewer](streaming-markdown.md): bounded source, conservative parse reuse and provisional rendering (experimental, since 0.13.0).
 - [Scroll, wheel and selection policies](scroll-input-policies.md)
 - [Terminal images and vertical cropping](kitty-vertical-cropping.md)
 - [Optional terminal program status](terminal-program-status.md)
@@ -54,7 +54,7 @@
 
 ## Maintainers
 
-- [0.12.0 release record](release-v0.12.0.md).
+- [0.13.0 release record](release-v0.13.0.md).
 
 - [API stability and release gates](api-stability.md): scoped ABI checks and published/candidate consumers.
 
@@ -71,7 +71,7 @@ These pages concern building, testing and researching the library, not prerequis
 
 These preserve decisions and release evidence; use Getting started for current installation instructions.
 
-- Release records: [0.11.0](release-v0.11.0.md), [0.10.0](release-v0.10.0.md), [0.9.2](release-v0.9.2.md), [0.9.1](release-v0.9.1.md)
+- Release records: [0.12.0](release-v0.12.0.md), [0.11.0](release-v0.11.0.md), [0.10.0](release-v0.10.0.md), [0.9.2](release-v0.9.2.md), [0.9.1](release-v0.9.1.md)
 - [Early tautui test comparison](tautui-test-comparison.md)
 
 [Changelog](../CHANGELOG.md) · [License](../LICENSE) · [Upstream attribution](../NOTICE)

@@ -13,6 +13,7 @@ The [source inventory](../compatibility/api-inventory.json) covers publishable s
 | Narrow `SiglyphJvm` facade | Preserve selected published public ABI; exercise Java/Kotlin consumers. |
 | Selected Input/Text construction/value/render methods, Component contract, render getters/factories and TUI lifecycle/fullscreen entry points | Baseline-preserved candidate surface; the manifest is authoritative, not every method in these files. |
 | DataTable, themes, scheduling/scopes and testing helpers | Experimental; evaluate through reference-app usage before graduating. |
+| Scala composition, Java builders/Kotlin source DSL, streaming Markdown and editor interaction additions (since 0.13.0) | Experimental; publication does not graduate these APIs to stable. |
 | Remaining public Markdown/image/extras/editor/layout/terminal APIs | Evolving; not covered by the selected ABI gate unless explicitly listed. Review changes and migration impact. |
 | Private/package-private coordinators, lifecycle machinery and parser implementation | Internal even where JVM bytecode exposes package-restricted Scala members. |
 
@@ -20,7 +21,7 @@ New source files must be classified in the inventory. Explicit themes and auxili
 
 ## Compatibility means different things
 
-- **Source:** baseline consumers compile with Scala 3.9.0; unreleased candidate consumers use Scala 3.10.1. Both retain JDK 21. Published 0.12.0 keeps its Scala 3.9.0 baseline; new candidate TASTy requires a Scala 3.10.1-compatible compiler. Recompilation alone is not binary proof.
+- **Source:** compatibility baseline 0.11.0 consumers compile with Scala 3.9.0; published 0.13.0 consumers require Scala 3.10.1 or a compatible newer compiler to read its TASTy. Both retain JDK 21. Published 0.12.0 keeps its Scala 3.9.0 baseline. Recompilation alone is not binary proof.
 - **JVM binary:** selected published public/protected descriptors/class shape remain, and already compiled Scala/Java/Kotlin consumer binaries run against candidate jars. The gate is conservative and intentionally limited: it does not prove every inheritance, inline/TASTy, generic, serialization or behavioral compatibility case.
 - **Behavior:** representative construction, input values, rendering and lifecycle fixtures pass, supplemented by the library regression/PTY suites. Descriptor equality cannot prove behavior.
 - **Native:** rebuild consumers using Scala Native 0.5.12 and the supported native toolchain. Statically linked binaries are not validated by swapping jars, so no JVM-style Native ABI promise is made.
@@ -30,8 +31,8 @@ New source files must be classified in the inventory. Explicit themes and auxili
 Use a unique non-release version; do not overwrite the baseline or publish remotely. Example from a checkout:
 
 ```bash
-env SIGLYPH_VERSION=0.12.0-compat-local mill --no-server -j 1 core.publishM2Local + terminalJvm.publishM2Local + coreNative.publishM2Local + terminalNative.publishM2Local
-python3 scripts/check-compatibility.py --candidate 0.12.0-compat-local --repository "file://$HOME/.m2/repository"
+env SIGLYPH_VERSION=0.13.0-compat-local mill --no-server -j 1 core.publishM2Local + terminalJvm.publishM2Local + coreNative.publishM2Local + terminalNative.publishM2Local
+python3 scripts/check-compatibility.py --candidate 0.13.0-compat-local --repository "file://$HOME/.m2/repository"
 ```
 
 Prefer a fresh version suffix per candidate so resolver caches cannot hide changes. The runner uses actual artifacts—not project source roots—and explicitly selects its repositories. Baseline artifacts and compiler tooling always resolve from Maven Central; the candidate repository cannot shadow the baseline. It compiles baseline Scala/Java/Kotlin fixtures, runs those binaries against the candidate, compiles current fixtures against the candidate, and rebuilds Native consumers against both versions. A failure exits nonzero. `--skip-native` is an explicit incomplete check and is reported as such.
@@ -51,13 +52,13 @@ The regression creates disposable baseline/candidate Java classes, removes a met
 
 ## Post-publication check
 
-After an explicitly authorized release, invoke the same runner with the **actual published version** and **without** a local repository. For the current baseline:
+After an explicitly authorized release, invoke the same runner with the **actual published version** and **without** a local repository. For the current release (the compatibility baseline remains 0.11.0):
 
 ```bash
-python3 scripts/check-compatibility.py --candidate 0.11.0
+python3 scripts/check-compatibility.py --candidate 0.13.0
 ```
 
-This resolves Maven Central artifacts and is separate from candidate validation. No script here creates a tag, release or remote publication.
+This resolves Maven Central artifacts and is separate from candidate validation. The 0.13.0 Central-only check passed, including already compiled Scala 3.9.0/Java/Kotlin baseline binaries and Native consumer rebuilds; see the [release record](release-v0.13.0.md). No script here creates a tag, release or remote publication.
 
 ## Deprecation, migration and graduation
 
