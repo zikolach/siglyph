@@ -129,7 +129,7 @@ jobs:
 
           \`\`\`scala
           object app extends ScalaModule {
-            def scalaVersion = "3.9.0"
+            def scalaVersion = "3.10.1"
 
             def repositories = Task {
               super.repositories() ++ Seq("https://maven.pkg.github.com/zikolach/siglyph")
@@ -151,7 +151,7 @@ jobs:
 
           \`\`\`scala
           object nativeApp extends ScalaNativeModule {
-            def scalaVersion = "3.9.0"
+            def scalaVersion = "3.10.1"
             def scalaNativeVersion = "0.5.12"
 
             def repositories = Task {

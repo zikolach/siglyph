@@ -55,7 +55,8 @@ scheduling, selection or cleanup semantics.
 ## Completion evidence
 
 Implementation checklists and verification evidence belong to the
-[language-DX OpenSpec change](../openspec/changes/add-language-dx/tasks.md).
+[archived language-DX implementation](../openspec/changes/archive/2026-11-22-add-language-dx/tasks.md).
+The still-deferred publication check is tracked in the [0.13.0 preparation record](release-v0.13.0.md#remaining-release-gates).
 A milestone is complete only after its code, examples, tests and documentation pass their checks;
 a roadmap document alone does not establish delivery. Full publication verification happens only
 after an independently authorized release.

@@ -7,6 +7,10 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-22
+
+Publication authorized; artifact verification is pending. See the [release record](docs/release-v0.13.0.md).
+
 ### Toolchain
 
 - Unreleased builds use Scala 3.10.1; consumers of new artifacts need a compatible compiler
@@ -22,6 +26,8 @@ and this project uses semantic versioning while it remains pre-1.0.
 
 ### Changed
 
+- Updated Scala to 3.10.1 (#119), jsoniter-scala core/macros to 2.43.0 (#117–#118),
+  and GitHub Actions major versions (#120). No new library runtime dependency was added.
 - Streaming Markdown scrolling uses cached visible-row ranges instead of validating the whole document
   per frame. Appends retain reusable rendering caches; selection highlighting is viewport-bounded,
   with corrected multirow selection-prefix guards.
@@ -481,7 +487,8 @@ and this project uses semantic versioning while it remains pre-1.0.
 - GitHub Actions CI, jar packaging, GitHub Packages publishing, and GitHub
   release artifacts.
 
-[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/zikolach/siglyph/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/zikolach/siglyph/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/zikolach/siglyph/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/zikolach/siglyph/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/zikolach/siglyph/compare/v0.9.2...v0.10.0

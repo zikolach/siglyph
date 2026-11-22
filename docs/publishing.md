@@ -7,7 +7,9 @@ Published 0.12.0 artifacts retain the Scala 3.9.0/JDK 21/Scala Native 0.5.12 bas
 Unreleased builds use Scala 3.10.1 with JDK 21 and Scala Native 0.5.12 unchanged; consumers
 of those builds need a Scala 3.10.1-compatible compiler. See the [release record](release-v0.12.0.md)
 for published verification. `docs/release-status.json` tracks published availability independently of a dated
-candidate changelog; update it only after public artifacts are verified.
+candidate changelog. Set `preparedVersion` during preparation; change `publishedVersion` only after
+public artifacts are verified. **0.13.0 is prepared, not published**; see its
+[candidate record](release-v0.13.0.md) for local evidence and outstanding release gates.
 
 ## Version source
 

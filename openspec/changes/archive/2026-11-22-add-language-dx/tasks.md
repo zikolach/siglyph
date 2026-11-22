@@ -17,6 +17,9 @@
 
 - [ ] 3.1 Verify new APIs against a future published version (blocked until separately authorized publication).
 
+Deferred release gate transferred to `docs/release-v0.13.0.md` during 0.13.0 preparation.
+Implementation is complete and may be archived; this unchecked publication task is not completed by archiving.
+
 ## Evidence and limits
 
 - Full JVM `core.test` passes. Shared `AppSuite` (6 tests on JVM and Native) exercises typed configuration, filtering/selection, bounded Accepted/Full/Closed delivery, cancellation and restart. Startup regressions count terminal starts and preserve fast worker/setup failures. `TUISuite` also passes on both JVM and Native (92 tests each).
