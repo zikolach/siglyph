@@ -6,6 +6,26 @@
 
 Version **0.13.0** is published on Maven Central. No GitHub credentials or local publishing are needed. Maintainers can find release details in [Publishing](publishing.md).
 
+### GitHub Release fallback
+
+For **0.14.0**, use the Maven repository ZIP from the [GitHub Release](https://github.com/zikolach/siglyph/releases/tag/v0.14.0). It contains the ten JVM and Native artifacts and their POMs. The individual JAR downloads do not include dependency metadata. Run these commands in a directory you can keep for as long as your build uses it:
+
+```bash
+base=https://github.com/zikolach/siglyph/releases/download/v0.14.0
+bundle=siglyph-maven-0.14.0.zip
+curl -fLO "$base/$bundle" && curl -fLO "$base/$bundle.sha256" &&
+  shasum -a 256 -c "$bundle.sha256" && unzip -q "$bundle"
+```
+
+Keep Central enabled for third-party dependencies. In the quickstart source, change the Siglyph dependency versions to `0.14.0`, then point Scala CLI at the extracted repository (replace the source path with yours):
+
+```bash
+repo=$(python3 -c 'from pathlib import Path; print(Path("maven").resolve().as_uri())')
+scala-cli run /path/to/hello.scala --jvm 21 --repository "$repo"
+```
+
+For sbt, add `resolvers += "Siglyph release" at file("/absolute/path/to/maven").toURI.toString` and use the same dependency coordinates with version `0.14.0`. No GitHub Packages credentials or local publication are needed.
+
 ### Toolchain compatibility
 
 Published **0.13.0** artifacts need **Scala 3.10.1 or a compatible newer compiler** to read their TASTy; the examples below use **Scala 3.10.1**. JVM applications and repository builds retain **JDK 21**. Scala Native uses **0.5.12**. Java/Kotlin applications use the JVM facade and do not need to install a Scala compiler.

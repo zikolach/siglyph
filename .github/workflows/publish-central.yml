@@ -21,6 +21,7 @@ permissions:
 
 jobs:
   publish-maven-central:
+    if: github.event_name == 'workflow_dispatch' || vars.PUBLISH_CENTRAL_ON_TAG == 'true'
     name: Publish to Maven Central
     runs-on: ubuntu-latest
 
