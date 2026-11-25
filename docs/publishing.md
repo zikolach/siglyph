@@ -65,8 +65,7 @@ Required GitHub Actions secrets:
 - `MILL_PGP_SECRET_BASE64` — base64-encoded ASCII-armored private signing key
 - `MILL_PGP_PASSPHRASE` — passphrase for the signing key, if set
 
-The workflow runs on future `v*` tags and can also be run manually with an
-explicit version. For non-SNAPSHOT versions it creates an automatic Central
+Tag releases publish the GitHub assets, including a Maven-layout ZIP and SHA-256 checksum, independently of Central. Central is skipped by default to avoid consuming the Sonatype quota. To enable automatic Central publication for future tags, set the GitHub Actions repository variable `PUBLISH_CENTRAL_ON_TAG=true`. Manual dispatch works regardless of that switch; select the intended release tag and its matching version. Check the Portal deployment and public coordinates before retrying: a successful upload is not proof of publication. For non-SNAPSHOT versions it creates an automatic Central
 Portal release by default. For snapshots it publishes to Central's snapshot
 repository.
 

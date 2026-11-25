@@ -12,6 +12,8 @@ siglyph provides editable inputs, fullscreen layouts, scrolling, selection and t
 
 **0.13.0 · Scala 3.10.1 (or a compatible newer compiler) · JDK 21 · macOS/Linux · pre-1.0**
 
+Maven Central remains the default (latest: **0.13.0**). If you need **0.14.0**, its Central publication is quota-blocked; use the [GitHub Release bundle](docs/getting-started.md#github-release-fallback) instead. No token is required.
+
 ## Quickstart
 
 Install [Scala CLI](https://scala-cli.virtuslab.org/install/) and use a real macOS/Linux terminal. Save this as `hello.scala`, then run `scala-cli run hello.scala --jvm 21`. Type and press Enter; **Esc or Ctrl+C exits** and restores terminal state.

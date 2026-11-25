@@ -87,7 +87,19 @@ jobs:
           cp out/imageNative/jar.dest/out.jar "release-artifacts/siglyph-image_native0.5_3-${version}.jar"
           cp out/extras/jar.dest/out.jar "release-artifacts/siglyph-extras_3-${version}.jar"
           cp out/extrasNative/jar.dest/out.jar "release-artifacts/siglyph-extras_native0.5_3-${version}.jar"
-          ls -lh release-artifacts
+          mill __.pom
+          repo="$RUNNER_TEMP/siglyph-release/maven/io/github/zikolach"
+          for jar in release-artifacts/*.jar; do
+            filename=${jar##*/}
+            artifact=${filename%-"$version".jar}
+            poms=(out/*/pom.dest/"$artifact-$version.pom")
+            [[ ${#poms[@]} == 1 && -f ${poms[0]} ]]
+            mkdir -p "$repo/$artifact/$version"
+            cp "$jar" "${poms[0]}" "$repo/$artifact/$version/"
+          done
+          bundle="siglyph-maven-$version.zip"
+          (cd "$RUNNER_TEMP/siglyph-release" && zip -qr "$GITHUB_WORKSPACE/release-artifacts/$bundle" maven)
+          (cd release-artifacts && sha256sum "$bundle" > "$bundle.sha256")
 
       - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -176,11 +188,11 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --title "$GITHUB_REF_NAME" \
               --notes "$notes"
-            gh release upload "$GITHUB_REF_NAME" release-artifacts/*.jar \
+            gh release upload "$GITHUB_REF_NAME" release-artifacts/* \
               --repo "$GITHUB_REPOSITORY" \
               --clobber
           else
-            gh release create "$GITHUB_REF_NAME" release-artifacts/*.jar \
+            gh release create "$GITHUB_REF_NAME" release-artifacts/* \
               --repo "$GITHUB_REPOSITORY" \
               --title "$GITHUB_REF_NAME" \
               --notes "$notes"
